@@ -27,6 +27,11 @@ const PORT = process.env.PORT || 3001;
 // }
 const rooms = new Map();
 
+// Global Connected Clients and Matchmaking Queue
+const connectedClients = new Map();     // Map<playerId, { id, socket, name, elo }>
+const matchmakingQueue = [];            // Array of { playerId, name, elo, difficulty, socket, queuedAt }
+const botIntervals = new Map();        // Map<roomCode, intervalId>
+
 // Helper: Generate unique 6-digit room code
 function generateRoomCode() {
   let code;
@@ -255,6 +260,65 @@ wss.on('connection', (ws) => {
               solution // Send the solved solution board for correctness check
             }
           });
+
+          // Trigger simulated opponent bot progress updates if one is present
+          const bot = room.players.find(p => p.id.startsWith('opp_'));
+          if (bot) {
+            if (botIntervals.has(room.code)) {
+              clearInterval(botIntervals.get(room.code));
+            }
+            const roomCode = room.code;
+            const botId = bot.id;
+            const intervalId = setInterval(() => {
+              const activeRoom = rooms.get(roomCode);
+              if (!activeRoom || !activeRoom.isGameStarted) return;
+              if (activeRoom.isPaused) return;
+
+              const activeBot = activeRoom.players.find(p => p.id === botId);
+              if (!activeBot) {
+                clearInterval(intervalId);
+                botIntervals.delete(roomCode);
+                return;
+              }
+
+              // Increment progress by 2% to 6%
+              activeBot.progress = Math.min(100, activeBot.progress + Math.floor(Math.random() * 5 + 2));
+              
+              // 5% chance of strike (if active strikes < 3)
+              if (Math.random() < 0.05 && activeBot.strikes < 3) {
+                activeBot.strikes++;
+              }
+
+              // Broadcast progress update
+              broadcastToRoom(roomCode, {
+                type: 'PROGRESS_UPDATED',
+                payload: {
+                  playerId: activeBot.id,
+                  progress: activeBot.progress,
+                  strikes: activeBot.strikes,
+                  mana: activeBot.mana
+                }
+              });
+
+              // Check if finished or eliminated
+              if (activeBot.progress >= 100 || activeBot.strikes >= 3) {
+                clearInterval(intervalId);
+                botIntervals.delete(roomCode);
+
+                broadcastToRoom(roomCode, {
+                  type: 'PLAYER_FINISHED',
+                  payload: {
+                    playerId: activeBot.id,
+                    name: activeBot.name,
+                    progress: activeBot.progress,
+                    strikes: activeBot.strikes
+                  }
+                });
+              }
+            }, 4000);
+
+            botIntervals.set(roomCode, intervalId);
+          }
           break;
         }
 
@@ -584,6 +648,10 @@ wss.on('connection', (ws) => {
             currentPlayer.name = trimmedName;
           }
 
+          if (registeredPlayerId && connectedClients.has(registeredPlayerId)) {
+            connectedClients.get(registeredPlayerId).name = trimmedName;
+          }
+
           const room = rooms.get(currentRoomCode);
           if (room) {
             const playerInRoom = room.players.find(p => p.id === currentPlayer.id);
@@ -824,6 +892,178 @@ wss.on('connection', (ws) => {
           break;
         }
 
+        case 'REGISTER_PLAYER': {
+          const { playerId, name, elo } = payload;
+          if (!playerId) return;
+          registeredPlayerId = playerId;
+          connectedClients.set(playerId, {
+            id: playerId,
+            socket: ws,
+            name: name || `Player_${playerId.slice(0, 4)}`,
+            elo: elo || 1450
+          });
+          console.log(`[WS Registered] Player: ${name} (ID: ${playerId})`);
+          break;
+        }
+
+        case 'SEND_FRIEND_REQUEST': {
+          const { senderId, targetName } = payload;
+          if (!senderId || !targetName) return;
+
+          const sender = connectedClients.get(senderId);
+          if (!sender) return;
+
+          // Find target online player
+          let target = null;
+          for (const client of connectedClients.values()) {
+            if (client.name.toLowerCase() === targetName.toLowerCase()) {
+              target = client;
+              break;
+            }
+          }
+
+          if (target) {
+            // Check if they are adding themselves
+            if (target.id === senderId) {
+              ws.send(JSON.stringify({
+                type: 'ERROR',
+                payload: { message: "You cannot add yourself as a friend!" }
+              }));
+              return;
+            }
+
+            // Send notification to target B
+            target.socket.send(JSON.stringify({
+              type: 'FRIEND_REQUEST_RECEIVED',
+              payload: {
+                sender: {
+                  id: sender.id,
+                  name: sender.name,
+                  elo: sender.elo
+                }
+              }
+            }));
+            
+            // Confirm to sender A
+            ws.send(JSON.stringify({
+              type: 'FRIEND_REQUEST_SENT_CONFIRMED',
+              payload: { targetName: target.name }
+            }));
+          } else {
+            // Offline simulation check for mock usernames
+            const VALID_MOCK_USERNAMES = [
+              'ApexSolver_99', 'Kirito101', 'SudokuGod', 'NordicMaster', 
+              'ZenPuzzler', 'SpeedRunner_7', 'SudokuKing', 'GrandmasterX', 
+              'PuzzlerPro', 'NumberCruncher'
+            ];
+            const isMockName = VALID_MOCK_USERNAMES.some(u => u.toLowerCase() === targetName.toLowerCase());
+            
+            if (isMockName) {
+              const mockRealName = VALID_MOCK_USERNAMES.find(u => u.toLowerCase() === targetName.toLowerCase());
+              // Simulate friend accepts request in 2.5s
+              setTimeout(() => {
+                ws.send(JSON.stringify({
+                  type: 'FRIEND_REQUEST_ACCEPTED',
+                  payload: {
+                    friend: {
+                      id: 'f_' + Math.random().toString(36).substring(2, 6),
+                      name: mockRealName,
+                      elo: 1000 + Math.floor(Math.random() * 600),
+                      status: 'online'
+                    }
+                  }
+                }));
+              }, 2500);
+
+              ws.send(JSON.stringify({
+                type: 'FRIEND_REQUEST_SENT_CONFIRMED',
+                payload: { targetName: mockRealName, simulated: true }
+              }));
+            } else {
+              ws.send(JSON.stringify({
+                type: 'ERROR',
+                payload: { message: `Player "${targetName}" is not online right now.` }
+              }));
+            }
+          }
+          break;
+        }
+
+        case 'ACCEPT_FRIEND_REQUEST': {
+          const { myPlayerId, targetId } = payload;
+          if (!myPlayerId || !targetId) return;
+
+          const me = connectedClients.get(myPlayerId);
+          const friend = connectedClients.get(targetId);
+
+          if (me && friend) {
+            // Notify me
+            ws.send(JSON.stringify({
+              type: 'FRIEND_REQUEST_ACCEPTED',
+              payload: {
+                friend: {
+                  id: friend.id,
+                  name: friend.name,
+                  elo: friend.elo,
+                  status: 'online'
+                }
+              }
+            }));
+
+            // Notify friend
+            friend.socket.send(JSON.stringify({
+              type: 'FRIEND_REQUEST_ACCEPTED',
+              payload: {
+                friend: {
+                  id: me.id,
+                  name: me.name,
+                  elo: me.elo,
+                  status: 'online'
+                }
+              }
+            }));
+          }
+          break;
+        }
+
+        case 'JOIN_MATCHMAKING_QUEUE': {
+          const { playerId, difficulty } = payload;
+          if (!playerId) return;
+
+          const client = connectedClients.get(playerId);
+          if (!client) return;
+
+          // Remove any existing matchmaking entries
+          const existingIdx = matchmakingQueue.findIndex(q => q.playerId === playerId);
+          if (existingIdx !== -1) {
+            matchmakingQueue.splice(existingIdx, 1);
+          }
+
+          matchmakingQueue.push({
+            playerId: client.id,
+            name: client.name,
+            elo: client.elo,
+            difficulty: difficulty || 'medium',
+            socket: ws,
+            queuedAt: Date.now()
+          });
+
+          console.log(`[Queue Join] Player: ${client.name} (ELO: ${client.elo}) for ${difficulty}`);
+          break;
+        }
+
+        case 'LEAVE_MATCHMAKING_QUEUE': {
+          const { playerId } = payload;
+          if (!playerId) return;
+
+          const idx = matchmakingQueue.findIndex(q => q.playerId === playerId);
+          if (idx !== -1) {
+            matchmakingQueue.splice(idx, 1);
+            console.log(`[Queue Leave] Player ID: ${playerId}`);
+          }
+          break;
+        }
+
         default:
           console.warn(`[WS Warning] Unknown msg type: ${type}`);
       }
@@ -833,6 +1073,15 @@ wss.on('connection', (ws) => {
   });
 
   ws.on('close', () => {
+    if (registeredPlayerId) {
+      connectedClients.delete(registeredPlayerId);
+      const idx = matchmakingQueue.findIndex(q => q.playerId === registeredPlayerId);
+      if (idx !== -1) {
+        matchmakingQueue.splice(idx, 1);
+        console.log(`[Queue Cleaned] Removed ${registeredPlayerId} on disconnect`);
+      }
+    }
+
     if (!currentRoomCode || !currentPlayer) return;
 
     console.log(`[WS Client Left] Player: ${currentPlayer.name} from Room: ${currentRoomCode}`);
@@ -881,9 +1130,13 @@ wss.on('connection', (ws) => {
           });
         }
 
-        if (currentRoom.players.length === 0) {
+        if (currentRoom.players.length === 0 || currentRoom.players.every(p => p.id.startsWith('opp_'))) {
           rooms.delete(currentRoomCode);
-          console.log(`[WS Room Deleted] Room ${currentRoomCode} is empty after disconnect timeout.`);
+          if (botIntervals.has(currentRoomCode)) {
+            clearInterval(botIntervals.get(currentRoomCode));
+            botIntervals.delete(currentRoomCode);
+          }
+          console.log(`[WS Room Deleted] Room ${currentRoomCode} is empty or only bots remain.`);
         } else {
           // Send PLAYER_LEFT so clients can update live-sync immediately and show a named toast
           broadcastToRoom(currentRoomCode, {
@@ -899,6 +1152,169 @@ wss.on('connection', (ws) => {
     }, 8000);
   });
 });
+
+// Server-side ELO Matchmaking Queue Sweep Loop
+setInterval(() => {
+  if (matchmakingQueue.length < 2) return;
+
+  for (let i = 0; i < matchmakingQueue.length; i++) {
+    const playerA = matchmakingQueue[i];
+    
+    for (let j = i + 1; j < matchmakingQueue.length; j++) {
+      const playerB = matchmakingQueue[j];
+
+      if (playerA.difficulty === playerB.difficulty) {
+        const durationA = (Date.now() - playerA.queuedAt) / 1000;
+        const durationB = (Date.now() - playerB.queuedAt) / 1000;
+        const tolerance = Math.max(50, Math.max(durationA, durationB) * 25);
+
+        if (Math.abs(playerA.elo - playerB.elo) <= tolerance) {
+          console.log(`[Match Found!] ${playerA.name} (${playerA.elo}) matched with ${playerB.name} (${playerB.elo})`);
+
+          // Remove both from queue
+          matchmakingQueue.splice(j, 1);
+          matchmakingQueue.splice(i, 1);
+          i--;
+
+          // Create the room
+          const roomCode = generateRoomCode();
+          
+          const playerAConnection = {
+            id: playerA.playerId,
+            name: playerA.name,
+            avatar: 'apex',
+            isReady: false,
+            progress: 0,
+            strikes: 0,
+            mana: 0,
+            isSpectator: false,
+            socket: playerA.socket
+          };
+
+          const playerBConnection = {
+            id: playerB.playerId,
+            name: playerB.name,
+            avatar: 'cyber',
+            isReady: false,
+            progress: 0,
+            strikes: 0,
+            mana: 0,
+            isSpectator: false,
+            socket: playerB.socket
+          };
+
+          const room = {
+            code: roomCode,
+            difficulty: playerA.difficulty,
+            enableAbilities: true,
+            board: null,
+            solution: null,
+            isGameStarted: false,
+            isPaused: false,
+            pauseVotes: {},
+            pauseRequesterId: null,
+            lastPauseRequestTime: 0,
+            playAgainVotes: {},
+            players: [playerAConnection, playerBConnection]
+          };
+
+          rooms.set(roomCode, room);
+
+          const matchPayloadA = {
+            room: getSanitizedRoom(room),
+            myPlayerId: playerA.playerId,
+            opponent: { name: playerB.name, elo: playerB.elo }
+          };
+
+          const matchPayloadB = {
+            room: getSanitizedRoom(room),
+            myPlayerId: playerB.playerId,
+            opponent: { name: playerA.name, elo: playerA.elo }
+          };
+
+          playerA.socket.send(JSON.stringify({ type: 'MATCH_FOUND', payload: matchPayloadA }));
+          playerB.socket.send(JSON.stringify({ type: 'MATCH_FOUND', payload: matchPayloadB }));
+          
+          break;
+        }
+      }
+    }
+  }
+}, 1500);
+
+// ELO Matchmaking Queue Bot Simulator Fallback (Matches bots after 5 seconds of waiting)
+setInterval(() => {
+  const now = Date.now();
+  for (let i = 0; i < matchmakingQueue.length; i++) {
+    const player = matchmakingQueue[i];
+    const waitTime = (now - player.queuedAt) / 1000;
+
+    if (waitTime >= 5) {
+      matchmakingQueue.splice(i, 1);
+      i--;
+
+      console.log(`[Queue Timeout] Match with Bot for ${player.name} (${player.elo} ELO)`);
+
+      const roomCode = generateRoomCode();
+      const botId = 'opp_' + Math.random().toString(36).substring(2, 6);
+      
+      const eloTarget = player.elo;
+      const botNames = ['ApexSolver_99', 'NordicMaster', 'ZenPuzzler', 'SpeedRunner_7', 'SudokuKing'];
+      const chosenBotName = botNames[Math.floor(Math.random() * botNames.length)];
+      const botElo = eloTarget + Math.floor(Math.random() * 120 - 60);
+
+      const playerConnection = {
+        id: player.playerId,
+        name: player.name,
+        avatar: 'apex',
+        isReady: false,
+        progress: 0,
+        strikes: 0,
+        mana: 0,
+        isSpectator: false,
+        socket: player.socket
+      };
+
+      const botConnection = {
+        id: botId,
+        name: chosenBotName,
+        avatar: 'zen',
+        isReady: true,
+        progress: 0,
+        strikes: 0,
+        mana: 0,
+        isSpectator: false,
+        socket: null
+      };
+
+      const room = {
+        code: roomCode,
+        difficulty: player.difficulty,
+        enableAbilities: true,
+        board: null,
+        solution: null,
+        isGameStarted: false,
+        isPaused: false,
+        pauseVotes: {},
+        pauseRequesterId: null,
+        lastPauseRequestTime: 0,
+        playAgainVotes: {},
+        players: [playerConnection, botConnection]
+      };
+
+      rooms.set(roomCode, room);
+
+      const matchPayload = {
+        room: getSanitizedRoom(room),
+        myPlayerId: player.playerId,
+        opponent: { name: chosenBotName, elo: botElo }
+      };
+
+      player.socket.send(JSON.stringify({ type: 'MATCH_FOUND', payload: matchPayload }));
+      break;
+    }
+  }
+}, 1000);
 
 app.get('/health', (req, res) => {
   res.send({ status: 'ok', activeRooms: rooms.size });

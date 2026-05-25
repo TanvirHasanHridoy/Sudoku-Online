@@ -128,9 +128,25 @@ export const useLobbyStore = create((set, get) => ({
     const socket = new WebSocket(wsUrl);
     set({ ws: socket }); // Store immediately to prevent duplicate connections!
 
-    socket.onopen = () => {
+    socket.onopen = async () => {
       set({ isConnected: true });
       get().addToast('Connected to competitive lobby server!', 'success');
+
+      // Register player with the server (use dynamic import to avoid circular dependency)
+      try {
+        const { useSocialStore } = await import('./useSocialStore');
+        const myElo = useSocialStore.getState().elo;
+        socket.send(JSON.stringify({
+          type: 'REGISTER_PLAYER',
+          payload: {
+            playerId: get().myPlayerId,
+            name: get().myPlayerName,
+            elo: myElo
+          }
+        }));
+      } catch (err) {
+        console.error('Failed to register player on connection open', err);
+      }
 
       // Auto-reconnect if there's a cached active room code
       const activeRoomCode = localStorage.getItem('sudoku_active_room_code');
@@ -146,6 +162,31 @@ export const useLobbyStore = create((set, get) => ({
         console.log(`[Client Received] Type: ${type}`, payload);
 
         switch (type) {
+          case 'FRIEND_REQUEST_RECEIVED': {
+            import('./useSocialStore').then(({ useSocialStore }) => {
+              useSocialStore.getState().receiveFriendRequest(payload.sender);
+            });
+            break;
+          }
+          case 'FRIEND_REQUEST_ACCEPTED': {
+            import('./useSocialStore').then(({ useSocialStore }) => {
+              useSocialStore.getState().friendRequestAccepted(payload.friend);
+            });
+            break;
+          }
+          case 'FRIEND_REQUEST_SENT_CONFIRMED': {
+            get().addToast(`Friend request sent to ${payload.targetName}!`, 'success');
+            break;
+          }
+          case 'MATCH_FOUND': {
+            const { room } = payload;
+            set({ room });
+            import('./useSocialStore').then(({ useSocialStore }) => {
+              useSocialStore.getState().matchFound(payload);
+            });
+            break;
+          }
+
           case 'ROOM_CREATED':
           case 'ROOM_JOINED': {
             // Persist the room code locally

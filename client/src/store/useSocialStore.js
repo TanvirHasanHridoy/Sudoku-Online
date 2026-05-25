@@ -10,18 +10,11 @@ export const supabase = (supabaseUrl && supabaseAnonKey)
   ? createClient(supabaseUrl, supabaseAnonKey)
   : null;
 
-// Initial mock friends to show off premium lobbies instantly
-const INITIAL_MOCK_FRIENDS = [
-  { id: 'f1', name: 'ApexSolver_99', elo: 1420, status: 'online' },
-  { id: 'f2', name: 'Kirito101', elo: 1390, status: 'offline' },
-  { id: 'f3', name: 'SudokuGod', elo: 1750, status: 'in-game' },
-  { id: 'f4', name: 'NordicMaster', elo: 1510, status: 'online' }
-];
-
 export const useSocialStore = create((set, get) => ({
   elo: Number(localStorage.getItem('sudoku_elo')) || 1450,
   rank: 'Diamond IV',
-  friends: INITIAL_MOCK_FRIENDS,
+  friends: [],
+  friendRequests: [],
   matchmakingStatus: 'idle', // 'idle' | 'searching' | 'matched'
   matchOpponent: null,
   matchSearchInterval: null,
@@ -108,70 +101,59 @@ export const useSocialStore = create((set, get) => ({
       return;
     }
 
-    // 1. Production database check (Supabase)
-    if (supabase) {
-      try {
-        const { data, error } = await supabase
-          .from('profiles')
-          .select('id, elo, rank')
-          .eq('username', trimmedName)
-          .single();
-
-        if (!error && data) {
-          const realFriend = {
-            id: data.id,
-            name: trimmedName,
-            elo: data.elo || 1000,
-            status: 'online'
-          };
-          set((state) => ({ friends: [...state.friends, realFriend] }));
-          useLobbyStore.getState().addToast(`Added ${trimmedName} as a friend!`, 'success');
-          return;
-        } else {
-          useLobbyStore.getState().addToast(`Player "${trimmedName}" does not exist in the database!`, 'error');
-          return;
-        }
-      } catch (err) {
-        console.warn('Supabase friend fetch failed.', err);
-        useLobbyStore.getState().addToast(`Player "${trimmedName}" does not exist in the database!`, 'error');
-        return;
-      }
+    // Send friend request over WebSockets
+    const lobbyStore = useLobbyStore.getState();
+    if (lobbyStore.ws && lobbyStore.isConnected && lobbyStore.ws.readyState === 1) {
+      lobbyStore.ws.send(JSON.stringify({
+        type: 'SEND_FRIEND_REQUEST',
+        payload: { senderId: lobbyStore.myPlayerId, targetName: trimmedName }
+      }));
+    } else {
+      lobbyStore.addToast("Cannot send friend request. Disconnected from server!", 'error');
     }
+  },
 
-    // 2. Local simulation database check (offline-only fallback)
-    const VALID_MOCK_USERNAMES = [
-      'ApexSolver_99',
-      'Kirito101',
-      'SudokuGod',
-      'NordicMaster',
-      'ZenPuzzler',
-      'SpeedRunner_7',
-      'SudokuKing',
-      'GrandmasterX',
-      'PuzzlerPro',
-      'NumberCruncher'
-    ];
-
-    const isValid = VALID_MOCK_USERNAMES.some(uname => uname.toLowerCase() === trimmedName.toLowerCase());
-
-    if (!isValid) {
-      useLobbyStore.getState().addToast(`Player "${trimmedName}" does not exist! Try adding "SpeedRunner_7" or "SudokuKing".`, 'error');
-      return;
+  acceptFriendRequest: (targetId) => {
+    const lobbyStore = useLobbyStore.getState();
+    if (lobbyStore.ws && lobbyStore.isConnected && lobbyStore.ws.readyState === 1) {
+      lobbyStore.ws.send(JSON.stringify({
+        type: 'ACCEPT_FRIEND_REQUEST',
+        payload: { myPlayerId: lobbyStore.myPlayerId, targetId }
+      }));
+      
+      // Clean up request locally
+      set((state) => ({
+        friendRequests: state.friendRequests.filter(r => r.id !== targetId)
+      }));
+      lobbyStore.addToast("Accepted friend request!", 'success');
+    } else {
+      lobbyStore.addToast("Cannot accept request. Disconnected from server!", 'error');
     }
+  },
 
-    // Success! Generate mock friend from registry
-    const mockFriend = {
-      id: 'f_' + Math.random().toString(36).substring(2, 6),
-      name: VALID_MOCK_USERNAMES.find(uname => uname.toLowerCase() === trimmedName.toLowerCase()) || trimmedName,
-      elo: 1000 + Math.floor(Math.random() * 600),
-      status: 'online'
-    };
-
+  declineFriendRequest: (targetId) => {
     set((state) => ({
-      friends: [...state.friends, mockFriend]
+      friendRequests: state.friendRequests.filter(r => r.id !== targetId)
     }));
+    useLobbyStore.getState().addToast("Declined friend request.", 'info');
+  },
 
-    useLobbyStore.getState().addToast(`Added ${mockFriend.name} as a friend!`, 'success');
+  receiveFriendRequest: (sender) => {
+    // sender is { id, name, elo }
+    set((state) => {
+      if (state.friendRequests.some(r => r.id === sender.id)) return {};
+      return { friendRequests: [...state.friendRequests, sender] };
+    });
+    useLobbyStore.getState().addToast(`Incoming friend request from ${sender.name}!`, 'info');
+  },
+
+  friendRequestAccepted: (friend) => {
+    // friend is { id, name, elo, status }
+    set((state) => {
+      if (state.friends.some(f => f.id === friend.id)) return {};
+      return { friends: [...state.friends, friend] };
+    });
+    useLobbyStore.getState().addToast(`You are now friends with ${friend.name}!`, 'success');
   },
 
   inviteFriend: (friendId) => {
@@ -185,30 +167,24 @@ export const useSocialStore = create((set, get) => ({
 
     useLobbyStore.getState().addToast(`Sent lobby invitation to ${friend.name}!`, 'success');
     
-    // Simulate mock acceptance after 2.5s for highly interactive demo!
-    setTimeout(() => {
-      const lobby = useLobbyStore.getState();
-      if (lobby.room && lobby.ws) {
-        lobby.addToast(`${friend.name} accepted your invitation and joined the lobby!`, 'success');
-        
-        // Mock socket broadcast joining them to our room
-        lobby.ws.send(JSON.stringify({
-          type: 'JOIN_ROOM',
-          payload: {
-            name: friend.name,
-            playerId: friend.id,
-            code: lobby.room.code,
-            isSpectator: false
-          }
-        }));
-      }
-    }, 2500);
+    const lobby = useLobbyStore.getState();
+    if (lobby.room && lobby.ws && lobby.ws.readyState === 1) {
+      // Send dynamic join invitation payload if the receiver is online
+      lobby.ws.send(JSON.stringify({
+        type: 'INVITE_FRIEND_TO_LOBBY',
+        payload: {
+          friendId,
+          roomCode: lobby.room.code,
+          inviterName: lobby.myPlayerName
+        }
+      }));
+    }
   },
 
-  // ELO Matchmaking Queue Simulator
+  // ELO Matchmaking Queue WebSocket Actions
   startMatchmaking: (difficulty = 'medium') => {
     const lobby = useLobbyStore.getState();
-    if (!lobby.isConnected) {
+    if (!lobby.isConnected || !lobby.ws || lobby.ws.readyState !== 1) {
       lobby.addToast('Cannot queue. You are disconnected from server!', 'error');
       return;
     }
@@ -216,58 +192,16 @@ export const useSocialStore = create((set, get) => ({
     set({ matchmakingStatus: 'searching', searchTimer: 0 });
     lobby.addToast('Searching for ELO-matched opponents...', 'info');
 
+    // Join WebSocket Queue
+    lobby.ws.send(JSON.stringify({
+      type: 'JOIN_MATCHMAKING_QUEUE',
+      payload: { playerId: lobby.myPlayerId, difficulty }
+    }));
+
     let duration = 0;
     const interval = setInterval(() => {
       duration += 1;
       set({ searchTimer: duration });
-
-      // Match ELO tolerance scales with duration: ±50, then ±100, then ±200
-      const eloTolerance = duration * 25;
-      console.log(`[Queue searching...] Time: ${duration}s. Matching range: ELO ±${eloTolerance}`);
-
-      // Simulate a matching player found in 4 seconds
-      if (duration >= 4) {
-        clearInterval(interval);
-        
-        // Pick an ELO matched opponent from mock online roster
-        const eloTarget = get().elo;
-        const opponentList = [
-          { name: 'ApexSolver_99', elo: eloTarget - 30 },
-          { name: 'NordicMaster', elo: eloTarget + 60 },
-          { name: 'ZenPuzzler', elo: eloTarget - 10 }
-        ];
-        const chosenOpponent = opponentList[Math.floor(Math.random() * opponentList.length)];
-        
-        set({ 
-          matchmakingStatus: 'matched', 
-          matchOpponent: chosenOpponent 
-        });
-        
-        lobby.addToast(`Opponent Found! matched with ${chosenOpponent.name} (${chosenOpponent.elo} ELO)`, 'success');
-
-        // Automatically spin up a multiplayer socket room for the match
-        setTimeout(() => {
-          lobby.createRoom(difficulty);
-          
-          // Force join the opponent player to the socket room in 1s to play!
-          setTimeout(() => {
-            if (lobby.room && lobby.ws) {
-              lobby.ws.send(JSON.stringify({
-                type: 'JOIN_ROOM',
-                payload: {
-                  name: chosenOpponent.name,
-                  playerId: 'opp_' + Math.random().toString(36).substring(2, 6),
-                  code: lobby.room.code,
-                  isSpectator: false
-                }
-              }));
-              
-              lobby.addToast('Both players connected. Set ready!', 'info');
-              set({ matchmakingStatus: 'idle', matchOpponent: null });
-            }
-          }, 1000);
-        }, 1500);
-      }
     }, 1000);
 
     set({ matchSearchInterval: interval });
@@ -278,7 +212,36 @@ export const useSocialStore = create((set, get) => ({
     if (matchSearchInterval) {
       clearInterval(matchSearchInterval);
     }
+    
+    const lobby = useLobbyStore.getState();
+    if (lobby.ws && lobby.isConnected && lobby.ws.readyState === 1) {
+      lobby.ws.send(JSON.stringify({
+        type: 'LEAVE_MATCHMAKING_QUEUE',
+        payload: { playerId: lobby.myPlayerId }
+      }));
+    }
+
     set({ matchmakingStatus: 'idle', searchTimer: 0, matchOpponent: null });
-    useLobbyStore.getState().addToast('Matchmaking search canceled.', 'info');
+    lobby.addToast('Matchmaking search canceled.', 'info');
+  },
+
+  matchFound: (payload) => {
+    const { opponent } = payload;
+    const { matchSearchInterval } = get();
+    if (matchSearchInterval) {
+      clearInterval(matchSearchInterval);
+    }
+
+    set({ 
+      matchmakingStatus: 'matched', 
+      matchOpponent: opponent 
+    });
+
+    const lobby = useLobbyStore.getState();
+    lobby.addToast(`Opponent Found! Matched with ${opponent.name} (${opponent.elo} ELO)`, 'success');
+    
+    setTimeout(() => {
+      set({ matchmakingStatus: 'idle', matchOpponent: null });
+    }, 2500);
   }
 }));

@@ -179,6 +179,7 @@ export default function App() {
     elo,
     rank,
     friends,
+    friendRequests,
     matchmakingStatus,
     matchOpponent,
     searchTimer,
@@ -188,6 +189,8 @@ export default function App() {
     inviteFriend,
     startMatchmaking,
     cancelMatchmaking,
+    acceptFriendRequest,
+    declineFriendRequest
   } = useSocialStore();
 
   // Local state inputs
@@ -209,11 +212,6 @@ export default function App() {
     { id: 'speed', name: 'Speed Runner', src: '/avatars/avatar_speed.png' },
     { id: 'zen', name: 'Zen Meditator', src: '/avatars/avatar_zen.png' },
   ];
-  // Pending friend requests (local simulation)
-  const [friendRequests, setFriendRequests] = useState([
-    { id: 'fr1', name: 'ZenPuzzler', elo: 1310 },
-    { id: 'fr2', name: 'SpeedRunner_7', elo: 1580 },
-  ]);
 
   // WebRTC Audio reference
   const remoteAudioRef = useRef(null);
@@ -957,21 +955,14 @@ export default function App() {
                       </div>
                       <div className="flex gap-1">
                         <button
-                          onClick={() => {
-                            addFriend(req.name);
-                            setFriendRequests(prev => prev.filter(r => r.id !== req.id));
-                            addToast(`Accepted ${req.name}'s friend request!`, 'success');
-                          }}
+                          onClick={() => acceptFriendRequest(req.id)}
                           className="w-6 h-6 rounded-lg bg-emerald-500/20 text-emerald-500 hover:bg-emerald-500 hover:text-white transition-all flex items-center justify-center"
                           title="Accept"
                         >
                           <Check size={12} />
                         </button>
                         <button
-                          onClick={() => {
-                            setFriendRequests(prev => prev.filter(r => r.id !== req.id));
-                            addToast(`Declined ${req.name}'s friend request.`, 'info');
-                          }}
+                          onClick={() => declineFriendRequest(req.id)}
                           className="w-6 h-6 rounded-lg bg-rose-500/20 text-rose-500 hover:bg-rose-500 hover:text-white transition-all flex items-center justify-center"
                           title="Decline"
                         >
