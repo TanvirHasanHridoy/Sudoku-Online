@@ -40,6 +40,9 @@ export function generateSudoku(difficulty = 'medium') {
   // Determine target number of cells to remove
   let cellsToRemove;
   switch (difficulty) {
+    case 'beginner':
+      cellsToRemove = 22; // ~59 clues left (extremely accessible!)
+      break;
     case 'easy':
       cellsToRemove = 35; // ~46 clues left
       break;

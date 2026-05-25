@@ -60,6 +60,7 @@ function getSanitizedRoom(room) {
     players: room.players.map(p => ({
       id: p.id,
       name: p.name,
+      avatar: p.avatar || 'apex',
       isReady: p.isReady,
       progress: p.progress,
       strikes: p.strikes,
@@ -81,12 +82,13 @@ wss.on('connection', (ws) => {
 
       switch (type) {
         case 'CREATE_ROOM': {
-          const { name, playerId, difficulty } = payload;
+          const { name, playerId, difficulty, avatar } = payload;
           const code = generateRoomCode();
 
           currentPlayer = {
             id: playerId,
             name: name || `Player_${playerId.slice(0, 4)}`,
+            avatar: avatar || 'apex',
             isReady: false,
             progress: 0,
             strikes: 0,
@@ -102,6 +104,8 @@ wss.on('connection', (ws) => {
             isGameStarted: false,
             isPaused: false,
             pauseVotes: {},
+            pauseRequesterId: null,        // tracks who asked for the current pause vote
+            lastPauseRequestTime: 0,       // unix ms — enforces 20s server-side cooldown
             playAgainVotes: {},
             players: [currentPlayer]
           };
@@ -120,7 +124,7 @@ wss.on('connection', (ws) => {
         }
 
         case 'JOIN_ROOM': {
-          const { name, playerId, code, isSpectator } = payload;
+          const { name, playerId, code, isSpectator, avatar } = payload;
           const room = rooms.get(code);
 
           if (!room) {
@@ -131,21 +135,39 @@ wss.on('connection', (ws) => {
             return;
           }
 
+          // 1. Kick Cooldown check (block joining if kicked within 10s)
+          if (room.kickCooldowns && room.kickCooldowns[playerId]) {
+            const elapsed = Date.now() - room.kickCooldowns[playerId];
+            const COOLDOWN_MS = 10_000;
+            if (elapsed < COOLDOWN_MS) {
+              const remaining = Math.ceil((COOLDOWN_MS - elapsed) / 1000);
+              ws.send(JSON.stringify({
+                type: 'ERROR',
+                payload: { message: `You were kicked from this room. Please wait ${remaining}s before joining again.` }
+              }));
+              return;
+            }
+          }
+
+          // 2. Forced spectator: anyone who enters after game started becomes spectator
+          const forcedSpectator = room.isGameStarted ? true : !!isSpectator;
+
           // Check if player already in the room
           const existingPlayerIndex = room.players.findIndex(p => p.id === playerId);
           
           currentPlayer = {
             id: playerId,
             name: name || `User_${playerId.slice(0, 4)}`,
-            isReady: isSpectator ? false : false,
+            avatar: avatar || 'apex',
+            isReady: forcedSpectator ? false : false,
             progress: 0,
             strikes: 0,
-            isSpectator: !!isSpectator,
+            isSpectator: forcedSpectator,
             socket: ws
           };
 
           if (existingPlayerIndex !== -1) {
-            // Reconnect logic
+            // Reconnect logic: restore socket reference and retain original isSpectator state
             room.players[existingPlayerIndex].socket = ws;
             currentPlayer = room.players[existingPlayerIndex];
           } else {
@@ -252,17 +274,83 @@ wss.on('connection', (ws) => {
 
           if (wasEliminated) {
             broadcastToRoom(currentRoomCode, {
-              type: 'NOTIFICATION',
-              payload: { message: `💀 ${currentPlayer.name} has been eliminated! (3 Strikes)` }
-            }, currentPlayer.id); // Notify others
+              type: 'PLAYER_FINISHED',
+              payload: {
+                playerId: currentPlayer.id,
+                name: currentPlayer.name,
+                result: 'lost'
+              }
+            }, currentPlayer.id);
           } else if (wasFinished) {
             broadcastToRoom(currentRoomCode, {
-              type: 'NOTIFICATION',
-              payload: { message: `🏆 ${currentPlayer.name} solved their board!` }
-            }, currentPlayer.id); // Notify others
+              type: 'PLAYER_FINISHED',
+              payload: {
+                playerId: currentPlayer.id,
+                name: currentPlayer.name,
+                result: 'won'
+              }
+            }, currentPlayer.id);
           }
           break;
         }
+
+        case 'HINT_USED': {
+          // Broadcast to other room players so they can see the toast
+          if (!currentRoomCode || !currentPlayer) return;
+          broadcastToRoom(currentRoomCode, {
+            type: 'HINT_USED',
+            payload: { name: currentPlayer.name }
+          }, currentPlayer.id);
+          break;
+        }
+
+        case 'LEAVE_GAME': {
+          // Explicit exit: remove the player immediately and notify others
+          const room = rooms.get(currentRoomCode);
+          if (!room || !currentPlayer) return;
+
+          console.log(`[WS Leave] Player ${currentPlayer.name} explicitly left room ${currentRoomCode}`);
+
+          // Notify remaining players before removing
+          broadcastToRoom(currentRoomCode, {
+            type: 'PLAYER_LEFT',
+            payload: {
+              playerId: currentPlayer.id,
+              name: currentPlayer.name
+            }
+          }, currentPlayer.id);
+
+          // Remove player from room
+          room.players = room.players.filter(p => p.id !== currentPlayer.id);
+          delete room.pauseVotes[currentPlayer.id];
+          delete room.playAgainVotes[currentPlayer.id];
+
+          // Reset pauseRequesterId if the leaver was the requester
+          if (room.pauseRequesterId === currentPlayer.id) {
+            room.pauseRequesterId = null;
+            room.pauseVotes = {};
+            // Dismiss any active vote modals
+            broadcastToRoom(currentRoomCode, {
+              type: 'PAUSE_DISMISSED',
+              payload: { room: getSanitizedRoom(room) }
+            });
+          }
+
+          if (room.players.length === 0) {
+            rooms.delete(currentRoomCode);
+          } else {
+            broadcastToRoom(currentRoomCode, {
+              type: 'ROOM_UPDATED',
+              payload: { room: getSanitizedRoom(room) }
+            });
+          }
+
+          // Clear current player/room tracking so onclose doesn't re-notify
+          currentRoomCode = null;
+          currentPlayer = null;
+          break;
+        }
+
 
         case 'SEND_EMOTE': {
           if (!currentRoomCode || !currentPlayer) return;
@@ -283,15 +371,56 @@ wss.on('connection', (ws) => {
           const room = rooms.get(currentRoomCode);
           if (!room || !currentPlayer) return;
 
-          room.pauseVotes = { [currentPlayer.id]: true };
+          // Enforce 20-second server-side cooldown between pause requests
+          const now = Date.now();
+          const PAUSE_COOLDOWN_MS = 20_000;
+          if (now - (room.lastPauseRequestTime || 0) < PAUSE_COOLDOWN_MS) {
+            const remaining = Math.ceil((PAUSE_COOLDOWN_MS - (now - room.lastPauseRequestTime)) / 1000);
+            ws.send(JSON.stringify({
+              type: 'ERROR',
+              payload: { message: `Pause cooldown active — wait ${remaining}s before requesting again.` }
+            }));
+            return;
+          }
 
+          const activePlayers = room.players.filter(p => !p.isSpectator);
+
+          // 1. Solo room pause behavior
+          if (activePlayers.length === 1) {
+            room.isPaused = !room.isPaused; // Toggle pause state
+            room.pauseVotes = {};
+            room.pauseRequesterId = null;
+            room.lastPauseRequestTime = now;
+
+            broadcastToRoom(currentRoomCode, {
+              type: 'PAUSE_CONSENSUS',
+              payload: {
+                room: getSanitizedRoom(room),
+                isPaused: room.isPaused
+              }
+            });
+            return;
+          }
+
+          // 2. Multiplayer pause behavior (consensus flow)
+          room.pauseVotes = { [currentPlayer.id]: true }; // Requester auto-votes yes
+          room.pauseRequesterId = currentPlayer.id;       // Remember who asked
+          room.lastPauseRequestTime = now;
+
+          // Notify the requester that the request was sent
+          ws.send(JSON.stringify({
+            type: 'NOTIFICATION',
+            payload: { message: 'Pause request sent to opponents.' }
+          }));
+
+          // Only send the vote modal to OTHER players
           broadcastToRoom(currentRoomCode, {
             type: 'PAUSE_REQUESTED',
             payload: {
               room: getSanitizedRoom(room),
               requesterName: currentPlayer.name
             }
-          });
+          }, currentPlayer.id); // <-- exclude requester
           break;
         }
 
@@ -307,10 +436,13 @@ wss.on('connection', (ws) => {
           const allApproved = activePlayers.every(p => room.pauseVotes[p.id] === true);
 
           if (allVoted) {
+            const requesterId = room.pauseRequesterId;
             if (allApproved) {
               room.isPaused = !room.isPaused; // Toggle pause state
-              room.pauseVotes = {}; // Clear votes
+              room.pauseVotes = {};
+              room.pauseRequesterId = null;
 
+              // Broadcast consensus to ALL (including requester)
               broadcastToRoom(currentRoomCode, {
                 type: 'PAUSE_CONSENSUS',
                 payload: {
@@ -319,14 +451,26 @@ wss.on('connection', (ws) => {
                 }
               });
             } else {
-              // Failed consensus
+              // Failed consensus — notify original requester with the name of who rejected it!
               room.pauseVotes = {};
+              room.pauseRequesterId = null;
+
+              const requesterPlayer = room.players.find(p => p.id === requesterId);
+              if (requesterPlayer && requesterPlayer.socket && requesterPlayer.socket.readyState === 1) {
+                requesterPlayer.socket.send(JSON.stringify({
+                  type: 'PAUSE_REJECTED',
+                  payload: {
+                    room: getSanitizedRoom(room),
+                    rejecterName: currentPlayer.name // Explicitly send rejecter name!
+                  }
+                }));
+              }
+
+              // Rejecter sees a different, neutral toast — notify everyone else except the requester
               broadcastToRoom(currentRoomCode, {
-                type: 'PAUSE_REJECTED',
-                payload: {
-                  room: getSanitizedRoom(room)
-                }
-              });
+                type: 'NOTIFICATION',
+                payload: { message: `${currentPlayer.name} declined the pause request.` }
+              }, requesterId); // exclude requester (they get PAUSE_REJECTED above)
             }
           } else {
             // Still waiting for votes, update room
@@ -519,6 +663,102 @@ wss.on('connection', (ws) => {
           break;
         }
 
+        case 'KICK_PLAYER': {
+          const room = rooms.get(currentRoomCode);
+          if (!room || !currentPlayer) return;
+
+          // Verify that the person requesting the kick is the host
+          const isHost = room.players[0]?.id === currentPlayer.id;
+          if (!isHost) {
+            ws.send(JSON.stringify({
+              type: 'ERROR',
+              payload: { message: 'Only the room host can kick players!' }
+            }));
+            return;
+          }
+
+          // Enforce 10-second kick action cooldown on the host
+          const hostCooldown = 10_000;
+          if (Date.now() - (room.lastKickTime || 0) < hostCooldown) {
+            const remaining = Math.ceil((hostCooldown - (Date.now() - room.lastKickTime)) / 1000);
+            ws.send(JSON.stringify({
+              type: 'ERROR',
+              payload: { message: `Kick action cooldown active. Wait ${remaining}s.` }
+            }));
+            return;
+          }
+
+          // Don't allow kicking if the game is already started
+          if (room.isGameStarted) {
+            ws.send(JSON.stringify({
+              type: 'ERROR',
+              payload: { message: 'Cannot kick players while the game is running!' }
+            }));
+            return;
+          }
+
+          const { playerId } = payload;
+          const targetPlayer = room.players.find(p => p.id === playerId);
+          if (!targetPlayer) return;
+
+          room.lastKickTime = Date.now();
+
+          // Set 10-second rejoining ban on target player
+          room.kickCooldowns = room.kickCooldowns || {};
+          room.kickCooldowns[playerId] = Date.now();
+
+          // Remove target player from room players list
+          room.players = room.players.filter(p => p.id !== playerId);
+          delete room.pauseVotes[playerId];
+          delete room.playAgainVotes[playerId];
+
+          // Notify the target player that they were kicked
+          if (targetPlayer.socket && targetPlayer.socket.readyState === 1) {
+            targetPlayer.socket.send(JSON.stringify({
+              type: 'KICKED',
+              payload: { message: 'You have been kicked from the lobby by the host.' }
+            }));
+          }
+
+          // Broadcast player left/kicked to remaining players
+          broadcastToRoom(currentRoomCode, {
+            type: 'PLAYER_LEFT',
+            payload: {
+              playerId: targetPlayer.id,
+              name: targetPlayer.name
+            }
+          });
+
+          broadcastToRoom(currentRoomCode, {
+            type: 'ROOM_UPDATED',
+            payload: { room: getSanitizedRoom(room) }
+          });
+          break;
+        }
+
+        case 'UPDATE_AVATAR': {
+          const { avatar } = payload;
+          if (!avatar) return;
+
+          if (currentPlayer) {
+            currentPlayer.avatar = avatar;
+          }
+
+          const room = rooms.get(currentRoomCode);
+          if (room) {
+            const playerInRoom = room.players.find(p => p.id === currentPlayer.id);
+            if (playerInRoom) {
+              playerInRoom.avatar = avatar;
+            }
+
+            broadcastToRoom(currentRoomCode, {
+              type: 'ROOM_UPDATED',
+              payload: { room: getSanitizedRoom(room) }
+            });
+          }
+          break;
+        }
+
         default:
           console.warn(`[WS Warning] Unknown msg type: ${type}`);
       }
@@ -541,37 +781,57 @@ wss.on('connection', (ws) => {
       if (targetPlayer && targetPlayer.socket && targetPlayer.socket.readyState === 1) {
         targetPlayer.socket.send(JSON.stringify({
           type: 'SPECTATOR_ALERT',
-          payload: {
-            spectatorName: currentPlayer.name,
-            isSpectating: false
-          }
+          payload: { spectatorName: currentPlayer.name, isSpectating: false }
         }));
       }
     }
 
-    // Filter out player
-    room.players = room.players.filter(p => p.id !== currentPlayer.id);
+    const disconnectedId = currentPlayer.id;
+    const disconnectedName = currentPlayer.name;
 
-    // Clean up empty votes
-    delete room.pauseVotes[currentPlayer.id];
-    delete room.playAgainVotes[currentPlayer.id];
+    // Mark the player's socket as disconnected (null) rather than immediately deleting them
+    currentPlayer.socket = null;
 
-    if (room.players.length === 0) {
-      // Room empty, delete it
-      rooms.delete(currentRoomCode);
-      console.log(`[WS Room Deleted] Room ${currentRoomCode} is empty.`);
-    } else {
-      // Notify other players
-      broadcastToRoom(currentRoomCode, {
-        type: 'ROOM_UPDATED',
-        payload: { room: getSanitizedRoom(room) }
-      });
+    // Set a timeout to clean up after 8 seconds (grace period for page reloads)
+    setTimeout(() => {
+      const currentRoom = rooms.get(currentRoomCode);
+      if (!currentRoom) return;
 
-      broadcastToRoom(currentRoomCode, {
-        type: 'NOTIFICATION',
-        payload: { message: `${currentPlayer.name} disconnected from lobby.` }
-      });
-    }
+      const player = currentRoom.players.find(p => p.id === disconnectedId);
+      // If the player still has no active socket (socket is null or closed), clean them up
+      if (player && (!player.socket || player.socket.readyState !== 1)) {
+        currentRoom.players = currentRoom.players.filter(p => p.id !== disconnectedId);
+
+        // Clean up votes
+        delete currentRoom.pauseVotes[disconnectedId];
+        delete currentRoom.playAgainVotes[disconnectedId];
+
+        // If the disconnected player had an active pause request, dismiss it
+        if (currentRoom.pauseRequesterId === disconnectedId) {
+          currentRoom.pauseRequesterId = null;
+          currentRoom.pauseVotes = {};
+          broadcastToRoom(currentRoomCode, {
+            type: 'PAUSE_DISMISSED',
+            payload: { room: getSanitizedRoom(currentRoom) }
+          });
+        }
+
+        if (currentRoom.players.length === 0) {
+          rooms.delete(currentRoomCode);
+          console.log(`[WS Room Deleted] Room ${currentRoomCode} is empty after disconnect timeout.`);
+        } else {
+          // Send PLAYER_LEFT so clients can update live-sync immediately and show a named toast
+          broadcastToRoom(currentRoomCode, {
+            type: 'PLAYER_LEFT',
+            payload: { playerId: disconnectedId, name: disconnectedName }
+          });
+          broadcastToRoom(currentRoomCode, {
+            type: 'ROOM_UPDATED',
+            payload: { room: getSanitizedRoom(currentRoom) }
+          });
+        }
+      }
+    }, 8000);
   });
 });
 

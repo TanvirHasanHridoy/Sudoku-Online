@@ -7,7 +7,8 @@ export default function SudokuGrid({
   notes = {},
   originalCells = new Set(),
   mistakes = {},
-  shakingCell = null
+  shakingCell = null,
+  isSpectatingMode = false
 }) {
   // Check if a cell is highlighted (same row, col, or 3x3 subgrid)
   const isCellHighlighted = (row, col) => {
@@ -58,11 +59,19 @@ export default function SudokuGrid({
             // Dynamic color logic based on theme state
             let bgClass = 'bg-panel-custom text-text-custom';
             if (isSelected) {
-              bgClass = 'bg-cell-selected text-accent-custom ring-2 ring-accent-custom ring-inset z-10';
+              bgClass = isSpectatingMode
+                ? 'bg-indigo-500/20 text-indigo-400 ring-2 ring-indigo-500/50 z-10'
+                : 'bg-cell-selected text-accent-custom ring-2 ring-accent-custom ring-inset z-10';
             } else if (isSameNum) {
-              bgClass = 'bg-cell-selected/60 text-accent-custom font-bold';
+              bgClass = isSpectatingMode
+                ? 'bg-indigo-500/10 text-indigo-400 font-bold'
+                : 'bg-cell-selected/60 text-accent-custom font-bold';
             } else if (isHighlighted) {
-              bgClass = 'bg-cell-highlight';
+              bgClass = isSpectatingMode
+                ? 'bg-indigo-500/5'
+                : 'bg-cell-highlight';
+            } else if (isSpectatingMode) {
+              bgClass = 'bg-panel-custom/70 text-text-custom/80 opacity-90 border border-indigo-500/5';
             }
 
             // Typography and error coloring
@@ -82,7 +91,7 @@ export default function SudokuGrid({
                   sudoku-cell relative flex items-center justify-center select-none text-lg md:text-xl
                   ${bgClass} ${fontClass} ${borderClasses}
                   ${isShaking ? 'shaking ring-2 ring-rose-500/80 z-20 bg-rose-500/10' : ''}
-                  hover:bg-accent-glow/20 transition-all duration-100
+                  ${isSpectatingMode ? 'cursor-default' : 'hover:bg-accent-glow/20 cursor-pointer'} transition-all duration-100
                 `}
               >
                 {val !== null ? (

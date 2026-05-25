@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { generateSudoku } from '../utils/generator';
+import { saveGameState, loadGameState, clearGameState } from '../utils/persistence';
 
 export const useGameStore = create((set, get) => ({
   // Core game states
@@ -22,7 +23,72 @@ export const useGameStore = create((set, get) => ({
   history: [],
   redoStack: [],
 
-  // Actions
+  // ─── Persistence ─────────────────────────────────────────────────────────
+
+  /**
+   * Called on app mount (solo play only).
+   * Returns true if state was successfully restored so the UI can show a toast.
+   */
+  loadPersistedState: () => {
+    const saved = loadGameState();
+    if (!saved || saved.gameStatus !== 'playing') return false;
+
+    set({
+      difficulty: saved.difficulty ?? 'medium',
+      board: saved.board,
+      solution: saved.solution,
+      originalCells: saved.originalCells,
+      notes: saved.notes ?? {},
+      mistakes: saved.mistakes ?? {},
+      strikes: saved.strikes ?? 0,
+      hintsRemaining: saved.hintsRemaining ?? 2,
+      gameStatus: 'playing',
+      timeline: saved.timeline ?? [],
+      selectedCell: saved.selectedCell ?? null,
+      history: [],
+      redoStack: [],
+      notesMode: false,
+      shakingCell: null,
+    });
+    return true;
+  },
+
+  /**
+   * Saves the current solo game state to localStorage.
+   * Should NOT be called for multiplayer games.
+   */
+  persistState: () => {
+    saveGameState(get());
+  },
+
+  /**
+   * Clears the persisted state and resets the store to its idle defaults.
+   * Called on explicit "Exit to Home" for solo, or automatically when a
+   * multiplayer game is loaded (multiplayer state is server-managed).
+   */
+  resetPersistedState: () => {
+    clearGameState();
+    set({
+      difficulty: 'medium',
+      board: Array(9).fill(null).map(() => Array(9).fill(null)),
+      solution: Array(9).fill(null).map(() => Array(9).fill(null)),
+      originalCells: new Set(),
+      selectedCell: null,
+      notesMode: false,
+      notes: {},
+      mistakes: {},
+      shakingCell: null,
+      timeline: [],
+      strikes: 0,
+      hintsRemaining: 2,
+      gameStatus: 'idle',
+      history: [],
+      redoStack: [],
+    });
+  },
+
+  // ─── Actions ──────────────────────────────────────────────────────────────
+
   initGame: (difficulty = 'medium', externalBoard = null, externalSolution = null) => {
     let puzzle, solution;
     if (externalBoard && externalSolution) {
@@ -42,7 +108,7 @@ export const useGameStore = create((set, get) => ({
       });
     });
 
-    set({
+    const nextState = {
       difficulty,
       board: puzzle,
       solution,
@@ -54,11 +120,16 @@ export const useGameStore = create((set, get) => ({
       shakingCell: null,
       timeline: [],
       strikes: 0,
-      hintsRemaining: difficulty === 'expert' ? 1 : 2,
+      hintsRemaining: difficulty === 'expert' ? 1 : difficulty === 'beginner' ? 3 : 2,
       gameStatus: 'playing',
       history: [],
-      redoStack: []
-    });
+      redoStack: [],
+    };
+
+    set(nextState);
+
+    // Always persist game state so it is retained on page refresh (for both solo and multiplayer matches)
+    saveGameState({ ...nextState, originalCells: originals });
   },
 
   selectCell: (row, col) => {
@@ -216,6 +287,17 @@ export const useGameStore = create((set, get) => ({
         }, 400);
       }
     }
+
+    // Auto-persist after every move (solo only — if solution was generated locally)
+    // We guard with a cheap heuristic: multiplayer boards are passed via initGame w/ externalBoard
+    // and clearGameState() is called then, so localStorage won't have a key.
+    const currentState = get();
+    if (currentState.gameStatus === 'playing') {
+      saveGameState(currentState);
+    } else {
+      // Game finished — clear persistence so it doesn't restore a completed game
+      clearGameState();
+    }
   },
 
   eraseCell: () => {
@@ -244,6 +326,8 @@ export const useGameStore = create((set, get) => ({
       mistakes: newMistakes,
       redoStack: []
     });
+
+    saveGameState(get());
   },
 
   getHint: (timeString = '00:00') => {
@@ -306,18 +390,27 @@ export const useGameStore = create((set, get) => ({
       if (!solved) break;
     }
 
+    const newStatus = solved ? 'won' : 'playing';
+
     set((state) => ({
       board: newBoard,
       notes: updatedNotes,
       mistakes: newMistakes,
       timeline: [...state.timeline, newTimelineEvent],
       hintsRemaining: hintsRemaining - 1,
-      gameStatus: solved ? 'won' : 'playing',
+      gameStatus: newStatus,
       redoStack: []
     }));
+
+    if (newStatus === 'playing') {
+      saveGameState(get());
+    } else {
+      clearGameState();
+    }
   },
 
-  // History Helpers
+  // ─── History Helpers ──────────────────────────────────────────────────────
+
   pushHistoryState: () => {
     const { board, notes, strikes, mistakes, timeline } = get();
     set((state) => ({
@@ -359,6 +452,8 @@ export const useGameStore = create((set, get) => ({
       timeline: previousState.timeline || [],
       strikes: previousState.strikes
     }));
+
+    saveGameState(get());
   },
 
   redo: () => {
@@ -386,5 +481,7 @@ export const useGameStore = create((set, get) => ({
       timeline: nextState.timeline || [],
       strikes: nextState.strikes
     }));
-  }
+
+    saveGameState(get());
+  },
 }));

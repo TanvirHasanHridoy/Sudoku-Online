@@ -13,22 +13,27 @@ const getCachedPlayer = () => {
     name = 'Solver_' + Math.floor(1000 + Math.random() * 9000);
     localStorage.setItem('sudoku_player_name', name);
   }
-  return { id, name };
+  let avatar = localStorage.getItem('sudoku_avatar') || 'apex';
+  return { id, name, avatar };
 };
 
-const { id: defaultId, name: defaultName } = getCachedPlayer();
+const { id: defaultId, name: defaultName, avatar: defaultAvatar } = getCachedPlayer();
 
 export const useLobbyStore = create((set, get) => ({
   ws: null,
   isConnected: false,
   myPlayerId: defaultId,
   myPlayerName: defaultName,
+  selectedAvatar: defaultAvatar,
   room: null, // { code, difficulty, isGameStarted, isPaused, players }
   
   // Voting / Modals States
   pauseRequester: null,
   showPauseVoteModal: false,
   showPlayAgainVoteModal: false,
+
+  // Pause cooldown (client-side guard — 20s)
+  lastPauseRequestTime: 0,
 
   // Floating emote callbacks
   emoteCallback: null,
@@ -90,6 +95,20 @@ export const useLobbyStore = create((set, get) => ({
     return true; // Succeeded
   },
 
+  setSelectedAvatar: (avatar) => {
+    localStorage.setItem('sudoku_avatar', avatar);
+    set({ selectedAvatar: avatar });
+
+    // Notify server of avatar change if connected
+    const { ws, isConnected } = get();
+    if (ws && isConnected && ws.readyState === 1) {
+      ws.send(JSON.stringify({
+        type: 'UPDATE_AVATAR',
+        payload: { avatar }
+      }));
+    }
+  },
+
   setEmoteCallback: (callback) => {
     set({ emoteCallback: callback });
   },
@@ -99,10 +118,18 @@ export const useLobbyStore = create((set, get) => ({
     if (activeWs && activeWs.readyState <= 1) return; // Already connecting or connected
 
     const socket = new WebSocket('ws://localhost:3001');
+    set({ ws: socket }); // Store immediately to prevent duplicate connections!
 
     socket.onopen = () => {
-      set({ ws: socket, isConnected: true });
+      set({ isConnected: true });
       get().addToast('Connected to competitive lobby server!', 'success');
+
+      // Auto-reconnect if there's a cached active room code
+      const activeRoomCode = localStorage.getItem('sudoku_active_room_code');
+      if (activeRoomCode) {
+        console.log(`[Auto Reconnect] Restoring multiplayer session for Room: ${activeRoomCode}`);
+        get().joinRoom(activeRoomCode);
+      }
     };
 
     socket.onmessage = (event) => {
@@ -113,6 +140,9 @@ export const useLobbyStore = create((set, get) => ({
         switch (type) {
           case 'ROOM_CREATED':
           case 'ROOM_JOINED': {
+            // Persist the room code locally
+            localStorage.setItem('sudoku_active_room_code', payload.room.code);
+
             set({ 
               room: payload.room, 
               myPlayerId: payload.myPlayerId,
@@ -126,7 +156,17 @@ export const useLobbyStore = create((set, get) => ({
             // If the game is already started in this room, load the board!
             if (payload.room.isGameStarted && payload.board) {
               const { difficulty } = payload.room;
-              useGameStore.getState().initGame(difficulty, payload.board, payload.solution); // Load board with its correct solution
+              const gameStore = useGameStore.getState();
+              
+              // Check if we already have a restored board matching this exact game
+              const hasMatchingBoard = 
+                gameStore.gameStatus === 'playing' &&
+                gameStore.solution &&
+                JSON.stringify(gameStore.solution) === JSON.stringify(payload.solution);
+              
+              if (!hasMatchingBoard) {
+                gameStore.initGame(difficulty, payload.board, payload.solution);
+              }
             }
             break;
           }
@@ -175,6 +215,8 @@ export const useLobbyStore = create((set, get) => ({
           }
 
           case 'PAUSE_REQUESTED': {
+            // Show pause vote modal ONLY for non-requester
+            // (Server already excludes the requester from this broadcast)
             set({
               room: payload.room,
               pauseRequester: payload.requesterName,
@@ -196,12 +238,13 @@ export const useLobbyStore = create((set, get) => ({
           }
 
           case 'PAUSE_REJECTED': {
+            // Server sends this ONLY to the original requester
             set({ 
               room: payload.room,
               showPauseVoteModal: false,
               pauseRequester: null
             });
-            get().addToast('Pause request rejected by opponents.', 'error');
+            get().addToast('Your pause request was rejected by opponent(s).', 'error');
             break;
           }
 
@@ -228,6 +271,65 @@ export const useLobbyStore = create((set, get) => ({
 
           case 'NOTIFICATION': {
             get().addToast(payload.message, 'info');
+            break;
+          }
+
+          case 'PLAYER_FINISHED': {
+            // A different player just won or was eliminated
+            const { name, result } = payload;
+            const emoji = result === 'won' ? '🏆' : '💀';
+            const verb  = result === 'won' ? 'solved the board!' : 'was eliminated!';
+            get().addToast(`${emoji} ${name} ${verb}`, result === 'won' ? 'success' : 'error');
+            break;
+          }
+
+          case 'PLAYER_LEFT': {
+            // Another player explicitly exited the game
+            const { name: leaverName, playerId: leaverId } = payload;
+            get().addToast(`🚪 ${leaverName} exited the game. Continue playing!`, 'info');
+            // Remove the player from local room state so live-sync cards update immediately
+            set((state) => {
+              if (!state.room) return {};
+              return {
+                room: {
+                  ...state.room,
+                  players: state.room.players.filter(p => p.id !== leaverId)
+                }
+              };
+            });
+            break;
+          }
+
+          case 'HINT_USED': {
+            // Another player just used a hint
+            get().addToast(`💡 ${payload.name} used a hint!`, 'info');
+            break;
+          }
+
+          case 'PAUSE_DISMISSED': {
+            // The pause requester left, dismiss any active vote modal
+            set({
+              room: payload.room,
+              showPauseVoteModal: false,
+              pauseRequester: null
+            });
+            get().addToast('Pause vote cancelled — a player left.', 'info');
+            break;
+          }
+
+          case 'KICKED': {
+            get().addToast(payload.message, 'error');
+            localStorage.removeItem('sudoku_active_room_code');
+            useGameStore.getState().resetPersistedState();
+            set({
+              room: null,
+              showPauseVoteModal: false,
+              pauseRequester: null,
+              showPlayAgainVoteModal: false,
+              spectatingPlayerId: null,
+              spectatedPlayerBoardState: null,
+              myActiveSpectators: []
+            });
             break;
           }
 
@@ -313,22 +415,22 @@ export const useLobbyStore = create((set, get) => ({
   },
 
   createRoom: (difficulty = 'medium') => {
-    const { ws, myPlayerName, myPlayerId } = get();
+    const { ws, myPlayerName, myPlayerId, selectedAvatar } = get();
     if (!ws || ws.readyState !== 1) return;
 
     ws.send(JSON.stringify({
       type: 'CREATE_ROOM',
-      payload: { name: myPlayerName, playerId: myPlayerId, difficulty }
+      payload: { name: myPlayerName, playerId: myPlayerId, difficulty, avatar: selectedAvatar }
     }));
   },
 
   joinRoom: (code, isSpectator = false) => {
-    const { ws, myPlayerName, myPlayerId } = get();
+    const { ws, myPlayerName, myPlayerId, selectedAvatar } = get();
     if (!ws || ws.readyState !== 1) return;
 
     ws.send(JSON.stringify({
       type: 'JOIN_ROOM',
-      payload: { name: myPlayerName, playerId: myPlayerId, code, isSpectator }
+      payload: { name: myPlayerName, playerId: myPlayerId, code, isSpectator, avatar: selectedAvatar }
     }));
   },
 
@@ -391,8 +493,19 @@ export const useLobbyStore = create((set, get) => ({
   },
 
   requestPause: () => {
-    const { ws, room } = get();
+    const { ws, room, lastPauseRequestTime } = get();
     if (!ws || ws.readyState !== 1 || !room) return;
+
+    // Client-side 20-second cooldown guard
+    const COOLDOWN_MS = 20_000;
+    const now = Date.now();
+    if (now - lastPauseRequestTime < COOLDOWN_MS) {
+      const remaining = Math.ceil((COOLDOWN_MS - (now - lastPauseRequestTime)) / 1000);
+      get().addToast(`Pause cooldown — wait ${remaining}s before requesting again.`, 'error');
+      return;
+    }
+
+    set({ lastPauseRequestTime: now });
 
     ws.send(JSON.stringify({
       type: 'REQUEST_PAUSE',
@@ -439,6 +552,53 @@ export const useLobbyStore = create((set, get) => ({
     set((state) => ({
       toasts: state.toasts.filter(t => t.id !== id)
     }));
+  },
+
+  /**
+   * Exit the current game and return to the homepage.
+   * - For solo games: clears persisted localStorage state.
+   * - For multiplayer: only clears room state (server keeps the room alive for others).
+   * The `onHome` callback is called by App.jsx to switch activeView to 'home'.
+   */
+  kickPlayer: (playerId) => {
+    const { ws, room } = get();
+    if (!ws || ws.readyState !== 1 || !room) return;
+
+    ws.send(JSON.stringify({
+      type: 'KICK_PLAYER',
+      payload: { playerId }
+    }));
+  },
+
+  exitToHome: (onHome) => {
+    const { ws, isConnected, room } = get();
+
+    // Notify the server so other players are informed and the player is removed from the room
+    if (ws && isConnected && ws.readyState === 1 && room) {
+      ws.send(JSON.stringify({
+        type: 'LEAVE_GAME',
+        payload: {}
+      }));
+    }
+
+    // Clear persisted room code
+    localStorage.removeItem('sudoku_active_room_code');
+
+    // Clear any persisted solo-game state (useGameStore is already imported at the top)
+    useGameStore.getState().resetPersistedState();
+
+    // Reset lobby / room state locally
+    set({
+      room: null,
+      showPauseVoteModal: false,
+      pauseRequester: null,
+      showPlayAgainVoteModal: false,
+      spectatingPlayerId: null,
+      spectatedPlayerBoardState: null,
+      myActiveSpectators: [],
+    });
+
+    if (typeof onHome === 'function') onHome();
   },
 
   // WebRTC P2P Voice Call Actions
