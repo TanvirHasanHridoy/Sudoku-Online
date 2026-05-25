@@ -1,0 +1,122 @@
+import React from 'react';
+import { Undo2, Redo2, Pen, Trash2, Lightbulb } from 'lucide-react';
+
+export default function Keypad({ 
+  onNumberClick, 
+  onActionClick, 
+  notesMode,
+  canUndo = false,
+  canRedo = false,
+  hintsRemaining = 1,
+  completedNumbers = new Set()
+}) {
+  const numberButtons = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+
+  return (
+    <div className="w-full max-w-[460px] flex flex-col gap-4 mt-6">
+      {/* Action Controls */}
+      <div className="grid grid-cols-5 gap-2">
+        <button
+          onClick={() => onActionClick('undo')}
+          disabled={!canUndo}
+          className={`
+            flex flex-col items-center justify-center py-2.5 rounded-xl border transition-all duration-200
+            ${canUndo 
+              ? 'glass-card text-text-custom hover:border-accent-custom hover:text-accent-custom active:scale-95' 
+              : 'border-border-custom opacity-40 cursor-not-allowed'}
+          `}
+          title="Undo"
+        >
+          <Undo2 size={20} />
+          <span className="text-[10px] mt-1 font-medium font-sans">Undo</span>
+        </button>
+
+        <button
+          onClick={() => onActionClick('redo')}
+          disabled={!canRedo}
+          className={`
+            flex flex-col items-center justify-center py-2.5 rounded-xl border transition-all duration-200
+            ${canRedo 
+              ? 'glass-card text-text-custom hover:border-accent-custom hover:text-accent-custom active:scale-95' 
+              : 'border-border-custom opacity-40 cursor-not-allowed'}
+          `}
+          title="Redo"
+        >
+          <Redo2 size={20} />
+          <span className="text-[10px] mt-1 font-medium font-sans">Redo</span>
+        </button>
+
+        <button
+          onClick={() => onActionClick('notes')}
+          className={`
+            flex flex-col items-center justify-center py-2.5 rounded-xl border transition-all duration-250 active:scale-95
+            ${notesMode 
+              ? 'bg-accent-custom border-accent-custom text-white shadow-md shadow-accent-custom/20' 
+              : 'glass-card text-text-custom hover:border-accent-custom hover:text-accent-custom'}
+          `}
+          title="Toggle Pencil Notes"
+        >
+          <Pen size={18} className={notesMode ? 'animate-pulse-subtle' : ''} />
+          <span className="text-[10px] mt-1 font-medium font-sans">Notes</span>
+        </button>
+
+        <button
+          onClick={() => onActionClick('erase')}
+          className="glass-card flex flex-col items-center justify-center py-2.5 rounded-xl border text-text-custom active:scale-95 hover:text-red-500 hover:border-red-400"
+          title="Erase cell value"
+        >
+          <Trash2 size={20} />
+          <span className="text-[10px] mt-1 font-medium font-sans">Erase</span>
+        </button>
+
+        <button
+          onClick={() => onActionClick('hint')}
+          className={`
+            glass-card flex flex-col items-center justify-center py-2.5 rounded-xl border text-text-custom active:scale-95 relative
+            ${hintsRemaining === 0 ? 'opacity-40 cursor-not-allowed' : 'hover:border-accent-custom hover:text-accent-custom'}
+          `}
+          title="Get Hint"
+          disabled={hintsRemaining === 0}
+        >
+          <Lightbulb size={20} className={hintsRemaining > 0 ? 'text-amber-500' : ''} />
+          <span className="text-[10px] mt-1 font-medium font-sans">Hint</span>
+          {hintsRemaining > 0 && (
+            <span className="absolute -top-1.5 -right-1.5 bg-amber-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow-sm">
+              {hintsRemaining}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {/* Numeric Pad */}
+      <div className="grid grid-cols-9 gap-1.5">
+        {numberButtons.map((num) => {
+          const isCompleted = completedNumbers.has(num);
+          return (
+            <button
+              key={num}
+              onClick={() => !isCompleted && onNumberClick(num)}
+              disabled={isCompleted}
+              className={`
+                aspect-square rounded-xl text-lg font-bold flex items-center justify-center relative
+                transition-all duration-150
+                ${isCompleted
+                  ? 'bg-accent-glow/20 border-dashed border-border-custom/50 text-text-custom/10 cursor-not-allowed opacity-20 pointer-events-none shadow-none'
+                  : 'glass-card border border-border-custom text-text-custom hover:bg-accent-glow hover:text-accent-custom hover:border-accent-custom active:scale-90'
+                }
+              `}
+              title={isCompleted ? `Number ${num} is complete!` : `Insert ${num}`}
+            >
+              <span>{num}</span>
+              {isCompleted && (
+                <span className="absolute top-1.5 right-1.5 text-[9px] font-extrabold text-accent-custom animate-pulse-subtle">
+                  ✓
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,234 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap');
+
+@import "tailwindcss";
+
+:root {
+  /* Nordic Light (Default) */
+  --bg-color: #f8fafc;
+  --text-color: #1e293b;
+  --panel-color: #ffffff;
+  --border-color: #e2e8f0;
+  --subgrid-border: #94a3b8; /* Dark slate - stark contrast against light selection */
+  --accent-color: #4f46e5;
+  --accent-hover: #4338ca;
+  --accent-glow: #e0e7ff;
+  --grid-bg: #cbd5e1;
+  --cell-selected: #cbd5e1;
+  --cell-highlight: #f1f5f9;
+}
+
+html.theme-nordic-dark {
+  --bg-color: #030712;
+  --text-color: #f1f5f9;
+  --panel-color: #0b0f19;
+  --border-color: #1e293b;
+  --subgrid-border: #475569; /* Slate 600 - stark contrast in dark mode */
+  --accent-color: #6366f1;
+  --accent-hover: #818cf8;
+  --accent-glow: rgba(99, 102, 241, 0.15);
+  --grid-bg: #1e293b;
+  --cell-selected: rgba(99, 102, 241, 0.3);
+  --cell-highlight: rgba(30, 41, 59, 0.4);
+}
+
+html.theme-monochrome-light {
+  --bg-color: #fafafa;
+  --text-color: #18181b;
+  --panel-color: #ffffff;
+  --border-color: #e4e4e7;
+  --subgrid-border: #71717a; /* Zinc 500 - bold gray */
+  --accent-color: #09090b;
+  --accent-hover: #27272a;
+  --accent-glow: #f4f4f5;
+  --grid-bg: #e4e4e7;
+  --cell-selected: #e4e4e7;
+  --cell-highlight: #f4f4f5;
+}
+
+html.theme-monochrome-dark {
+  --bg-color: #09090b;
+  --text-color: #fafafa;
+  --panel-color: #18181b;
+  --border-color: #27272a;
+  --subgrid-border: #52525b; /* Zinc 600 - highly visible */
+  --accent-color: #ffffff;
+  --accent-hover: #e4e4e7;
+  --accent-glow: rgba(255, 255, 255, 0.1);
+  --grid-bg: #27272a;
+  --cell-selected: rgba(255, 255, 255, 0.25);
+  --cell-highlight: rgba(39, 39, 42, 0.4);
+}
+
+html.theme-cyberpunk {
+  --bg-color: #0f051d;
+  --text-color: #39ff14; /* Neon green text */
+  --panel-color: #1a0b2e;
+  --border-color: #ec4899; /* Pink borders */
+  --subgrid-border: #39ff14; /* Neon Green - stunning contrast against pink grid bg! */
+  --accent-color: #ec4899; /* Neon pink accent */
+  --accent-hover: #f472b6;
+  --accent-glow: rgba(236, 72, 153, 0.2);
+  --grid-bg: #ec4899;
+  --cell-selected: rgba(236, 72, 153, 0.4);
+  --cell-highlight: rgba(26, 11, 46, 0.8);
+}
+
+html.theme-pastel {
+  --bg-color: #fffaf0; /* warm cream */
+  --text-color: #4a3728; /* deep soft brown */
+  --panel-color: #ffffff;
+  --border-color: #fed7aa; /* soft orange */
+  --subgrid-border: #f97316; /* Bold orange - premium contrast */
+  --accent-color: #dd6b20; /* warm pastel orange */
+  --accent-hover: #c05621;
+  --accent-glow: #ffedd5;
+  --grid-bg: #fed7aa;
+  --cell-selected: #ffedd5;
+  --cell-highlight: #fffaf0;
+}
+
+@theme {
+  --color-bg-custom: var(--bg-color);
+  --color-text-custom: var(--text-color);
+  --color-panel-custom: var(--panel-color);
+  --color-border-custom: var(--border-color);
+  --color-border-subgrid: var(--subgrid-border);
+  --color-accent-custom: var(--accent-color);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-glow: var(--accent-glow);
+  --color-grid-custom: var(--grid-bg);
+  --color-cell-selected: var(--cell-selected);
+  --color-cell-highlight: var(--cell-highlight);
+  --font-sans: 'Outfit', 'Inter', 'sans-serif';
+  
+  --animate-fade-in: fadeIn 0.2s ease-out;
+  --animate-scale-in: scaleIn 0.15s cubic-bezier(0.34, 1.56, 0.64, 1);
+  --animate-pulse-subtle: pulseSubtle 2.5s infinite ease-in-out;
+  --animate-shake: shake 0.4s cubic-bezier(.36,.07,.19,.97) both;
+  --animate-float-emoji: floatEmoji 1.5s ease-out forwards;
+
+  @keyframes fadeIn {
+    0% { opacity: 0; }
+    100% { opacity: 1; }
+  }
+  @keyframes scaleIn {
+    0% { transform: scale(0.95); opacity: 0; }
+    100% { transform: scale(1); opacity: 1; }
+  }
+  @keyframes pulseSubtle {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+  }
+  @keyframes shake {
+    10%, 90% { transform: translate3d(-1px, 0, 0); }
+    20%, 80% { transform: translate3d(2px, 0, 0); }
+    30%, 50%, 70% { transform: translate3d(-3px, 0, 0); }
+    40%, 60% { transform: translate3d(3px, 0, 0); }
+  }
+  @keyframes floatEmoji {
+    0% { transform: translateY(0) scale(0.5); opacity: 0; }
+    15% { transform: translateY(-20px) scale(1.2); opacity: 1; }
+    100% { transform: translateY(-100px) scale(0.8); opacity: 0; }
+  }
+}
+
+@layer base {
+  body {
+    background-color: var(--bg-color);
+    color: var(--text-color);
+    transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+    font-family: 'Outfit', 'Inter', sans-serif;
+    @apply antialiased overflow-x-hidden;
+  }
+
+  /* Custom Scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: var(--border-color);
+    border-radius: 9999px;
+    transition: background-color 0.2s;
+  }
+}
+
+/* Glassmorphism Panels */
+.glass-panel {
+  background-color: rgba(var(--panel-color), 0.7);
+  backdrop-filter: blur(12px);
+  border-color: var(--border-color);
+  @apply border;
+}
+
+.glass-card {
+  background-color: var(--panel-color);
+  border-color: var(--border-color);
+  @apply border shadow-xs hover:shadow-md transition-all duration-300;
+}
+
+/* Sudoku Grid specific styles */
+.sudoku-cell {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 500;
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.shaking {
+  animation: shake 0.4s cubic-bezier(.36,.07,.19,.97) both;
+}
+
+/* Interactive Floating emojis */
+.emoji-float {
+  position: absolute;
+  pointer-events: none;
+  font-size: 2.5rem;
+  animation: floatEmoji 1.5s ease-out forwards;
+}
+
+/* Cyberpunk Neon Theme Selected Cell text color override */
+html.theme-cyberpunk .sudoku-cell.bg-cell-selected,
+html.theme-cyberpunk .sudoku-cell.bg-cell-selected\/60 {
+  color: #39ff14 !important; /* Force electric neon green text for high readability */
+}
+
+/* Speaking Pulse Avatar voice indicator animation */
+.speaking-pulse-avatar::before {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 9999px;
+  border: 2.5px solid var(--accent-color);
+  animation: speakingPulse 1.8s infinite ease-in-out;
+  pointer-events: none;
+}
+
+@keyframes speakingPulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+  50% {
+    transform: scale(1.2);
+    opacity: 0.4;
+  }
+  100% {
+    transform: scale(1.35);
+    opacity: 0;
+  }
+}
+
+/* Styling option tags inside selects to guarantee high-contrast readability in all themes */
+select option {
+  background-color: var(--panel-color) !important;
+  color: var(--text-color) !important;
+}
