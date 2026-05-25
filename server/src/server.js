@@ -81,6 +81,7 @@ function getSanitizedRoom(room) {
 wss.on('connection', (ws) => {
   let currentPlayer = null;
   let currentRoomCode = null;
+  let registeredPlayerId = null;
 
   ws.on('message', (message) => {
     try {
