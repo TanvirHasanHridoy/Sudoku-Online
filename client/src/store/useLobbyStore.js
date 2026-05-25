@@ -117,7 +117,8 @@ export const useLobbyStore = create((set, get) => ({
     const activeWs = get().ws;
     if (activeWs && activeWs.readyState <= 1) return; // Already connecting or connected
 
-    const socket = new WebSocket('ws://localhost:3001');
+    const wsUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:3001';
+    const socket = new WebSocket(wsUrl);
     set({ ws: socket }); // Store immediately to prevent duplicate connections!
 
     socket.onopen = () => {
