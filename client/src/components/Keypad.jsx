@@ -8,12 +8,13 @@ export default function Keypad({
   canUndo = false,
   canRedo = false,
   hintsRemaining = 1,
-  completedNumbers = new Set()
+  completedNumbers = new Set(),
+  numberCounts = Array(10).fill(0)
 }) {
   const numberButtons = [1, 2, 3, 4, 5, 6, 7, 8, 9];
 
   return (
-    <div className="w-full max-w-[460px] flex flex-col gap-4 mt-6">
+    <div className="w-full max-w-[460px] flex flex-col gap-4 mt-4 sm:mt-6">
       {/* Action Controls */}
       <div className="grid grid-cols-5 gap-2">
         <button
@@ -91,25 +92,31 @@ export default function Keypad({
       {/* Numeric Pad */}
       <div className="grid grid-cols-9 gap-1.5">
         {numberButtons.map((num) => {
-          const isCompleted = completedNumbers.has(num);
+          const count = numberCounts[num] || 0;
+          const isCompleted = completedNumbers.has(num) || count >= 9;
           return (
             <button
               key={num}
               onClick={() => !isCompleted && onNumberClick(num)}
               disabled={isCompleted}
               className={`
-                aspect-square rounded-xl text-lg font-bold flex items-center justify-center relative
-                transition-all duration-150
+                aspect-square rounded-xl flex flex-col items-center justify-center relative
+                transition-all duration-150 py-1
                 ${isCompleted
                   ? 'bg-accent-glow/20 border-dashed border-border-custom/50 text-text-custom/10 cursor-not-allowed opacity-20 pointer-events-none shadow-none'
                   : 'glass-card border border-border-custom text-text-custom hover:bg-accent-glow hover:text-accent-custom hover:border-accent-custom active:scale-90'
                 }
               `}
-              title={isCompleted ? `Number ${num} is complete!` : `Insert ${num}`}
+              title={isCompleted ? `Number ${num} is complete!` : `Insert ${num} (${count}/9 completed)`}
             >
-              <span>{num}</span>
+              <span className={`font-bold leading-none ${isCompleted ? 'text-lg' : 'text-[15px]'}`}>{num}</span>
+              {!isCompleted && (
+                <span className="text-[8px] font-sans font-semibold mt-0.5 opacity-60 leading-none">
+                  {count}/9
+                </span>
+              )}
               {isCompleted && (
-                <span className="absolute top-1.5 right-1.5 text-[9px] font-extrabold text-accent-custom animate-pulse-subtle">
+                <span className="absolute top-1 right-1 text-[9px] font-extrabold text-accent-custom animate-pulse-subtle">
                   ✓
                 </span>
               )}

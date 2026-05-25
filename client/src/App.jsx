@@ -33,6 +33,7 @@ import {
 import { QRCodeSVG } from "qrcode.react";
 import SudokuGrid from "./components/SudokuGrid";
 import Keypad from "./components/Keypad";
+import { playSound } from "./utils/audio";
 import { useGameStore } from "./store/useGameStore";
 import { useLobbyStore } from "./store/useLobbyStore";
 import { useSocialStore } from "./store/useSocialStore";
@@ -435,6 +436,94 @@ export default function App() {
     }
   }, [isMeSpectator, room?.players, gameStatus, spectatingPlayerId, startSpectating]);
 
+  // Zero-dependency chiptune audio retro synthesizer triggers
+  const prevBoardRef = useRef(board);
+  const prevStrikesRef = useRef(strikes);
+  const prevGameStatusRef = useRef(gameStatus);
+  const prevHintsRemainingRef = useRef(hintsRemaining);
+
+  useEffect(() => {
+    // 1. Check Game Status Changes (Start, Win, Lose)
+    if (gameStatus !== prevGameStatusRef.current) {
+      if (gameStatus === 'playing' && prevGameStatusRef.current !== 'playing') {
+        playSound.start(soundEnabled);
+      } else if (gameStatus === 'won') {
+        playSound.win(soundEnabled);
+      } else if (gameStatus === 'lost') {
+        playSound.lose(soundEnabled);
+      }
+      prevGameStatusRef.current = gameStatus;
+    }
+
+    // 2. Check Strikes / Mistakes
+    if (strikes > prevStrikesRef.current) {
+      playSound.mistake(soundEnabled);
+    }
+    prevStrikesRef.current = strikes;
+
+    // 3. Check Hints
+    if (hintsRemaining < prevHintsRemainingRef.current) {
+      playSound.hint(soundEnabled);
+    }
+    prevHintsRemainingRef.current = hintsRemaining;
+
+    // 4. Check Board for Correct Placements
+    if (board && solution && board.length === 9 && solution.length === 9) {
+      let correctPlaced = false;
+      for (let r = 0; r < 9; r++) {
+        for (let c = 0; c < 9; c++) {
+          const currentVal = board[r][c];
+          const prevVal = prevBoardRef.current?.[r]?.[c] ?? null;
+          const solVal = solution[r][c];
+          
+          if (currentVal !== prevVal && currentVal === solVal && currentVal !== null) {
+            correctPlaced = true;
+          }
+        }
+      }
+      
+      // Play correct chime if a cell was placed correctly, strikes didn't increase, and game is active
+      if (correctPlaced && strikes === prevStrikesRef.current && gameStatus === 'playing') {
+        playSound.correct(soundEnabled);
+      }
+    }
+    prevBoardRef.current = board;
+  }, [board, strikes, gameStatus, hintsRemaining, solution, soundEnabled]);
+
+  // Track multiplayer opponents for correct moves and strikes to play chiptune warnings
+  const prevOpponentsStateRef = useRef({}); // { [playerId]: { progress, strikes } }
+
+  useEffect(() => {
+    if (!room || !room.players || !room.isGameStarted || gameStatus !== 'playing') {
+      prevOpponentsStateRef.current = {};
+      return;
+    }
+
+    const currentOpponentsState = {};
+    room.players.forEach((p) => {
+      if (p.id === myPlayerId || p.isSpectator) return;
+      
+      const prev = prevOpponentsStateRef.current[p.id];
+      if (prev) {
+        // If progress increased
+        if (p.progress > prev.progress) {
+          playSound.opponentCorrect(soundEnabled);
+        }
+        // If strikes increased
+        if (p.strikes > prev.strikes) {
+          playSound.opponentStrike(soundEnabled);
+        }
+      }
+      
+      currentOpponentsState[p.id] = {
+        progress: p.progress,
+        strikes: p.strikes
+      };
+    });
+
+    prevOpponentsStateRef.current = currentOpponentsState;
+  }, [room?.players, room?.isGameStarted, gameStatus, myPlayerId, soundEnabled]);
+
   // Format timer
   const formatTime = (secs) => {
     const m = Math.floor(secs / 60)
@@ -451,9 +540,9 @@ export default function App() {
     setActiveView("game");
   };
 
-  // Calculate completed numbers 1-9 (placed correctly exactly 9 times)
-  const getCompletedNumbers = () => {
-    if (!solution || solution.length === 0) return new Set();
+  // Calculate solved counts for keypad numbers 1-9 (correctly placed + clue numbers)
+  const getNumberCounts = () => {
+    if (!solution || solution.length === 0) return Array(10).fill(0);
     const counts = Array(10).fill(0);
     board.forEach((row, r) => {
       row.forEach((val, c) => {
@@ -462,7 +551,13 @@ export default function App() {
         }
       });
     });
+    return counts;
+  };
 
+  // Calculate completed numbers 1-9 (placed correctly exactly 9 times)
+  const getCompletedNumbers = () => {
+    if (!solution || solution.length === 0) return new Set();
+    const counts = getNumberCounts();
     const completed = new Set();
     for (let num = 1; num <= 9; num++) {
       if (counts[num] === 9) {
@@ -745,7 +840,7 @@ export default function App() {
  
       {/* Main Container */}
       {activeView === "home" && (
-        <main className="max-w-6xl mx-auto px-4 py-6 md:py-10 grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+        <main className="max-w-6xl mx-auto px-2 sm:px-4 py-6 md:py-10 grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
           {/* LEFT PANEL: Player Profile */}
           <section className="lg:col-span-3 flex flex-col gap-4">
             {/* Avatar Picker */}
@@ -1277,7 +1372,7 @@ export default function App() {
         </main>
       )}
       {activeView !== "home" && (
-        <main className="max-w-6xl mx-auto px-4 py-6 md:py-10 grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+        <main className="max-w-6xl mx-auto px-2 sm:px-4 py-6 md:py-10 grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
           {/* LEFT COLUMN: The Sudoku Puzzle Area (Cols 1 to 7) */}
           <section className="lg:col-span-7 flex flex-col items-center relative">
             {/* PAUSED MASK SCREEN */}
@@ -1305,28 +1400,51 @@ export default function App() {
             )}
 
             {/* Game controls header */}
-            <div className="w-full max-w-[460px] flex items-center justify-between mb-4 px-2">
-              <div className="flex items-center gap-2">
-                {/* Difficulty selector (locked once multiplayer room is active) */}
-                <select
-                  value={room ? room.difficulty : difficulty}
-                  disabled={!!room}
-                  onChange={(e) => startNewGame(e.target.value)}
-                  className="text-xs font-bold px-3 py-1.5 bg-accent-glow border border-border-custom rounded-xl focus:outline-none cursor-pointer text-text-custom disabled:opacity-75 disabled:cursor-not-allowed transition-all"
-                >
-                  <option value="beginner">Beginner</option>
-                  <option value="easy">Easy Diff</option>
-                  <option value="medium">Medium Diff</option>
-                  <option value="hard">Hard Diff</option>
-                  <option value="expert">Expert Diff</option>
-                </select>
+            <div className="w-full max-w-[460px] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-0 mb-4 px-2">
+              {/* Row 1: Info (Diff, Timer, and Lives) */}
+              <div className="flex items-center justify-between sm:justify-start gap-2.5 w-full sm:w-auto">
+                <div className="flex items-center gap-2">
+                  {/* Difficulty selector (locked once multiplayer room is active) */}
+                  <select
+                    value={room ? room.difficulty : difficulty}
+                    disabled={!!room}
+                    onChange={(e) => startNewGame(e.target.value)}
+                    className="text-xs font-bold px-2.5 py-1.5 bg-accent-glow border border-border-custom rounded-xl focus:outline-none cursor-pointer text-text-custom disabled:opacity-75 disabled:cursor-not-allowed transition-all"
+                  >
+                    <option value="beginner">Beginner</option>
+                    <option value="easy">Easy Diff</option>
+                    <option value="medium">Medium Diff</option>
+                    <option value="hard">Hard Diff</option>
+                    <option value="expert">Expert Diff</option>
+                  </select>
 
-                {/* Timer indicator — fixed width so it never pushes other buttons */}
-                <span className="text-xs font-bold px-3 py-1.5 bg-accent-glow border border-border-custom rounded-xl flex items-center gap-1 min-w-[70px] justify-center tabular-nums">
-                  <Timer size={13} className="text-accent-custom shrink-0" />
-                  {formatTime(seconds)}
-                </span>
+                  {/* Timer indicator — fixed width so it never pushes other buttons */}
+                  <span className="text-xs font-bold px-2.5 py-1.5 bg-accent-glow border border-border-custom rounded-xl flex items-center gap-1 min-w-[70px] justify-center tabular-nums">
+                    <Timer size={13} className="text-accent-custom shrink-0" />
+                    {formatTime(seconds)}
+                  </span>
+                </div>
 
+                {/* Lives system */}
+                <div className="flex items-center gap-1" title="Lives Remaining">
+                  {[1, 2, 3].map((heartIndex) => (
+                    <div
+                      key={heartIndex}
+                      className={`w-2.5 h-2.5 rounded-full transition-colors duration-300 ${
+                        heartIndex <= maxStrikes - strikes
+                          ? "bg-rose-500 shadow-xs shadow-rose-500/20"
+                          : "border border-dashed border-border-custom opacity-40"
+                      }`}
+                    />
+                  ))}
+                  <span className="text-xs font-bold font-sans ml-1 opacity-70">
+                    Lives
+                  </span>
+                </div>
+              </div>
+
+              {/* Row 2: Action Buttons (Pause & Exit) */}
+              <div className="flex items-center justify-end gap-2 w-full sm:w-auto border-t border-border-custom/30 sm:border-0 pt-2 sm:pt-0">
                 {/* Pause button for multiplayer */}
                 {room && room.isGameStarted && (
                   <button
@@ -1346,29 +1464,12 @@ export default function App() {
                       setSeconds(0);
                     });
                   }}
-                  className="p-1.5 rounded-xl bg-rose-500/10 border border-rose-500/30 hover:bg-rose-500 hover:text-white text-rose-500 transition-all active:scale-95 text-[10px] font-bold flex items-center gap-1"
+                  className="px-3 py-1.5 rounded-xl bg-rose-500/10 border border-rose-500/30 hover:bg-rose-500 hover:text-white text-rose-500 transition-all active:scale-95 text-[10px] font-bold flex items-center gap-1"
                   title="Exit to Home"
                 >
                   <X size={13} />
-                  Exit
+                  Exit Game
                 </button>
-              </div>
-
-              {/* Lives system */}
-              <div className="flex items-center gap-1" title="Lives Remaining">
-                {[1, 2, 3].map((heartIndex) => (
-                  <div
-                    key={heartIndex}
-                    className={`w-2.5 h-2.5 rounded-full transition-colors duration-300 ${
-                      heartIndex <= maxStrikes - strikes
-                        ? "bg-rose-500 shadow-xs shadow-rose-500/20"
-                        : "border border-dashed border-border-custom opacity-40"
-                    }`}
-                  />
-                ))}
-                <span className="text-xs font-bold font-sans ml-1 opacity-70">
-                  Lives
-                </span>
               </div>
             </div>
 
@@ -1457,6 +1558,7 @@ export default function App() {
               canRedo={redoStack.length > 0}
               hintsRemaining={hintsRemaining}
               completedNumbers={completedNumbers}
+              numberCounts={getNumberCounts()}
               disabled={!!(spectatingPlayerId || isMeSpectator)}
             />
           </section>
