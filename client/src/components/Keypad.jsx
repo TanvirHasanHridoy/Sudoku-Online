@@ -9,9 +9,23 @@ export default function Keypad({
   canRedo = false,
   hintsRemaining = 1,
   completedNumbers = new Set(),
-  numberCounts = Array(10).fill(0)
+  numberCounts = Array(10).fill(0),
+  isScrambled = false
 }) {
-  const numberButtons = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+  const [shuffledButtons, setShuffledButtons] = React.useState([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+
+  React.useEffect(() => {
+    if (isScrambled) {
+      const arr = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      setShuffledButtons(arr);
+    } else {
+      setShuffledButtons([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    }
+  }, [isScrambled]);
 
   return (
     <div className="w-full max-w-[460px] flex flex-col gap-4 mt-4 sm:mt-6">
@@ -91,7 +105,7 @@ export default function Keypad({
 
       {/* Numeric Pad */}
       <div className="grid grid-cols-9 gap-1.5">
-        {numberButtons.map((num) => {
+        {shuffledButtons.map((num) => {
           const count = numberCounts[num] || 0;
           const isCompleted = completedNumbers.has(num) || count >= 9;
           return (
@@ -101,18 +115,25 @@ export default function Keypad({
               disabled={isCompleted}
               className={`
                 aspect-square rounded-xl flex flex-col items-center justify-center relative
-                transition-all duration-150 py-1
+                transition-all duration-300 py-1
                 ${isCompleted
                   ? 'bg-accent-glow/20 border-dashed border-border-custom/50 text-text-custom/10 cursor-not-allowed opacity-20 pointer-events-none shadow-none'
-                  : 'glass-card border border-border-custom text-text-custom hover:bg-accent-glow hover:text-accent-custom hover:border-accent-custom active:scale-90'
+                  : isScrambled
+                    ? 'bg-purple-950/20 border-2 border-purple-500/85 text-purple-400 font-sans shadow-lg shadow-purple-500/10 hover:border-purple-400 active:scale-90 animate-pulse-subtle'
+                    : 'glass-card border border-border-custom text-text-custom hover:bg-accent-glow hover:text-accent-custom hover:border-accent-custom active:scale-90'
                 }
               `}
-              title={isCompleted ? `Number ${num} is complete!` : `Insert ${num} (${count}/9 completed)`}
+              title={isCompleted ? `Number ${num} is complete!` : isScrambled ? `Scrambled key ${num}` : `Insert ${num} (${count}/9 completed)`}
             >
               <span className={`font-bold leading-none ${isCompleted ? 'text-lg' : 'text-[15px]'}`}>{num}</span>
-              {!isCompleted && (
+              {!isCompleted && !isScrambled && (
                 <span className="text-[8px] font-sans font-semibold mt-0.5 opacity-60 leading-none">
                   {count}/9
+                </span>
+              )}
+              {!isCompleted && isScrambled && (
+                <span className="text-[7px] font-sans font-black text-purple-400 mt-0.5 leading-none animate-pulse">
+                  GLITCH
                 </span>
               )}
               {isCompleted && (

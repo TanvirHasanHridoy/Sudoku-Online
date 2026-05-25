@@ -64,6 +64,7 @@ function getSanitizedRoom(room) {
       isReady: p.isReady,
       progress: p.progress,
       strikes: p.strikes,
+      mana: p.mana || 0,
       isSpectator: p.isSpectator,
       isVoiceJoined: !!p.isVoiceJoined,
       isVoiceMuted: !!p.isVoiceMuted
@@ -92,6 +93,7 @@ wss.on('connection', (ws) => {
             isReady: false,
             progress: 0,
             strikes: 0,
+            mana: 0,
             isSpectator: false,
             socket: ws
           };
@@ -162,6 +164,7 @@ wss.on('connection', (ws) => {
             isReady: forcedSpectator ? false : false,
             progress: 0,
             strikes: 0,
+            mana: 0,
             isSpectator: forcedSpectator,
             socket: ws
           };
@@ -240,6 +243,7 @@ wss.on('connection', (ws) => {
           room.isPaused = false;
           room.pauseVotes = {};
           room.playAgainVotes = {};
+          room.players.forEach(p => { p.progress = 0; p.strikes = 0; p.mana = 0; });
 
           broadcastToRoom(currentRoomCode, {
             type: 'GAME_STARTED',
@@ -256,19 +260,23 @@ wss.on('connection', (ws) => {
           const room = rooms.get(currentRoomCode);
           if (!room || !currentPlayer) return;
 
-          const { progress, strikes } = payload;
+          const { progress, strikes, mana } = payload;
           const wasEliminated = currentPlayer.strikes < 3 && strikes >= 3;
           const wasFinished = currentPlayer.progress < 100 && progress >= 100;
 
           currentPlayer.progress = progress;
           currentPlayer.strikes = strikes;
+          if (mana !== undefined) {
+            currentPlayer.mana = mana;
+          }
 
           broadcastToRoom(currentRoomCode, {
             type: 'PROGRESS_UPDATED',
             payload: {
               playerId: currentPlayer.id,
               progress,
-              strikes
+              strikes,
+              mana: currentPlayer.mana || 0
             }
           });
 
@@ -502,7 +510,7 @@ wss.on('connection', (ws) => {
               });
               
               // Reset player readiness to vote cycle reset
-              room.players.forEach(p => { p.isReady = false; p.progress = 0; p.strikes = 0; });
+              room.players.forEach(p => { p.isReady = false; p.progress = 0; p.strikes = 0; p.mana = 0; });
               room.isGameStarted = false;
               room.board = null;
               room.solution = null;
@@ -756,6 +764,61 @@ wss.on('connection', (ws) => {
               payload: { room: getSanitizedRoom(room) }
             });
           }
+          break;
+        }
+
+        case 'TRIGGER_ABILITY': {
+          const { abilityType } = payload;
+          if (!abilityType) return;
+
+          const room = rooms.get(currentRoomCode);
+          if (!room || !currentPlayer || !room.isGameStarted || room.isPaused) return;
+
+          const playerInRoom = room.players.find(p => p.id === currentPlayer.id);
+          if (!playerInRoom) return;
+
+          // Deduct cost authoritatively
+          const COSTS = {
+            cleanse: 35,
+            ink: 65,
+            scramble: 90
+          };
+
+          const cost = COSTS[abilityType] || 0;
+          if (playerInRoom.mana < cost) {
+            ws.send(JSON.stringify({
+              type: 'ERROR',
+              payload: { message: `Insufficient mana to trigger ${abilityType}!` }
+            }));
+            return;
+          }
+
+          playerInRoom.mana -= cost;
+
+          // Send confirmation of deducted mana to sender
+          ws.send(JSON.stringify({
+            type: 'ABILITY_CONFIRMED',
+            payload: {
+              abilityType,
+              mana: playerInRoom.mana
+            }
+          }));
+
+          // Broadcast to room opponents (applying to them)
+          broadcastToRoom(currentRoomCode, {
+            type: 'ABILITY_APPLIED',
+            payload: {
+              senderId: currentPlayer.id,
+              senderName: currentPlayer.name,
+              abilityType
+            }
+          }, currentPlayer.id); // Exclude the sender!
+
+          // Broadcast updated room state so sidebars update mana pools
+          broadcastToRoom(currentRoomCode, {
+            type: 'ROOM_UPDATED',
+            payload: { room: getSanitizedRoom(room) }
+          });
           break;
         }
 

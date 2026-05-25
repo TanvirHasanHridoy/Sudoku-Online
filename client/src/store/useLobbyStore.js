@@ -53,6 +53,13 @@ export const useLobbyStore = create((set, get) => ({
   spectatedPlayerBoardState: null, // { board, notes, selectedCell }
   myActiveSpectators: [], // [ "PlayerName1", "PlayerName2", ... ]
 
+  // Phase 12 Sabotage & Power-up States
+  myMana: 0,
+  myStreak: 0,
+  myShieldActive: false,
+  isScrambled: false,
+  activeInkSplashes: [], // [ { id, top, left, size, opacity } ]
+
   // Actions
   setPlayerName: (name) => {
     const trimmed = name.trim();
@@ -151,7 +158,12 @@ export const useLobbyStore = create((set, get) => ({
               pauseRequester: null,
               spectatingPlayerId: null,
               spectatedPlayerBoardState: null,
-              myActiveSpectators: []
+              myActiveSpectators: [],
+              myMana: 0,
+              myStreak: 0,
+              myShieldActive: false,
+              isScrambled: false,
+              activeInkSplashes: []
             });
             
             // If the game is already started in this room, load the board!
@@ -184,7 +196,12 @@ export const useLobbyStore = create((set, get) => ({
               pauseRequester: null,
               spectatingPlayerId: null,
               spectatedPlayerBoardState: null,
-              myActiveSpectators: []
+              myActiveSpectators: [],
+              myMana: 0,
+              myStreak: 0,
+              myShieldActive: false,
+              isScrambled: false,
+              activeInkSplashes: []
             });
             // Initialize local Sudoku board with shared dynamic board
             const { difficulty } = payload.room;
@@ -198,7 +215,7 @@ export const useLobbyStore = create((set, get) => ({
               if (!state.room) return {};
               const updatedPlayers = state.room.players.map(p => 
                 p.id === payload.playerId 
-                  ? { ...p, progress: payload.progress, strikes: payload.strikes } 
+                  ? { ...p, progress: payload.progress, strikes: payload.strikes, mana: payload.mana || 0 } 
                   : p
               );
               return { room: { ...state.room, players: updatedPlayers } };
@@ -329,8 +346,68 @@ export const useLobbyStore = create((set, get) => ({
               showPlayAgainVoteModal: false,
               spectatingPlayerId: null,
               spectatedPlayerBoardState: null,
-              myActiveSpectators: []
+              myActiveSpectators: [],
+              myMana: 0,
+              myStreak: 0,
+              myShieldActive: false,
+              isScrambled: false,
+              activeInkSplashes: []
             });
+            break;
+          }
+
+          case 'ABILITY_CONFIRMED': {
+            const { abilityType, mana } = payload;
+            set({ myMana: mana });
+            get().addToast(`✨ Casted ${abilityType.toUpperCase()}!`, 'success');
+            
+            // If it is cleanse, activate local shield immediately
+            if (abilityType === 'cleanse') {
+              set({ myShieldActive: true });
+              get().cleanseAllSabotages();
+              
+              // Clear shield after 5 seconds
+              setTimeout(() => {
+                set({ myShieldActive: false });
+                get().addToast('Shield expired.', 'info');
+              }, 5000);
+            }
+            break;
+          }
+
+          case 'ABILITY_APPLIED': {
+            const { senderName, abilityType } = payload;
+            
+            // Check if player has an active Cleanse Shield
+            if (get().myShieldActive) {
+              get().addToast(`🛡️ Blocked ${senderName}'s ${abilityType} attack!`, 'success');
+              break;
+            }
+
+            get().addToast(`⚠️ Incoming attack: ${senderName} casted ${abilityType}!`, 'error');
+
+            if (abilityType === 'ink') {
+              // Generate 3 random ink splashes on the grid
+              const splashes = [];
+              for (let i = 0; i < 3; i++) {
+                splashes.push({
+                  id: 'ink_' + Math.random().toString(36).substring(2, 9),
+                  top: Math.floor(Math.random() * 65) + 10, // 10% to 75% height
+                  left: Math.floor(Math.random() * 65) + 10, // 10% to 75% width
+                  size: Math.floor(Math.random() * 40) + 70, // 70px to 110px size
+                  opacity: 0.95
+                });
+              }
+              set({ activeInkSplashes: splashes });
+            } else if (abilityType === 'scramble') {
+              set({ isScrambled: true });
+              
+              // Scramble keypad for 7 seconds
+              setTimeout(() => {
+                set({ isScrambled: false });
+                get().addToast('Keypad restored.', 'info');
+              }, 7000);
+            }
             break;
           }
 
@@ -473,13 +550,13 @@ export const useLobbyStore = create((set, get) => ({
     }));
   },
 
-  sendProgress: (progress, strikes) => {
-    const { ws, room } = get();
+  sendProgress: (progress, strikes, mana) => {
+    const { ws, room, myMana } = get();
     if (!ws || ws.readyState !== 1 || !room) return;
 
     ws.send(JSON.stringify({
       type: 'UPDATE_PROGRESS',
-      payload: { progress, strikes }
+      payload: { progress, strikes, mana: mana !== undefined ? mana : myMana }
     }));
   },
 
@@ -597,6 +674,11 @@ export const useLobbyStore = create((set, get) => ({
       spectatingPlayerId: null,
       spectatedPlayerBoardState: null,
       myActiveSpectators: [],
+      myMana: 0,
+      myStreak: 0,
+      myShieldActive: false,
+      isScrambled: false,
+      activeInkSplashes: []
     });
 
     if (typeof onHome === 'function') onHome();
@@ -863,5 +945,61 @@ export const useLobbyStore = create((set, get) => ({
         payload: {}
       }));
     }
+  },
+
+  // Phase 12 Sabotage & Power-up Actions
+  addMana: (amount) => {
+    const nextMana = Math.max(0, Math.min(100, get().myMana + amount));
+    set({ myMana: nextMana });
+
+    // Sync to server if in active multiplayer game
+    const gameStore = useGameStore.getState();
+    const solution = gameStore.solution;
+    if (solution && solution.length > 0) {
+      let correctCount = 0;
+      gameStore.board.forEach((row, r) => {
+        row.forEach((val, c) => {
+          if (val !== null && val === solution[r][c]) {
+            correctCount++;
+          }
+        });
+      });
+      const progress = Math.round((correctCount / 81) * 100);
+      get().sendProgress(progress, gameStore.strikes, nextMana);
+    }
+  },
+
+  resetStreak: () => set({ myStreak: 0 }),
+  incrementStreak: () => set((state) => ({ myStreak: state.myStreak + 1 })),
+
+  triggerAbility: (abilityType) => {
+    const { ws, isConnected, room } = get();
+    if (!ws || !isConnected || ws.readyState !== 1 || !room) return;
+
+    ws.send(JSON.stringify({
+      type: 'TRIGGER_ABILITY',
+      payload: { abilityType }
+    }));
+  },
+
+  wipeInkSplatter: (blobId) => {
+    set((state) => {
+      const updated = state.activeInkSplashes.map((splash) => {
+        if (splash.id === blobId) {
+          const nextOpacity = splash.opacity - 0.33;
+          return { ...splash, opacity: nextOpacity };
+        }
+        return splash;
+      }).filter(s => s.opacity > 0.05);
+
+      return { activeInkSplashes: updated };
+    });
+  },
+
+  cleanseAllSabotages: () => {
+    set({
+      activeInkSplashes: [],
+      isScrambled: false
+    });
   }
 }));

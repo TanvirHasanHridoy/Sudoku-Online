@@ -33,6 +33,7 @@ import {
 import { QRCodeSVG } from "qrcode.react";
 import SudokuGrid from "./components/SudokuGrid";
 import Keypad from "./components/Keypad";
+import SabotageOverlay from "./components/SabotageOverlay";
 import { playSound } from "./utils/audio";
 import { useGameStore } from "./store/useGameStore";
 import { useLobbyStore } from "./store/useLobbyStore";
@@ -159,6 +160,18 @@ export default function App() {
     kickPlayer,
     selectedAvatar,
     setSelectedAvatar,
+    // Phase 12 Sabotage states & actions
+    myMana,
+    myStreak,
+    myShieldActive,
+    isScrambled,
+    activeInkSplashes,
+    addMana,
+    resetStreak,
+    incrementStreak,
+    triggerAbility,
+    wipeInkSplatter,
+    cleanseAllSabotages
   } = useLobbyStore();
 
   // Zustand Store - Social State
@@ -436,7 +449,7 @@ export default function App() {
     }
   }, [isMeSpectator, room?.players, gameStatus, spectatingPlayerId, startSpectating]);
 
-  // Zero-dependency chiptune audio retro synthesizer triggers
+  // Zero-dependency chiptune audio retro synthesizer triggers & mana additions
   const prevBoardRef = useRef(board);
   const prevStrikesRef = useRef(strikes);
   const prevGameStatusRef = useRef(gameStatus);
@@ -458,6 +471,10 @@ export default function App() {
     // 2. Check Strikes / Mistakes
     if (strikes > prevStrikesRef.current) {
       playSound.mistake(soundEnabled);
+      if (room && room.isGameStarted) {
+        resetStreak();
+        addMana(-15);
+      }
     }
     prevStrikesRef.current = strikes;
 
@@ -485,10 +502,17 @@ export default function App() {
       // Play correct chime if a cell was placed correctly, strikes didn't increase, and game is active
       if (correctPlaced && strikes === prevStrikesRef.current && gameStatus === 'playing') {
         playSound.correct(soundEnabled);
+        if (room && room.isGameStarted) {
+          const nextStreak = myStreak + 1;
+          incrementStreak();
+          const reward = nextStreak === 1 ? 10 : nextStreak === 2 ? 15 : nextStreak === 3 ? 20 : 25;
+          addMana(reward);
+          addToast(`🔥 Streak x${nextStreak}! +${reward} Mana`, 'success');
+        }
       }
     }
     prevBoardRef.current = board;
-  }, [board, strikes, gameStatus, hintsRemaining, solution, soundEnabled]);
+  }, [board, strikes, gameStatus, hintsRemaining, solution, soundEnabled, room?.isGameStarted, myStreak, incrementStreak, resetStreak, addMana, addToast]);
 
   // Track multiplayer opponents for correct moves and strikes to play chiptune warnings
   const prevOpponentsStateRef = useRef({}); // { [playerId]: { progress, strikes } }
@@ -1547,7 +1571,95 @@ export default function App() {
                 shakingCell={(spectatingPlayerId || isMeSpectator) ? null : shakingCell}
                 isSpectatingMode={!!(spectatingPlayerId || isMeSpectator)}
               />
+              {room && room.isGameStarted && !isMeSpectator && !spectatingPlayerId && (
+                <SabotageOverlay splashes={activeInkSplashes} onWipe={wipeInkSplatter} />
+              )}
             </div>
+
+            {/* Phase 12 Sabotage & Power-up Control Panel */}
+            {room && room.isGameStarted && !isMeSpectator && !spectatingPlayerId && (
+              <div className="w-full max-w-[460px] glass-panel p-3.5 rounded-2xl border border-border-custom/50 flex flex-col gap-3 mt-4 animate-scale-in">
+                <div className="flex items-center justify-between text-xs font-bold font-sans uppercase tracking-wider">
+                  <span className="flex items-center gap-1.5 text-accent-custom animate-pulse">
+                    ⚡ Mana Reactor
+                  </span>
+                  <span className="text-text-custom/70 tabular-nums">
+                    {myMana} / 100
+                  </span>
+                </div>
+                
+                {/* Horizontal Neon Mana Bar */}
+                <div className="h-4 bg-accent-glow/20 rounded-full border border-border-custom overflow-hidden relative shadow-inner w-full">
+                  <div 
+                    className="bg-gradient-to-r from-cyan-400 to-indigo-500 h-full rounded-full transition-all duration-300 animate-pulse-slow shadow-lg shadow-cyan-500/20" 
+                    style={{ width: `${myMana}%` }} 
+                  />
+                  {myMana >= 100 && (
+                    <span className="absolute inset-0 flex items-center justify-center text-[9px] font-extrabold text-white uppercase tracking-widest animate-pulse">
+                      MAX REACTOR CHARGE
+                    </span>
+                  )}
+                </div>
+
+                {/* Circular Ability Power-up Buttons */}
+                <div className="grid grid-cols-3 gap-2 mt-1">
+                  {/* Cleanse Shield */}
+                  <button
+                    onClick={() => myMana >= 35 && triggerAbility('cleanse')}
+                    disabled={myMana < 35}
+                    className={`
+                      flex flex-col items-center justify-center py-2 px-1.5 rounded-xl border transition-all duration-300 select-none relative overflow-hidden active:scale-95
+                      ${myMana >= 35
+                        ? 'bg-teal-500/10 border-teal-500 text-teal-400 hover:bg-teal-500 hover:text-white shadow-md shadow-teal-500/20 cursor-pointer animate-pulse-subtle'
+                        : 'border-border-custom opacity-40 cursor-not-allowed text-text-custom/60'
+                      }
+                      ${myShieldActive ? 'ring-2 ring-teal-500 animate-pulse bg-teal-500 text-white' : ''}
+                    `}
+                    title="Cleanse all sabotages and shields you from the next attack for 5 seconds (Cost: 35)"
+                  >
+                    <span className="text-lg leading-none">🛡️</span>
+                    <span className="text-[10px] font-extrabold mt-1 font-sans">Shield</span>
+                    <span className="text-[8px] opacity-75 font-semibold font-sans mt-0.5">35 Mana</span>
+                  </button>
+
+                  {/* Ink Splash */}
+                  <button
+                    onClick={() => myMana >= 65 && triggerAbility('ink')}
+                    disabled={myMana < 65}
+                    className={`
+                      flex flex-col items-center justify-center py-2 px-1.5 rounded-xl border transition-all duration-300 select-none active:scale-95
+                      ${myMana >= 65
+                        ? 'bg-pink-500/10 border-pink-500 text-pink-400 hover:bg-pink-500 hover:text-white shadow-md shadow-pink-500/20 cursor-pointer animate-pulse-subtle'
+                        : 'border-border-custom opacity-40 cursor-not-allowed text-text-custom/60'
+                      }
+                    `}
+                    title="Splashes obscure neon ink droplets on the opponent's grid (Cost: 65)"
+                  >
+                    <span className="text-lg leading-none">💧</span>
+                    <span className="text-[10px] font-extrabold mt-1 font-sans">Ink Splat</span>
+                    <span className="text-[8px] opacity-75 font-semibold font-sans mt-0.5">65 Mana</span>
+                  </button>
+
+                  {/* Keypad Scramble */}
+                  <button
+                    onClick={() => myMana >= 90 && triggerAbility('scramble')}
+                    disabled={myMana < 90}
+                    className={`
+                      flex flex-col items-center justify-center py-2 px-1.5 rounded-xl border transition-all duration-300 select-none active:scale-95
+                      ${myMana >= 90
+                        ? 'bg-purple-500/10 border-purple-500 text-purple-400 hover:bg-purple-500 hover:text-white shadow-md shadow-purple-500/20 cursor-pointer animate-pulse-subtle'
+                        : 'border-border-custom opacity-40 cursor-not-allowed text-text-custom/60'
+                      }
+                    `}
+                    title="Physically shuffles opponent's keypad buttons randomly (Cost: 90)"
+                  >
+                    <span className="text-lg leading-none">🌀</span>
+                    <span className="text-[10px] font-extrabold mt-1 font-sans">Scramble</span>
+                    <span className="text-[8px] opacity-75 font-semibold font-sans mt-0.5">90 Mana</span>
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Keypad selector */}
             <Keypad
@@ -1559,6 +1671,7 @@ export default function App() {
               hintsRemaining={hintsRemaining}
               completedNumbers={completedNumbers}
               numberCounts={getNumberCounts()}
+              isScrambled={isScrambled}
               disabled={!!(spectatingPlayerId || isMeSpectator)}
             />
           </section>
