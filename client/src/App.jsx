@@ -1576,50 +1576,71 @@ export default function App() {
               )}
             </div>
 
-            {/* Phase 12 Sabotage & Power-up Control Panel */}
+            {/* Phase 12 Sabotage & Power-up Control Panel - Ultra-compact Single-Row Unified Combat Bar */}
             {room && room.isGameStarted && !isMeSpectator && !spectatingPlayerId && (
-              <div className="w-full max-w-[460px] glass-panel p-3.5 rounded-2xl border border-border-custom/50 flex flex-col gap-3 mt-4 animate-scale-in">
-                <div className="flex items-center justify-between text-xs font-bold font-sans uppercase tracking-wider">
-                  <span className="flex items-center gap-1.5 text-accent-custom animate-pulse">
-                    ⚡ Mana Reactor
-                  </span>
-                  <span className="text-text-custom/70 tabular-nums">
-                    {myMana} / 100
-                  </span>
-                </div>
+              <div className="w-full max-w-[460px] glass-panel py-1.5 px-3 rounded-2xl border border-border-custom/50 flex items-center justify-between gap-3 mt-2 animate-scale-in">
                 
-                {/* Horizontal Neon Mana Bar */}
-                <div className="h-4 bg-accent-glow/20 rounded-full border border-border-custom overflow-hidden relative shadow-inner w-full">
-                  <div 
-                    className="bg-gradient-to-r from-cyan-400 to-indigo-500 h-full rounded-full transition-all duration-300 animate-pulse-slow shadow-lg shadow-cyan-500/20" 
-                    style={{ width: `${myMana}%` }} 
-                  />
-                  {myMana >= 100 && (
-                    <span className="absolute inset-0 flex items-center justify-center text-[9px] font-extrabold text-white uppercase tracking-widest animate-pulse">
-                      MAX REACTOR CHARGE
-                    </span>
-                  )}
+                {/* Left Side: Shrunk 32px Circular SVG Mana Reactor Progress Dial */}
+                <div className="flex items-center gap-1.5 shrink-0 select-none">
+                  <div className="relative w-8 h-8 flex items-center justify-center">
+                    <svg className="w-full h-full transform -rotate-90">
+                      <circle
+                        cx="16"
+                        cy="16"
+                        r="13.5"
+                        className="stroke-border-custom opacity-25"
+                        strokeWidth="2.5"
+                        fill="transparent"
+                      />
+                      <circle
+                        cx="16"
+                        cy="16"
+                        r="13.5"
+                        className="stroke-accent-custom transition-all duration-300 ease-out"
+                        strokeWidth="2.5"
+                        fill="transparent"
+                        strokeDasharray={2 * Math.PI * 13.5}
+                        strokeDashoffset={2 * Math.PI * 13.5 * (1 - myMana / 100)}
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                    {/* Centered Raw Count / Gold Lightning Badge */}
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      {myMana >= 100 ? (
+                        <span className="text-xs animate-bounce-slow" title="Max Mana Charge!">⚡</span>
+                      ) : (
+                        <span className="text-[9.5px] font-black font-sans tabular-nums text-text-custom/90 leading-none">
+                          {myMana}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  {/* Slim Inline Indicator */}
+                  <span className="text-[8.5px] font-black tracking-wider text-accent-custom/80 uppercase font-sans">
+                    Mana
+                  </span>
                 </div>
 
-                {/* Circular Ability Power-up Buttons */}
-                <div className="grid grid-cols-3 gap-2 mt-1">
+                {/* Right Side: Micro-Circular Keys (32px) with Floating Cost Badges */}
+                <div className="flex items-center gap-2.5 justify-end flex-1">
                   {/* Cleanse Shield */}
                   <button
                     onClick={() => myMana >= 35 && triggerAbility('cleanse')}
                     disabled={myMana < 35}
                     className={`
-                      flex flex-col items-center justify-center py-2 px-1.5 rounded-xl border transition-all duration-300 select-none relative overflow-hidden active:scale-95
+                      relative w-8 h-8 rounded-full border flex items-center justify-center transition-all duration-300 select-none active:scale-90 hover:scale-105
                       ${myMana >= 35
-                        ? 'bg-teal-500/10 border-teal-500 text-teal-400 hover:bg-teal-500 hover:text-white shadow-md shadow-teal-500/20 cursor-pointer animate-pulse-subtle'
-                        : 'border-border-custom opacity-40 cursor-not-allowed text-text-custom/60'
+                        ? 'bg-teal-500/10 border-teal-500 text-teal-400 hover:bg-teal-500 hover:text-white shadow-[0_0_8px_rgba(20,184,166,0.3)] hover:shadow-[0_0_12px_rgba(20,184,166,0.5)] cursor-pointer animate-pulse-subtle'
+                        : 'border-border-custom opacity-30 cursor-not-allowed text-text-custom/60'
                       }
                       ${myShieldActive ? 'ring-2 ring-teal-500 animate-pulse bg-teal-500 text-white' : ''}
                     `}
-                    title="Cleanse all sabotages and shields you from the next attack for 5 seconds (Cost: 35)"
+                    title="Cleanse all sabotages & shield yourself from the next attack for 5s (Cost: 35)"
                   >
-                    <span className="text-lg leading-none">🛡️</span>
-                    <span className="text-[10px] font-extrabold mt-1 font-sans">Shield</span>
-                    <span className="text-[8px] opacity-75 font-semibold font-sans mt-0.5">35 Mana</span>
+                    <span className="text-xs leading-none">🛡️</span>
+                    <span className="absolute -top-0.5 -right-0.5 bg-teal-500 text-white text-[6.5px] font-black w-3.5 h-3.5 rounded-full flex items-center justify-center shadow-xs border border-bg-custom leading-none">
+                      35
+                    </span>
                   </button>
 
                   {/* Ink Splash */}
@@ -1627,17 +1648,18 @@ export default function App() {
                     onClick={() => myMana >= 65 && triggerAbility('ink')}
                     disabled={myMana < 65}
                     className={`
-                      flex flex-col items-center justify-center py-2 px-1.5 rounded-xl border transition-all duration-300 select-none active:scale-95
+                      relative w-8 h-8 rounded-full border flex items-center justify-center transition-all duration-300 select-none active:scale-90 hover:scale-105
                       ${myMana >= 65
-                        ? 'bg-pink-500/10 border-pink-500 text-pink-400 hover:bg-pink-500 hover:text-white shadow-md shadow-pink-500/20 cursor-pointer animate-pulse-subtle'
-                        : 'border-border-custom opacity-40 cursor-not-allowed text-text-custom/60'
+                        ? 'bg-pink-500/10 border-pink-500 text-pink-400 hover:bg-pink-500 hover:text-white shadow-[0_0_8px_rgba(236,72,153,0.3)] hover:shadow-[0_0_12px_rgba(236,72,153,0.5)] cursor-pointer animate-pulse-subtle'
+                        : 'border-border-custom opacity-30 cursor-not-allowed text-text-custom/60'
                       }
                     `}
                     title="Splashes obscure neon ink droplets on the opponent's grid (Cost: 65)"
                   >
-                    <span className="text-lg leading-none">💧</span>
-                    <span className="text-[10px] font-extrabold mt-1 font-sans">Ink Splat</span>
-                    <span className="text-[8px] opacity-75 font-semibold font-sans mt-0.5">65 Mana</span>
+                    <span className="text-xs leading-none">💧</span>
+                    <span className="absolute -top-0.5 -right-0.5 bg-pink-500 text-white text-[6.5px] font-black w-3.5 h-3.5 rounded-full flex items-center justify-center shadow-xs border border-bg-custom leading-none">
+                      65
+                    </span>
                   </button>
 
                   {/* Keypad Scramble */}
@@ -1645,17 +1667,18 @@ export default function App() {
                     onClick={() => myMana >= 90 && triggerAbility('scramble')}
                     disabled={myMana < 90}
                     className={`
-                      flex flex-col items-center justify-center py-2 px-1.5 rounded-xl border transition-all duration-300 select-none active:scale-95
+                      relative w-8 h-8 rounded-full border flex items-center justify-center transition-all duration-300 select-none active:scale-90 hover:scale-105
                       ${myMana >= 90
-                        ? 'bg-purple-500/10 border-purple-500 text-purple-400 hover:bg-purple-500 hover:text-white shadow-md shadow-purple-500/20 cursor-pointer animate-pulse-subtle'
-                        : 'border-border-custom opacity-40 cursor-not-allowed text-text-custom/60'
+                        ? 'bg-purple-500/10 border-purple-500 text-purple-400 hover:bg-purple-500 hover:text-white shadow-[0_0_8px_rgba(168,85,247,0.3)] hover:shadow-[0_0_12px_rgba(168,85,247,0.5)] cursor-pointer animate-pulse-subtle'
+                        : 'border-border-custom opacity-30 cursor-not-allowed text-text-custom/60'
                       }
                     `}
                     title="Physically shuffles opponent's keypad buttons randomly (Cost: 90)"
                   >
-                    <span className="text-lg leading-none">🌀</span>
-                    <span className="text-[10px] font-extrabold mt-1 font-sans">Scramble</span>
-                    <span className="text-[8px] opacity-75 font-semibold font-sans mt-0.5">90 Mana</span>
+                    <span className="text-xs leading-none">🌀</span>
+                    <span className="absolute -top-0.5 -right-0.5 bg-purple-500 text-white text-[6.5px] font-black w-3.5 h-3.5 rounded-full flex items-center justify-center shadow-xs border border-bg-custom leading-none">
+                      90
+                    </span>
                   </button>
                 </div>
               </div>
