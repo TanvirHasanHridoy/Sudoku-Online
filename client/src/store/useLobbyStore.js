@@ -379,6 +379,7 @@ export const useLobbyStore = create((set, get) => ({
           case 'KICKED': {
             get().addToast(payload.message, 'error');
             localStorage.removeItem('sudoku_active_room_code');
+            get().leaveVoice(); // Clean up WebRTC tracks and connections
             useGameStore.getState().resetPersistedState();
             set({
               room: null,

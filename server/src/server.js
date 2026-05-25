@@ -797,6 +797,14 @@ wss.on('connection', (ws) => {
               type: 'KICKED',
               payload: { message: 'You have been kicked from the lobby by the host.' }
             }));
+            
+            // Close the target player's socket connection after a short delay
+            const targetSocket = targetPlayer.socket;
+            setTimeout(() => {
+              if (targetSocket && targetSocket.readyState === 1) {
+                targetSocket.close();
+              }
+            }, 100);
           }
 
           // Broadcast player left/kicked to remaining players
