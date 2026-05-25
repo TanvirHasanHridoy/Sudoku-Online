@@ -492,13 +492,13 @@ export const useLobbyStore = create((set, get) => ({
     };
   },
 
-  createRoom: (difficulty = 'medium') => {
+  createRoom: (difficulty = 'medium', enableAbilities = true) => {
     const { ws, myPlayerName, myPlayerId, selectedAvatar } = get();
     if (!ws || ws.readyState !== 1) return;
 
     ws.send(JSON.stringify({
       type: 'CREATE_ROOM',
-      payload: { name: myPlayerName, playerId: myPlayerId, difficulty, avatar: selectedAvatar }
+      payload: { name: myPlayerName, playerId: myPlayerId, difficulty, avatar: selectedAvatar, enableAbilities }
     }));
   },
 

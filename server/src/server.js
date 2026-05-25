@@ -53,6 +53,7 @@ function getSanitizedRoom(room) {
   return {
     code: room.code,
     difficulty: room.difficulty,
+    enableAbilities: room.enableAbilities,
     isGameStarted: room.isGameStarted,
     isPaused: room.isPaused,
     pauseVotes: room.pauseVotes,
@@ -83,7 +84,7 @@ wss.on('connection', (ws) => {
 
       switch (type) {
         case 'CREATE_ROOM': {
-          const { name, playerId, difficulty, avatar } = payload;
+          const { name, playerId, difficulty, avatar, enableAbilities } = payload;
           const code = generateRoomCode();
 
           currentPlayer = {
@@ -101,6 +102,7 @@ wss.on('connection', (ws) => {
           const room = {
             code,
             difficulty: difficulty || 'medium',
+            enableAbilities: enableAbilities !== false, // Default to true if undefined
             board: null,
             solution: null,
             isGameStarted: false,
@@ -772,7 +774,7 @@ wss.on('connection', (ws) => {
           if (!abilityType) return;
 
           const room = rooms.get(currentRoomCode);
-          if (!room || !currentPlayer || !room.isGameStarted || room.isPaused) return;
+          if (!room || !currentPlayer || !room.isGameStarted || room.isPaused || !room.enableAbilities) return;
 
           const playerInRoom = room.players.find(p => p.id === currentPlayer.id);
           if (!playerInRoom) return;

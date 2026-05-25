@@ -196,6 +196,7 @@ export default function App() {
   const [friendNameInput, setFriendNameInput] = useState("");
   const [isCopied, setIsCopied] = useState(false);
   const [selectedDifficulty, setSelectedDifficulty] = useState("easy");
+  const [enableAbilities, setEnableAbilities] = useState(true);
   const [seconds, setSeconds] = useState(0);
   const timerRef = useRef(null);
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
@@ -471,7 +472,7 @@ export default function App() {
     // 2. Check Strikes / Mistakes
     if (strikes > prevStrikesRef.current) {
       playSound.mistake(soundEnabled);
-      if (room && room.isGameStarted) {
+      if (room && room.isGameStarted && room.enableAbilities) {
         resetStreak();
         addMana(-15);
       }
@@ -502,7 +503,7 @@ export default function App() {
       // Play correct chime if a cell was placed correctly, strikes didn't increase, and game is active
       if (correctPlaced && strikes === prevStrikesRef.current && gameStatus === 'playing') {
         playSound.correct(soundEnabled);
-        if (room && room.isGameStarted) {
+        if (room && room.isGameStarted && room.enableAbilities) {
           const nextStreak = myStreak + 1;
           incrementStreak();
           const reward = nextStreak === 1 ? 10 : nextStreak === 2 ? 15 : nextStreak === 3 ? 20 : 25;
@@ -512,7 +513,7 @@ export default function App() {
       }
     }
     prevBoardRef.current = board;
-  }, [board, strikes, gameStatus, hintsRemaining, solution, soundEnabled, room?.isGameStarted, myStreak, incrementStreak, resetStreak, addMana, addToast]);
+  }, [board, strikes, gameStatus, hintsRemaining, solution, soundEnabled, room?.isGameStarted, room?.enableAbilities, myStreak, incrementStreak, resetStreak, addMana, addToast]);
 
   // Track multiplayer opponents for correct moves and strikes to play chiptune warnings
   const prevOpponentsStateRef = useRef({}); // { [playerId]: { progress, strikes } }
@@ -1059,9 +1060,24 @@ export default function App() {
                           <option value="expert">Expert</option>
                         </select>
                       </div>
+                      <div className="flex items-center gap-2 mt-2 select-none">
+                        <input
+                          type="checkbox"
+                          id="enableAbilitiesCheck"
+                          checked={enableAbilities}
+                          onChange={(e) => setEnableAbilities(e.target.checked)}
+                          className="w-4 h-4 rounded border-border-custom text-accent-custom bg-accent-glow/20 focus:ring-accent-custom focus:ring-offset-0 cursor-pointer"
+                        />
+                        <label
+                          htmlFor="enableAbilitiesCheck"
+                          className="text-[10px] uppercase font-bold opacity-80 tracking-wider cursor-pointer"
+                        >
+                          Enable Special Abilities (Mana)
+                        </label>
+                      </div>
                       <button
-                        onClick={() => createRoom(selectedDifficulty)}
-                        className="w-full py-3 bg-accent-glow hover:bg-accent-glow/70 border border-border-custom text-text-custom font-bold text-xs rounded-xl active:scale-95 transition-all flex items-center justify-center gap-1.5"
+                        onClick={() => createRoom(selectedDifficulty, enableAbilities)}
+                        className="w-full py-3 bg-accent-glow hover:bg-accent-glow/70 border border-border-custom text-text-custom font-bold text-xs rounded-xl active:scale-95 transition-all flex items-center justify-center gap-1.5 mt-1"
                         disabled={!isConnected}
                       >
                         <PlayCircle size={15} className="text-accent-custom" />
@@ -1571,13 +1587,13 @@ export default function App() {
                 shakingCell={(spectatingPlayerId || isMeSpectator) ? null : shakingCell}
                 isSpectatingMode={!!(spectatingPlayerId || isMeSpectator)}
               />
-              {room && room.isGameStarted && !isMeSpectator && !spectatingPlayerId && (
+              {room && room.isGameStarted && room.enableAbilities && !isMeSpectator && !spectatingPlayerId && (
                 <SabotageOverlay splashes={activeInkSplashes} onWipe={wipeInkSplatter} />
               )}
             </div>
 
             {/* Phase 12 Sabotage & Power-up Control Panel - Ultra-compact Single-Row Unified Combat Bar */}
-            {room && room.isGameStarted && !isMeSpectator && !spectatingPlayerId && (
+            {room && room.isGameStarted && room.enableAbilities && !isMeSpectator && !spectatingPlayerId && (
               <div className="w-full max-w-[460px] glass-panel py-1.5 px-3 rounded-2xl border border-border-custom/50 flex items-center justify-between gap-3 mt-2 animate-scale-in">
                 
                 {/* Left Side: Shrunk 32px Circular SVG Mana Reactor Progress Dial */}
@@ -1788,8 +1804,24 @@ export default function App() {
                         </select>
                       </div>
 
+                      <div className="flex items-center gap-2 select-none py-1">
+                        <input
+                          type="checkbox"
+                          id="enableAbilitiesCheckMobile"
+                          checked={enableAbilities}
+                          onChange={(e) => setEnableAbilities(e.target.checked)}
+                          className="w-4 h-4 rounded border-border-custom text-accent-custom bg-accent-glow/20 focus:ring-accent-custom focus:ring-offset-0 cursor-pointer"
+                        />
+                        <label
+                          htmlFor="enableAbilitiesCheckMobile"
+                          className="text-[10px] uppercase font-bold opacity-80 tracking-wider cursor-pointer"
+                        >
+                          Enable Special Abilities (Mana)
+                        </label>
+                      </div>
+
                       <button
-                        onClick={() => createRoom(selectedDifficulty)}
+                        onClick={() => createRoom(selectedDifficulty, enableAbilities)}
                         className="w-full py-3 bg-accent-glow hover:bg-accent-glow/70 border border-border-custom text-text-custom font-bold text-xs rounded-xl active:scale-95 transition-all flex items-center justify-center gap-1.5"
                         disabled={!isConnected}
                       >
