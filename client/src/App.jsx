@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+﻿import { useState, useEffect, useRef } from "react";
 import {
   Volume2,
   VolumeX,
@@ -889,7 +889,7 @@ export default function App() {
           {/* Supabase Google Auth Widget */}
           {loadingAuth ? (
             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-border-custom bg-panel-custom text-xs">
-              <span className="animate-spin text-accent-custom">⏳</span>
+              <span className="animate-spin text-accent-custom"><RefreshCw size={14} /></span>
               <span className="opacity-70 font-semibold">Loading...</span>
             </div>
           ) : isGuest ? (
@@ -911,7 +911,7 @@ export default function App() {
                   />
                 ) : (
                   <div className="w-5 h-5 rounded-full bg-accent-custom text-white text-[10px] flex items-center justify-center font-bold">
-                    {profile?.display_name?.slice(0, 1).toUpperCase()}
+                    {profile?.display_name?.charAt(0)?.toUpperCase() || "P"}
                   </div>
                 )}
                 <div className="text-[11px] font-bold tracking-tight max-w-[80px] truncate text-text-custom">
@@ -1047,7 +1047,7 @@ export default function App() {
                       className="w-full h-full object-cover"
                     />
                   ) : (
-                    myPlayerName?.charAt(0).toUpperCase() || "M"
+                    myPlayerName?.charAt(0)?.toUpperCase() || "M"
                   )}
                 </div>
                 <div
@@ -1172,7 +1172,7 @@ export default function App() {
                       className="flex items-center gap-2 text-xs"
                     >
                       <div className="w-7 h-7 rounded-full bg-accent-glow border border-border-custom flex items-center justify-center font-bold text-[10px]">
-                        {req.name.charAt(0).toUpperCase()}
+                        {req.name?.charAt(0)?.toUpperCase() || "F"}
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="font-bold truncate leading-tight">
@@ -1219,7 +1219,7 @@ export default function App() {
                   onClick={() => setActiveTab("matchmaker")}
                   className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold transition-all ${activeTab === "matchmaker" ? "bg-panel-custom text-text-custom shadow-xs" : "opacity-60 hover:opacity-100"}`}
                 >
-                  <Award size={16} />
+                  <Trophy size={16} />
                   Matchmaking
                 </button>
               </div>
@@ -1382,7 +1382,7 @@ export default function App() {
                                       ) : isMe ? (
                                         "ME"
                                       ) : (
-                                        p.name.slice(0, 2).toUpperCase()
+                                        p.name?.slice(0, 2)?.toUpperCase() || "P"
                                       )}
                                     </div>
                                     <div>
@@ -1544,7 +1544,7 @@ export default function App() {
                     <div className="space-y-4">
                       <div className="text-center space-y-2">
                         <div className="w-12 h-12 rounded-full bg-accent-glow text-accent-custom mx-auto flex items-center justify-center">
-                          <Award size={24} />
+                          <Trophy size={24} />
                         </div>
                         <h3 className="text-sm font-bold">
                           Queue ELO Competitive
@@ -2050,7 +2050,7 @@ export default function App() {
                         : "opacity-60 hover:opacity-100"
                     }`}
                   >
-                    <Award size={16} />
+                    <Trophy size={16} />
                     Matchmaking
                   </button>
                 )}
@@ -2233,7 +2233,7 @@ export default function App() {
                                       ) : isMe ? (
                                         "ME"
                                       ) : (
-                                        p.name.slice(0, 2).toUpperCase()
+                                        p.name?.slice(0, 2)?.toUpperCase() || "P"
                                       )}
                                     </div>
                                     <div>
@@ -2513,7 +2513,7 @@ export default function App() {
                     <div className="space-y-4">
                       <div className="text-center space-y-2">
                         <div className="w-12 h-12 rounded-full bg-accent-glow text-accent-custom mx-auto flex items-center justify-center">
-                          <Award size={24} />
+                          <Trophy size={24} />
                         </div>
                         <h3 className="text-sm font-bold">
                           Queue ELO Competitive
@@ -2588,7 +2588,7 @@ export default function App() {
                         className="flex items-center gap-2 text-xs"
                       >
                         <div className="w-6 h-6 rounded-full bg-accent-glow border border-border-custom flex items-center justify-center font-bold text-[9px]">
-                          {req.name?.charAt(0).toUpperCase() || "F"}
+                          {req.name?.charAt(0)?.toUpperCase() || "F"}
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="font-bold truncate leading-tight text-[11px]">
@@ -2706,7 +2706,7 @@ export default function App() {
             </div>
 
             <div className="border border-border-custom p-3 rounded-xl bg-accent-glow/5 text-xs text-emerald-500 font-bold flex items-center justify-center gap-1">
-              <Award size={14} /> ELO Rating +24 points (Rank: {rank})
+              <Trophy size={14} /> ELO Rating +24 points (Rank: {rank})
             </div>
 
             {/* Post-Game Replay Timeline Analysis */}
