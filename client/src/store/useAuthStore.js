@@ -69,10 +69,23 @@ export const useAuthStore = create((set, get) => ({
         if (!isMigrated) {
           const updates = {};
           if (currentGuestElo) updates.elo = parseInt(currentGuestElo, 10);
-          if (currentGuestName && (!profile.display_name || profile.display_name.startsWith('Solver_'))) {
-            updates.display_name = currentGuestName;
+          
+          // Prioritize Google Display Name if available, otherwise guest name
+          const googleName = user.user_metadata?.full_name || user.user_metadata?.name;
+          const currentName = profile.display_name;
+          const isDefaultName = !currentName || currentName.startsWith('Solver_');
+
+          if (isDefaultName) {
+            if (googleName) {
+              updates.display_name = googleName;
+            } else if (currentGuestName && !currentGuestName.startsWith('Solver_')) {
+              updates.display_name = currentGuestName;
+            }
           }
-          if (currentGuestAvatar) updates.avatar_id = currentGuestAvatar;
+          
+          if (currentGuestAvatar && !profile.avatar_id) {
+            updates.avatar_id = currentGuestAvatar;
+          }
 
           if (Object.keys(updates).length > 0) {
             const { data: updatedProfile, error: updateError } = await supabase

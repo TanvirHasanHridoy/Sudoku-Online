@@ -944,13 +944,18 @@ export default function App() {
                 className="text-xs font-bold leading-tight bg-transparent border-b border-transparent hover:border-border-custom focus:border-accent-custom focus:outline-none w-24 transition-all"
                 title="Click to edit name"
               />
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1.5">
                 <div
                   className={`w-1.5 h-1.5 rounded-full ${isConnected ? "bg-emerald-500 animate-pulse" : "bg-rose-500"}`}
                 ></div>
                 <span className="text-[9px] font-semibold opacity-65">
                   {isConnected ? `Online (${elo} ELO)` : "Offline"}
                 </span>
+                {!isGuest && (
+                  <div className="w-2.5 h-2.5 rounded-full bg-indigo-500 flex items-center justify-center text-white" title="Linked Account">
+                    <Check size={8} strokeWidth={4} />
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -1004,7 +1009,19 @@ export default function App() {
 
               {/* Editable username */}
               <div className="w-full">
-                <label className="text-[10px] uppercase font-bold opacity-50 tracking-wider block mb-1">Display Name</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[10px] uppercase font-bold opacity-50 tracking-wider block">Display Name</label>
+                  {!isGuest && (
+                    <span className="text-[8px] bg-emerald-500/20 text-emerald-500 px-1.5 py-0.5 rounded-full font-bold flex items-center gap-0.5">
+                      <Check size={8} /> Verified
+                    </span>
+                  )}
+                  {isGuest && (
+                    <span className="text-[8px] bg-amber-500/20 text-amber-500 px-1.5 py-0.5 rounded-full font-bold">
+                      Guest
+                    </span>
+                  )}
+                </div>
                 <input
                   type="text"
                   value={inputName}
@@ -1031,6 +1048,25 @@ export default function App() {
                   <p className="text-[10px] font-extrabold text-accent-custom leading-tight">{rank}</p>
                 </div>
               </div>
+
+              {/* Account Actions */}
+              {!isGuest ? (
+                <button
+                  onClick={signOut}
+                  className="w-full py-2 px-4 rounded-xl border border-rose-500/30 bg-rose-500/5 hover:bg-rose-500/10 hover:border-rose-500 text-rose-500 transition-all flex items-center justify-center gap-2 text-xs font-bold mt-2"
+                >
+                  <LogOut size={14} />
+                  Sign Out of Account
+                </button>
+              ) : (
+                <button
+                  onClick={signInWithGoogle}
+                  className="w-full py-2 px-4 rounded-xl border border-accent-custom/30 bg-accent-custom/5 hover:bg-accent-custom/10 hover:border-accent-custom text-accent-custom transition-all flex items-center justify-center gap-2 text-xs font-bold mt-2"
+                >
+                  <LogIn size={14} />
+                  Link Google Account
+                </button>
+              )}
             </div>
 
             {/* Pending Friend Requests */}
