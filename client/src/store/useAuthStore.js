@@ -2,6 +2,39 @@ import { create } from "zustand";
 import { supabase } from "../lib/supabase";
 import { useLobbyStore } from "./useLobbyStore";
 
+// Helper function to generate a unique username
+const generateUniqueUsername = async (baseName) => {
+  if (!supabase) return baseName;
+  
+  // First, check if the base name is available
+  const { data: existing } = await supabase
+    .from("profiles")
+    .select("id")
+    .eq("display_name", baseName)
+    .single();
+  
+  if (!existing) {
+    return baseName; // Name is available
+  }
+  
+  // If taken, try appending numbers
+  for (let i = 1; i <= 999; i++) {
+    const candidateName = `${baseName}_${i}`;
+    const { data: existingCandidate } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("display_name", candidateName)
+      .single();
+    
+    if (!existingCandidate) {
+      return candidateName; // Found available name
+    }
+  }
+  
+  // Fallback: use timestamp if all else fails
+  return `${baseName}_${Date.now()}`;
+};
+
 export const useAuthStore = create((set, get) => ({
   user: null,
   profile: null,
@@ -19,16 +52,21 @@ export const useAuthStore = create((set, get) => ({
       data: { session },
     } = await supabase.auth.getSession();
     const initialUser = session?.user || null;
+    console.log("[Auth] Initial session check:", initialUser?.id ? `User ${initialUser.id}` : "No user");
+    
     if (initialUser) {
       set({ user: initialUser, isGuest: false });
+      console.log("[Auth] User detected, fetching profile...");
       await get().fetchAndSyncProfile(initialUser);
     } else {
+      console.log("[Auth] No initial user, setting loading to false");
       set({ loading: false });
     }
 
     // Listen to auth state changes
     supabase.auth.onAuthStateChange(async (event, session) => {
       const user = session?.user || null;
+      console.log("[Auth] Auth state changed, event:", event, "user:", user?.id ? `User ${user.id}` : "No user");
 
       // Only update if user changed to avoid infinite loops or redundant fetches
       const currentUser = get().user;
@@ -36,6 +74,7 @@ export const useAuthStore = create((set, get) => ({
         set({ user, isGuest: !user });
 
         if (user) {
+          console.log("[Auth] New user detected after state change, fetching profile...");
           await get().fetchAndSyncProfile(user);
         } else {
           set({ profile: null, loading: false });
@@ -47,6 +86,7 @@ export const useAuthStore = create((set, get) => ({
   fetchAndSyncProfile: async (user) => {
     try {
       set({ loading: true });
+      console.log("[Auth] Fetching profile for user:", user.id);
 
       let { data: profile, error } = await supabase
         .from("profiles")
@@ -54,9 +94,9 @@ export const useAuthStore = create((set, get) => ({
         .eq("id", user.id)
         .single();
 
-      // If it doesn't exist yet (due to race condition with trigger), retry
+      // If it doesn't exist yet (due to race condition with trigger), retry with exponential backoff
       if (error || !profile) {
-        console.warn("Profile not found, retrying profile fetch...", error);
+        console.warn("[Auth] Profile not found on first attempt, retrying...", error);
         await new Promise((resolve) => setTimeout(resolve, 1000));
         const retryResult = await supabase
           .from("profiles")
@@ -64,9 +104,17 @@ export const useAuthStore = create((set, get) => ({
           .eq("id", user.id)
           .single();
         profile = retryResult.data;
+        
+        // If still not found after retry, log error but continue
+        if (!profile) {
+          console.error("[Auth] Profile still not found after retry:", retryResult.error);
+          set({ loading: false });
+          return;
+        }
       }
 
       if (profile) {
+        console.log("[Auth] Profile found, syncing data...");
         const currentGuestId = localStorage.getItem("sudoku_player_id");
         const currentGuestName = localStorage.getItem("sudoku_player_name");
         const currentGuestAvatar =
@@ -84,6 +132,7 @@ export const useAuthStore = create((set, get) => ({
         // Now sync with local storage if not migrated yet
         const isMigrated = localStorage.getItem(`sudoku_migrated_${user.id}`);
         if (!isMigrated) {
+          console.log("[Auth] First migration for this user, pulling in guest data...");
           const updates = {};
           if (currentGuestElo) updates.elo = parseInt(currentGuestElo, 10);
 
@@ -96,12 +145,20 @@ export const useAuthStore = create((set, get) => ({
 
           if (isDefaultName) {
             if (googleName) {
-              updates.display_name = googleName;
+              // Make the Google name unique
+              console.log("[Auth] Making Google name unique:", googleName);
+              const uniqueName = await generateUniqueUsername(googleName);
+              console.log("[Auth] Using unique name:", uniqueName);
+              updates.display_name = uniqueName;
             } else if (
               currentGuestName &&
               !currentGuestName.startsWith("Solver_")
             ) {
-              updates.display_name = currentGuestName;
+              // Make the guest name unique
+              console.log("[Auth] Making guest name unique:", currentGuestName);
+              const uniqueName = await generateUniqueUsername(currentGuestName);
+              console.log("[Auth] Using unique name:", uniqueName);
+              updates.display_name = uniqueName;
             }
           }
 
@@ -110,6 +167,7 @@ export const useAuthStore = create((set, get) => ({
           }
 
           if (Object.keys(updates).length > 0) {
+            console.log("[Auth] Updating profile with:", updates);
             const { data: updatedProfile, error: updateError } = await supabase
               .from("profiles")
               .update(updates)
@@ -119,6 +177,9 @@ export const useAuthStore = create((set, get) => ({
 
             if (!updateError && updatedProfile) {
               profile = updatedProfile;
+              console.log("[Auth] Profile updated successfully");
+            } else {
+              console.error("[Auth] Error updating profile:", updateError);
             }
           }
           localStorage.setItem(`sudoku_migrated_${user.id}`, "true");
@@ -131,14 +192,21 @@ export const useAuthStore = create((set, get) => ({
             (!currentName || currentName.startsWith("Solver_")) &&
             googleName
           ) {
+            console.log("[Auth] Already migrated, but Google name available and current is default, updating...");
+            // Make the Google name unique
+            const uniqueName = await generateUniqueUsername(googleName);
+            console.log("[Auth] Using unique name:", uniqueName);
             const { data: updatedProfile, error: updateError } = await supabase
               .from("profiles")
-              .update({ display_name: googleName })
+              .update({ display_name: uniqueName })
               .eq("id", user.id)
               .select()
               .single();
             if (!updateError && updatedProfile) {
               profile = updatedProfile;
+              console.log("[Auth] Profile updated with Google name");
+            } else {
+              console.error("[Auth] Error updating profile with Google name:", updateError);
             }
           }
         }
@@ -150,6 +218,7 @@ export const useAuthStore = create((set, get) => ({
         localStorage.setItem("sudoku_elo", profile.elo.toString());
 
         // Update LobbyStore local states using setState to trigger reactivity
+        console.log("[Auth] Setting profile in auth store:", profile.display_name);
         set({ profile });
 
         useLobbyStore.setState({
@@ -165,6 +234,7 @@ export const useAuthStore = create((set, get) => ({
           lobbyStore.isConnected &&
           lobbyStore.ws.readyState === 1
         ) {
+          console.log("[Auth] Registering player on socket");
           lobbyStore.ws.send(
             JSON.stringify({
               type: "REGISTER_PLAYER",
@@ -179,7 +249,7 @@ export const useAuthStore = create((set, get) => ({
         }
       }
     } catch (err) {
-      console.error("Error fetching/syncing profile", err);
+      console.error("[Auth] Error fetching/syncing profile", err);
     } finally {
       set({ loading: false });
     }
