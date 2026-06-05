@@ -5,7 +5,6 @@ import {
   Users,
   Wifi,
   ShieldAlert,
-  Award,
   RefreshCw,
   Zap,
   Palette,
@@ -1097,9 +1096,6 @@ export default function App() {
                   ) : (
                     <span className="text-[8px] bg-amber-500/20 text-amber-500 px-1.5 py-0.5 rounded-full font-bold">
                       Guest
-                    </span>
-                  )}
-                </div>
                     </span>
                   )}
                 </div>
