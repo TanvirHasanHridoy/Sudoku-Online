@@ -31,6 +31,56 @@ const rooms = new Map();
 const connectedClients = new Map();     // Map<playerId, { id, socket, name, elo }>
 const matchmakingQueue = [];            // Array of { playerId, name, elo, difficulty, socket, queuedAt }
 
+// Helper: Get player status ('offline' | 'online' | 'in-game')
+function getPlayerStatus(friendId) {
+  let foundClient = null;
+  for (const client of connectedClients.values()) {
+    if (client.id === friendId || (client.supabaseUserId && client.supabaseUserId === friendId)) {
+      foundClient = client;
+      break;
+    }
+  }
+
+  if (!foundClient) return 'offline';
+
+  // Check if they are in any room
+  for (const room of rooms.values()) {
+    if (room.players.some(p => p.id === foundClient.id)) {
+      return 'in-game';
+    }
+  }
+
+  return 'online';
+}
+
+// Helper: Broadcast status change of playerId to all connected friends
+function broadcastOnlineStatusChange(playerId, status) {
+  const client = connectedClients.get(playerId);
+  const targetId = client ? client.id : playerId;
+  const supabaseUserId = client ? client.supabaseUserId : null;
+
+  for (const otherClient of connectedClients.values()) {
+    if (otherClient.id === targetId) continue;
+    
+    // Check if the other client has targetId or supabaseUserId in their friends list
+    const isFriend = otherClient.friendsList && 
+      (otherClient.friendsList.has(targetId) || (supabaseUserId && otherClient.friendsList.has(supabaseUserId)));
+      
+    if (isFriend) {
+      const matchedFriendId = otherClient.friendsList.has(targetId) ? targetId : supabaseUserId;
+      if (otherClient.socket && otherClient.socket.readyState === 1) {
+        otherClient.socket.send(JSON.stringify({
+          type: 'FRIEND_STATUS_UPDATE',
+          payload: {
+            friendId: matchedFriendId,
+            status
+          }
+        }));
+      }
+    }
+  }
+}
+
 // Helper: Generate unique 6-digit room code
 function generateRoomCode() {
   let code;
@@ -127,6 +177,7 @@ wss.on('connection', (ws) => {
 
           rooms.set(code, room);
           currentRoomCode = code;
+          broadcastOnlineStatusChange(playerId, 'in-game');
 
           ws.send(JSON.stringify({
             type: 'ROOM_CREATED',
@@ -194,6 +245,7 @@ wss.on('connection', (ws) => {
           }
 
           currentRoomCode = code;
+          broadcastOnlineStatusChange(playerId, 'in-game');
 
           // Notify player of successful join
           ws.send(JSON.stringify({
@@ -370,9 +422,11 @@ wss.on('connection', (ws) => {
             });
           }
 
+          const playerLeaverId = currentPlayer.id;
           // Clear current player/room tracking so onclose doesn't re-notify
           currentRoomCode = null;
           currentPlayer = null;
+          broadcastOnlineStatusChange(playerLeaverId, 'online');
           break;
         }
 
@@ -852,16 +906,66 @@ wss.on('connection', (ws) => {
         }
 
         case 'REGISTER_PLAYER': {
-          const { playerId, name, elo } = payload;
+          const { playerId, name, elo, supabaseUserId } = payload;
           if (!playerId) return;
           registeredPlayerId = playerId;
-          connectedClients.set(playerId, {
+          
+          const clientObj = {
             id: playerId,
             socket: ws,
             name: name || `Player_${playerId.slice(0, 4)}`,
-            elo: elo || 1450
-          });
-          console.log(`[WS Registered] Player: ${name} (ID: ${playerId})`);
+            elo: elo || 1450,
+            supabaseUserId: supabaseUserId || null,
+            friendsList: new Set()
+          };
+          
+          connectedClients.set(playerId, clientObj);
+          currentPlayer = clientObj;
+          console.log(`[WS Registered] Player: ${name} (ID: ${playerId}) (Supabase: ${supabaseUserId})`);
+          
+          broadcastOnlineStatusChange(playerId, 'online');
+          break;
+        }
+
+        case 'SET_FRIENDS_LIST': {
+          const { friendIds } = payload;
+          if (!currentPlayer) return;
+          
+          currentPlayer.friendsList = new Set(friendIds || []);
+          
+          const statuses = {};
+          for (const friendId of currentPlayer.friendsList) {
+            statuses[friendId] = getPlayerStatus(friendId);
+          }
+          
+          ws.send(JSON.stringify({
+            type: 'FRIENDS_STATUS_LIST',
+            payload: { statuses }
+          }));
+          break;
+        }
+
+        case 'INVITE_FRIEND_TO_LOBBY': {
+          const { friendId, roomCode, inviterName } = payload;
+          if (!friendId || !roomCode) return;
+          
+          let target = null;
+          for (const client of connectedClients.values()) {
+            if (client.id === friendId || (client.supabaseUserId && client.supabaseUserId === friendId)) {
+              target = client;
+              break;
+            }
+          }
+          
+          if (target && target.socket && target.socket.readyState === 1) {
+            target.socket.send(JSON.stringify({
+              type: 'LOBBY_INVITATION',
+              payload: {
+                roomCode,
+                inviterName
+              }
+            }));
+          }
           break;
         }
 
@@ -1034,6 +1138,7 @@ wss.on('connection', (ws) => {
 
   ws.on('close', () => {
     if (registeredPlayerId) {
+      broadcastOnlineStatusChange(registeredPlayerId, 'offline');
       connectedClients.delete(registeredPlayerId);
       const idx = matchmakingQueue.findIndex(q => q.playerId === registeredPlayerId);
       if (idx !== -1) {
@@ -1115,9 +1220,19 @@ setInterval(() => {
 
   for (let i = 0; i < matchmakingQueue.length; i++) {
     const playerA = matchmakingQueue[i];
+    if (!playerA.socket || playerA.socket.readyState !== 1) {
+      matchmakingQueue.splice(i, 1);
+      i--;
+      continue;
+    }
     
     for (let j = i + 1; j < matchmakingQueue.length; j++) {
       const playerB = matchmakingQueue[j];
+      if (!playerB.socket || playerB.socket.readyState !== 1) {
+        matchmakingQueue.splice(j, 1);
+        j--;
+        continue;
+      }
 
       // Match players purely based on ELO proximity tolerance & matching abilities preference
       if (playerA.enableAbilities !== playerB.enableAbilities) continue;
@@ -1189,6 +1304,8 @@ setInterval(() => {
         };
 
         rooms.set(roomCode, room);
+        broadcastOnlineStatusChange(playerA.playerId, 'in-game');
+        broadcastOnlineStatusChange(playerB.playerId, 'in-game');
 
         const matchPayloadA = {
           room: getSanitizedRoom(room),

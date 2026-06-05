@@ -23,6 +23,8 @@ import {
   X,
   Mic,
   MicOff,
+  LogIn,
+  LogOut,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import SudokuGrid from "./components/SudokuGrid";
@@ -32,6 +34,7 @@ import { playSound } from "./utils/audio";
 import { useGameStore } from "./store/useGameStore";
 import { useLobbyStore } from "./store/useLobbyStore";
 import { useSocialStore } from "./store/useSocialStore";
+import { useAuthStore } from "./store/useAuthStore";
 
 const THEMES = [
   {
@@ -119,6 +122,7 @@ export default function App() {
     room,
     pauseRequester,
     showPauseVoteModal,
+    activeLobbyInvitation,
     toasts,
     setPlayerName,
     setEmoteCallback,
@@ -182,6 +186,17 @@ export default function App() {
     declineFriendRequest
   } = useSocialStore();
 
+  // Zustand Store - Auth State
+  const {
+    profile,
+    isGuest,
+    loading: loadingAuth,
+    signInWithGoogle,
+    signOut,
+    initAuth,
+    signInWithEmailAndPassword
+  } = useAuthStore();
+
   // Local state inputs
   const [inputName, setInputName] = useState(myPlayerName);
   const [inputCode, setInputCode] = useState("");
@@ -195,6 +210,9 @@ export default function App() {
   const lastSentStrikesRef = useRef(null);
   const lastSentStateRef = useRef("");
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
+  const [showDevLogin, setShowDevLogin] = useState(false);
+  const [devEmail, setDevEmail] = useState("");
+  const [devPassword, setDevPassword] = useState("");
 
   const AVATARS = [
     { id: 'apex', name: 'Apex Solver', src: '/avatars/avatar_apex.png' },
@@ -240,6 +258,7 @@ export default function App() {
   useEffect(() => {
     if (!hasRestoredRef.current) {
       hasRestoredRef.current = true;
+      initAuth();
       connectWebSocket();
       initSocial();
 
@@ -272,7 +291,15 @@ export default function App() {
     }
 
     return () => setEmoteCallback(null);
-  }, [connectWebSocket, setEmoteCallback, initSocial, loadPersistedState, addToast]);
+  }, [connectWebSocket, setEmoteCallback, initSocial, loadPersistedState, addToast, initAuth]);
+
+  // Sync inputName when myPlayerName updates (e.g. from Supabase Profile Sync)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setInputName(myPlayerName);
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [myPlayerName]);
 
   // Sync ELO ELO score adjustment inside won/lost states
   const eloSyncedRef = useRef(null);
@@ -746,6 +773,8 @@ export default function App() {
     setFriendNameInput("");
   };
 
+  console.log("App.jsx toasts list:", toasts);
+
   return (
     <div className="min-h-screen bg-bg-custom text-text-custom font-sans transition-colors duration-300 relative pb-10">
       {/* Toast Notifications Stack */}
@@ -799,6 +828,57 @@ export default function App() {
         </div>
 
         <div className="flex items-center gap-3">
+          {/* Supabase Google Auth Widget */}
+          {loadingAuth ? (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-border-custom bg-panel-custom text-xs">
+              <span className="animate-spin text-accent-custom">⏳</span>
+              <span className="opacity-70 font-semibold">Loading...</span>
+            </div>
+          ) : isGuest ? (
+            <div className="flex gap-1.5">
+              <button
+                onClick={signInWithGoogle}
+                className="px-3 py-1.5 rounded-xl border border-border-custom hover:bg-accent-glow hover:border-accent-custom hover:text-accent-custom active:scale-95 transition-all flex items-center gap-1.5 text-xs font-bold text-text-custom cursor-pointer"
+              >
+                <LogIn size={14} />
+                <span>Link Google</span>
+              </button>
+              <button
+                onClick={() => setShowDevLogin(true)}
+                className="px-3 py-1.5 rounded-xl border border-dashed border-border-custom hover:bg-accent-glow/50 active:scale-95 transition-all flex items-center gap-1 text-[11px] font-semibold text-accent-custom cursor-pointer"
+                title="Developer test account login"
+              >
+                <span>Dev Login</span>
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl border border-border-custom bg-panel-custom/50">
+                {profile?.avatar_url ? (
+                  <img
+                    src={profile.avatar_url}
+                    alt="avatar"
+                    className="w-5 h-5 rounded-full border border-accent-custom/55"
+                  />
+                ) : (
+                  <div className="w-5 h-5 rounded-full bg-accent-custom text-white text-[10px] flex items-center justify-center font-bold">
+                    {profile?.display_name?.slice(0, 1).toUpperCase()}
+                  </div>
+                )}
+                <div className="text-[11px] font-bold tracking-tight max-w-[80px] truncate text-text-custom">
+                  {profile?.display_name}
+                </div>
+              </div>
+              <button
+                onClick={signOut}
+                className="p-2 rounded-xl border border-border-custom hover:bg-rose-500/10 hover:border-rose-500 hover:text-rose-500 active:scale-95 transition-all text-xs font-bold text-text-custom"
+                title="Sign Out"
+              >
+                <LogOut size={14} />
+              </button>
+            </div>
+          )}
+
           {/* Theme custom picker */}
           <div className="relative">
             <button
@@ -1410,15 +1490,20 @@ export default function App() {
                         </span>
                       </div>
                     </div>
-                    {f.status === "online" && room && (
+                    {room ? (
                       <button
                         onClick={() => inviteFriend(f.id)}
-                        className="px-2 py-1 bg-accent-glow border border-border-custom hover:border-accent-custom hover:text-accent-custom active:scale-95 transition-all rounded-md text-[9px] font-bold"
+                        disabled={f.status !== "online"}
+                        className={`px-2 py-1 border transition-all rounded-md text-[9px] font-bold ${
+                          f.status === "online"
+                            ? "bg-accent-glow border-border-custom hover:border-accent-custom hover:text-accent-custom active:scale-95 cursor-pointer"
+                            : "bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700 cursor-not-allowed opacity-50"
+                        }`}
+                        title={f.status !== "online" ? `Friend must be online (currently: ${f.status})` : "Invite to Room"}
                       >
                         Invite
                       </button>
-                    )}
-                    {f.status !== "online" && (
+                    ) : (
                       <span className="text-[9px] uppercase font-bold opacity-45 px-1">
                         {f.status}
                       </span>
@@ -2294,6 +2379,44 @@ export default function App() {
                 </button>
               </form>
 
+              {/* Pending Friend Requests */}
+              {friendRequests.length > 0 && (
+                <div className="mb-4 bg-accent-glow/10 border border-border-custom/50 rounded-xl p-3 space-y-2">
+                  <h4 className="text-[9px] uppercase font-bold opacity-50 tracking-wider flex items-center gap-1">
+                    <UserPlus size={10} /> Pending Requests ({friendRequests.length})
+                  </h4>
+                  <div className="space-y-2">
+                    {friendRequests.map(req => (
+                      <div key={req.id} className="flex items-center gap-2 text-xs">
+                        <div className="w-6 h-6 rounded-full bg-accent-glow border border-border-custom flex items-center justify-center font-bold text-[9px]">
+                          {req.name?.charAt(0).toUpperCase() || 'F'}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-bold truncate leading-tight text-[11px]">{req.name}</p>
+                          <p className="text-[8px] opacity-50">{req.elo} ELO</p>
+                        </div>
+                        <div className="flex gap-0.5">
+                          <button
+                            onClick={() => acceptFriendRequest(req.id)}
+                            className="w-5 h-5 rounded-md bg-emerald-500/20 text-emerald-500 hover:bg-emerald-500 hover:text-white transition-all flex items-center justify-center cursor-pointer"
+                            title="Accept"
+                          >
+                            <Check size={10} />
+                          </button>
+                          <button
+                            onClick={() => declineFriendRequest(req.id)}
+                            className="w-5 h-5 rounded-md bg-rose-500/20 text-rose-500 hover:bg-rose-500 hover:text-white transition-all flex items-center justify-center cursor-pointer"
+                            title="Decline"
+                          >
+                            <X size={10} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Friends lists mapping */}
               <div className="space-y-2.5 max-h-[160px] overflow-y-auto pr-1">
                 {friends.map((f) => (
@@ -2319,15 +2442,20 @@ export default function App() {
                       </div>
                     </div>
 
-                    {f.status === "online" && room && (
+                    {room ? (
                       <button
                         onClick={() => inviteFriend(f.id)}
-                        className="px-2 py-1 bg-accent-glow border border-border-custom hover:border-accent-custom hover:text-accent-custom active:scale-95 transition-all rounded-md text-[9px] font-bold"
+                        disabled={f.status !== "online"}
+                        className={`px-2 py-1 border transition-all rounded-md text-[9px] font-bold ${
+                          f.status === "online"
+                            ? "bg-accent-glow border-border-custom hover:border-accent-custom hover:text-accent-custom active:scale-95 cursor-pointer"
+                            : "bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700 cursor-not-allowed opacity-50"
+                        }`}
+                        title={f.status !== "online" ? `Friend must be online (currently: ${f.status})` : "Invite to Room"}
                       >
                         Invite
                       </button>
-                    )}
-                    {f.status !== "online" && (
+                    ) : (
                       <span className="text-[9px] uppercase font-bold opacity-45 px-1">
                         {f.status}
                       </span>
@@ -2614,6 +2742,103 @@ export default function App() {
                 Reject
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* INCOMING LOBBY INVITATION MODAL */}
+      {activeLobbyInvitation && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="glass-card rounded-2xl p-6 max-w-sm w-full text-center space-y-4 animate-scale-in">
+            <h3 className="text-sm font-bold text-accent-custom">
+              Lobby Invitation
+            </h3>
+            <p className="text-xs text-text-custom opacity-75">
+              <strong>{activeLobbyInvitation.inviterName}</strong> has invited you to join their game.
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  joinRoom(activeLobbyInvitation.roomCode);
+                  useLobbyStore.setState({ activeLobbyInvitation: null });
+                }}
+                className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs active:scale-95 transition-all cursor-pointer"
+              >
+                Accept
+              </button>
+              <button
+                onClick={() => {
+                  useLobbyStore.setState({ activeLobbyInvitation: null });
+                }}
+                className="flex-1 py-2 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs active:scale-95 transition-all cursor-pointer"
+              >
+                Decline
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* DEV LOGIN MODAL */}
+      {showDevLogin && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="glass-card rounded-2xl p-6 max-w-sm w-full text-center space-y-4 animate-scale-in border border-border-custom shadow-2xl">
+            <div className="flex justify-between items-center border-b border-border-custom pb-2">
+              <h3 className="text-sm font-bold text-accent-custom flex items-center gap-1.5">
+                Developer Login
+              </h3>
+              <button 
+                onClick={() => setShowDevLogin(false)}
+                className="text-text-custom opacity-50 hover:opacity-100 transition-opacity cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <p className="text-[11px] opacity-75 text-left leading-normal text-text-custom">
+              Sign in with one of the test email accounts you created in the Supabase Dashboard. No verification code is required.
+            </p>
+            <form 
+              onSubmit={async (e) => {
+                e.preventDefault();
+                if (!devEmail || !devPassword) return;
+                const success = await signInWithEmailAndPassword(devEmail, devPassword);
+                if (success) {
+                  setShowDevLogin(false);
+                  setDevEmail("");
+                  setDevPassword("");
+                }
+              }}
+              className="space-y-3"
+            >
+              <div className="space-y-1 text-left">
+                <label className="text-[9px] uppercase font-extrabold opacity-60 tracking-wider text-text-custom">Email Address</label>
+                <input
+                  type="email"
+                  required
+                  placeholder="test@example.com"
+                  value={devEmail}
+                  onChange={(e) => setDevEmail(e.target.value)}
+                  className="w-full px-3 py-2 bg-accent-glow/30 border border-border-custom rounded-xl text-xs focus:outline-none focus:border-accent-custom text-text-custom"
+                />
+              </div>
+              <div className="space-y-1 text-left">
+                <label className="text-[9px] uppercase font-extrabold opacity-60 tracking-wider text-text-custom">Password</label>
+                <input
+                  type="password"
+                  required
+                  placeholder="••••••••"
+                  value={devPassword}
+                  onChange={(e) => setDevPassword(e.target.value)}
+                  className="w-full px-3 py-2 bg-accent-glow/30 border border-border-custom rounded-xl text-xs focus:outline-none focus:border-accent-custom text-text-custom"
+                />
+              </div>
+              <button
+                type="submit"
+                className="w-full py-2.5 bg-accent-custom hover:bg-accent-hover text-white font-bold rounded-xl text-xs active:scale-[0.98] transition-all cursor-pointer shadow-md shadow-accent-custom/25"
+              >
+                Login to Test Account
+              </button>
+            </form>
           </div>
         </div>
       )}

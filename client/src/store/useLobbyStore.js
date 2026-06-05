@@ -26,6 +26,7 @@ export const useLobbyStore = create((set, get) => ({
   myPlayerName: defaultName,
   selectedAvatar: defaultAvatar,
   room: null, // { code, difficulty, isGameStarted, isPaused, players }
+  activeLobbyInvitation: null, // { roomCode, inviterName }
   
   // Voting / Modals States
   pauseRequester: null,
@@ -135,13 +136,16 @@ export const useLobbyStore = create((set, get) => ({
       // Register player with the server (use dynamic import to avoid circular dependency)
       try {
         const { useSocialStore } = await import('./useSocialStore');
+        const { useAuthStore } = await import('./useAuthStore');
         const myElo = useSocialStore.getState().elo;
+        const supabaseUserId = useAuthStore.getState().user?.id || null;
         socket.send(JSON.stringify({
           type: 'REGISTER_PLAYER',
           payload: {
             playerId: get().myPlayerId,
             name: get().myPlayerName,
-            elo: myElo
+            elo: myElo,
+            supabaseUserId
           }
         }));
       } catch (err) {
@@ -176,6 +180,35 @@ export const useLobbyStore = create((set, get) => ({
           }
           case 'FRIEND_REQUEST_SENT_CONFIRMED': {
             get().addToast(`Friend request sent to ${payload.targetName}!`, 'success');
+            break;
+          }
+          case 'FRIENDS_STATUS_LIST': {
+            import('./useSocialStore').then(({ useSocialStore }) => {
+              const { friends } = useSocialStore.getState();
+              const updatedFriends = friends.map(f => ({
+                ...f,
+                status: payload.statuses[f.id] || 'offline'
+              }));
+              useSocialStore.setState({ friends: updatedFriends });
+            });
+            break;
+          }
+          case 'FRIEND_STATUS_UPDATE': {
+            import('./useSocialStore').then(({ useSocialStore }) => {
+              const { friends } = useSocialStore.getState();
+              const updatedFriends = friends.map(f => {
+                if (f.id === payload.friendId) {
+                  return { ...f, status: payload.status };
+                }
+                return f;
+              });
+              useSocialStore.setState({ friends: updatedFriends });
+            });
+            break;
+          }
+          case 'LOBBY_INVITATION': {
+            set({ activeLobbyInvitation: payload });
+            get().addToast(`✉️ Invitation received from ${payload.inviterName}!`, 'info');
             break;
           }
           case 'MATCH_FOUND': {
@@ -465,6 +498,9 @@ export const useLobbyStore = create((set, get) => ({
 
           case 'ERROR': {
             get().addToast(payload.message, 'error');
+            if (payload.message && payload.message.toLowerCase().includes('room not found')) {
+              localStorage.removeItem('sudoku_active_room_code');
+            }
             break;
           }
 

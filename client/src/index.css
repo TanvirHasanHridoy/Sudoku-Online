@@ -158,7 +158,7 @@ html.theme-pastel {
 
 /* Glassmorphism Panels */
 .glass-panel {
-  background-color: rgba(var(--panel-color), 0.7);
+  background-color: color-mix(in srgb, var(--panel-color) 70%, transparent);
   backdrop-filter: blur(12px);
   border-color: var(--border-color);
   @apply border;

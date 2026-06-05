@@ -1,14 +1,7 @@
 import { create } from 'zustand';
-import { createClient } from '@supabase/supabase-js';
+import { supabase } from '../lib/supabase';
 import { useLobbyStore } from './useLobbyStore';
-
-// Retrieve Supabase credentials from client environment variables
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-
-export const supabase = (supabaseUrl && supabaseAnonKey)
-  ? createClient(supabaseUrl, supabaseAnonKey)
-  : null;
+import { useAuthStore } from './useAuthStore';
 
 export const useSocialStore = create((set, get) => ({
   elo: Number(localStorage.getItem('sudoku_elo')) || 1450,
@@ -20,31 +13,27 @@ export const useSocialStore = create((set, get) => ({
   matchSearchInterval: null,
   searchTimer: 0,
 
-  // Actions
-  initSocial: async () => {
-    // If Supabase is active, fetch real user profile and ELO
-    if (supabase) {
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          const { data, error } = await supabase
-            .from('profiles')
-            .select('elo, rank')
-            .eq('id', user.id)
-            .single();
-          
-          if (data && !error) {
-            set({ elo: data.elo, rank: data.rank });
-            localStorage.setItem('sudoku_elo', data.elo.toString());
-          }
-        }
-      } catch (err) {
-        console.warn('Supabase fetch failed, continuing with cached ELO.', err);
+  initSocial: () => {
+    const updateRank = () => {
+      get().updateRankTier();
+    };
+
+    // Sync state with useAuthStore profile ELO
+    useAuthStore.subscribe((state) => {
+      if (state.profile) {
+        set({ elo: state.profile.elo });
+      } else {
+        set({ elo: Number(localStorage.getItem('sudoku_elo')) || 1450 });
       }
-    }
-    
-    // Refresh rank badge based on ELO
-    get().updateRankTier();
+      updateRank();
+      // Reload friends list whenever auth profile changes (login, logout, sync)
+      get().loadFriends();
+    });
+
+    // Initial tier check
+    updateRank();
+    // Load friends on startup
+    get().loadFriends();
   },
 
   updateRankTier: () => {
@@ -62,20 +51,38 @@ export const useSocialStore = create((set, get) => ({
   },
 
   adjustElo: async (points) => {
-    const newElo = Math.max(100, get().elo + points);
+    const currentElo = get().elo;
+    const newElo = Math.max(100, currentElo + points);
+
     localStorage.setItem('sudoku_elo', newElo.toString());
     set({ elo: newElo });
     get().updateRankTier();
 
+    const { user, profile } = useAuthStore.getState();
+    if (profile) {
+      useAuthStore.setState({ profile: { ...profile, elo: newElo } });
+    }
+
     // Sync to Supabase if logged in
-    if (supabase) {
+    if (user && supabase) {
       try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          await supabase
-            .from('profiles')
-            .update({ elo: newElo })
-            .eq('id', user.id);
+        await supabase
+          .from('profiles')
+          .update({ elo: newElo })
+          .eq('id', user.id);
+
+        // Notify server of new ELO if connected
+        const lobbyStore = useLobbyStore.getState();
+        if (lobbyStore.ws && lobbyStore.isConnected && lobbyStore.ws.readyState === 1) {
+          lobbyStore.ws.send(JSON.stringify({
+            type: 'REGISTER_PLAYER',
+            payload: {
+              playerId: profile ? profile.id : lobbyStore.myPlayerId,
+              name: profile ? profile.display_name : lobbyStore.myPlayerName,
+              elo: newElo,
+              supabaseUserId: user.id
+            }
+          }));
         }
       } catch (err) {
         console.warn('Failed syncing ELO to Supabase', err);
@@ -83,63 +90,248 @@ export const useSocialStore = create((set, get) => ({
     }
   },
 
+  loadFriends: async () => {
+    const { user } = useAuthStore.getState();
+    if (!user || !supabase) {
+      // Load guest friends from local storage if any
+      const localFriends = JSON.parse(localStorage.getItem('sudoku_friends') || '[]');
+      set({ friends: localFriends, friendRequests: [] });
+      return;
+    }
+
+    try {
+      const myId = user.id;
+      const { data: friendships, error } = await supabase
+        .from('friendships')
+        .select('*')
+        .or(`user_id.eq.${myId},friend_id.eq.${myId}`);
+
+      if (error) throw error;
+
+      if (!friendships || friendships.length === 0) {
+        set({ friends: [], friendRequests: [] });
+        return;
+      }
+
+      const friendIds = friendships.map(f => f.user_id === myId ? f.friend_id : f.user_id);
+      const { data: profiles, error: profileError } = await supabase
+        .from('profiles')
+        .select('id, display_name, elo, avatar_id')
+        .in('id', friendIds);
+
+      if (profileError) throw profileError;
+
+      const profileMap = new Map(profiles.map(p => [p.id, p]));
+
+      const loadedFriends = [];
+      const loadedRequests = [];
+
+      for (const f of friendships) {
+        const friendId = f.user_id === myId ? f.friend_id : f.user_id;
+        const profile = profileMap.get(friendId);
+        if (!profile) continue;
+
+        if (f.status === 'accepted') {
+          loadedFriends.push({
+            id: profile.id,
+            name: profile.display_name,
+            elo: profile.elo,
+            avatar: profile.avatar_id || 'apex',
+            status: 'offline' // default until sync
+          });
+        } else if (f.status === 'pending') {
+          if (f.friend_id === myId) {
+            loadedRequests.push({
+              id: profile.id,
+              name: profile.display_name,
+              elo: profile.elo,
+              avatar: profile.avatar_id || 'apex'
+            });
+          }
+        }
+      }
+
+      set({ friends: loadedFriends, friendRequests: loadedRequests });
+
+      // Notify the server of our friends list so it can send online status
+      const lobbyStore = useLobbyStore.getState();
+      if (lobbyStore.ws && lobbyStore.isConnected && lobbyStore.ws.readyState === 1) {
+        lobbyStore.ws.send(JSON.stringify({
+          type: 'SET_FRIENDS_LIST',
+          payload: { friendIds }
+        }));
+      }
+
+    } catch (err) {
+      console.warn('Failed loading friends from Supabase:', err);
+    }
+  },
+
   addFriend: async (name) => {
     const trimmedName = name.trim();
     if (!trimmedName) return;
 
-    // Check if player is trying to add themselves
     const myName = useLobbyStore.getState().myPlayerName;
     if (trimmedName.toLowerCase() === myName.toLowerCase()) {
       useLobbyStore.getState().addToast("You cannot add yourself as a friend!", 'error');
       return;
     }
 
-    // Check if player is already a friend
-    const isFriend = get().friends.some(f => f.name.toLowerCase() === trimmedName.toLowerCase());
+    const isFriend = get().friends.some(f => f.name && f.name.toLowerCase() === trimmedName.toLowerCase());
     if (isFriend) {
       useLobbyStore.getState().addToast(`${trimmedName} is already on your friends list!`, 'error');
       return;
     }
 
-    // Send friend request over WebSockets
+    const { user } = useAuthStore.getState();
     const lobbyStore = useLobbyStore.getState();
-    if (lobbyStore.ws && lobbyStore.isConnected && lobbyStore.ws.readyState === 1) {
-      lobbyStore.ws.send(JSON.stringify({
-        type: 'SEND_FRIEND_REQUEST',
-        payload: { senderId: lobbyStore.myPlayerId, targetName: trimmedName }
-      }));
+
+    if (user && supabase) {
+      try {
+        const { data: targetProfile, error: profileError } = await supabase
+          .from('profiles')
+          .select('id, display_name, elo')
+          .ilike('display_name', trimmedName)
+          .single();
+
+        if (profileError || !targetProfile) {
+          lobbyStore.addToast(`Player "${trimmedName}" not found.`, 'error');
+          return;
+        }
+
+        const { data: existing, error: existingError } = await supabase
+          .from('friendships')
+          .select('*')
+          .or(`and(user_id.eq.${user.id},friend_id.eq.${targetProfile.id}),and(user_id.eq.${targetProfile.id},friend_id.eq.${user.id})`);
+
+        if (existingError) {
+          console.error('Error checking existing friendship:', existingError);
+          throw existingError;
+        }
+
+        if (existing && existing.length > 0) {
+          lobbyStore.addToast(`Friend request already sent or active with ${trimmedName}!`, 'error');
+          return;
+        }
+
+        const { error: insertError } = await supabase
+          .from('friendships')
+          .insert({
+            user_id: user.id,
+            friend_id: targetProfile.id,
+            status: 'pending'
+          });
+
+        if (insertError) throw insertError;
+
+        if (lobbyStore.ws && lobbyStore.isConnected && lobbyStore.ws.readyState === 1) {
+          lobbyStore.ws.send(JSON.stringify({
+            type: 'SEND_FRIEND_REQUEST',
+            payload: { senderId: user.id, targetName: trimmedName }
+          }));
+        }
+
+        lobbyStore.addToast(`Friend request sent to ${trimmedName}!`, 'success');
+        get().loadFriends(); // Reload to reflect any state changes
+
+      } catch (err) {
+        console.warn('Failed adding friend in Supabase:', err);
+        lobbyStore.addToast('Error sending friend request.', 'error');
+      }
     } else {
-      lobbyStore.addToast("Cannot send friend request. Disconnected from server!", 'error');
+      if (lobbyStore.ws && lobbyStore.isConnected && lobbyStore.ws.readyState === 1) {
+        lobbyStore.ws.send(JSON.stringify({
+          type: 'SEND_FRIEND_REQUEST',
+          payload: { senderId: lobbyStore.myPlayerId, targetName: trimmedName }
+        }));
+      } else {
+        lobbyStore.addToast("Cannot send friend request. Disconnected from server!", 'error');
+      }
     }
   },
 
-  acceptFriendRequest: (targetId) => {
+  acceptFriendRequest: async (targetId) => {
+    const { user } = useAuthStore.getState();
     const lobbyStore = useLobbyStore.getState();
-    if (lobbyStore.ws && lobbyStore.isConnected && lobbyStore.ws.readyState === 1) {
-      lobbyStore.ws.send(JSON.stringify({
-        type: 'ACCEPT_FRIEND_REQUEST',
-        payload: { myPlayerId: lobbyStore.myPlayerId, targetId }
-      }));
-      
-      // Clean up request locally
+
+    if (user && supabase) {
+      try {
+        const { error } = await supabase
+          .from('friendships')
+          .update({ status: 'accepted' })
+          .eq('user_id', targetId)
+          .eq('friend_id', user.id);
+
+        if (error) {
+          await supabase
+            .from('friendships')
+            .update({ status: 'accepted' })
+            .eq('user_id', user.id)
+            .eq('friend_id', targetId);
+        }
+
+        set((state) => ({
+          friendRequests: state.friendRequests.filter(r => r.id !== targetId)
+        }));
+
+        if (lobbyStore.ws && lobbyStore.isConnected && lobbyStore.ws.readyState === 1) {
+          lobbyStore.ws.send(JSON.stringify({
+            type: 'ACCEPT_FRIEND_REQUEST',
+            payload: { myPlayerId: user.id, targetId }
+          }));
+        }
+
+        await get().loadFriends();
+        lobbyStore.addToast("Accepted friend request!", 'success');
+
+      } catch (err) {
+        console.warn('Failed accepting friend request in Supabase:', err);
+        lobbyStore.addToast('Error accepting friend request.', 'error');
+      }
+    } else {
+      if (lobbyStore.ws && lobbyStore.isConnected && lobbyStore.ws.readyState === 1) {
+        lobbyStore.ws.send(JSON.stringify({
+          type: 'ACCEPT_FRIEND_REQUEST',
+          payload: { myPlayerId: lobbyStore.myPlayerId, targetId }
+        }));
+        
+        set((state) => ({
+          friendRequests: state.friendRequests.filter(r => r.id !== targetId)
+        }));
+        lobbyStore.addToast("Accepted friend request!", 'success');
+      } else {
+        lobbyStore.addToast("Cannot accept request. Disconnected from server!", 'error');
+      }
+    }
+  },
+
+  declineFriendRequest: async (targetId) => {
+    const { user } = useAuthStore.getState();
+    const lobbyStore = useLobbyStore.getState();
+
+    if (user && supabase) {
+      try {
+        await supabase
+          .from('friendships')
+          .delete()
+          .or(`and(user_id.eq.${targetId},friend_id.eq.${user.id}),and(user_id.eq.${user.id},friend_id.eq.${targetId})`);
+
+        set((state) => ({
+          friendRequests: state.friendRequests.filter(r => r.id !== targetId)
+        }));
+        lobbyStore.addToast("Declined friend request.", 'info');
+      } catch (err) {
+        console.warn('Failed declining friend request in Supabase:', err);
+      }
+    } else {
       set((state) => ({
         friendRequests: state.friendRequests.filter(r => r.id !== targetId)
       }));
-      lobbyStore.addToast("Accepted friend request!", 'success');
-    } else {
-      lobbyStore.addToast("Cannot accept request. Disconnected from server!", 'error');
+      useLobbyStore.getState().addToast("Declined friend request.", 'info');
     }
   },
 
-  declineFriendRequest: (targetId) => {
-    set((state) => ({
-      friendRequests: state.friendRequests.filter(r => r.id !== targetId)
-    }));
-    useLobbyStore.getState().addToast("Declined friend request.", 'info');
-  },
-
   receiveFriendRequest: (sender) => {
-    // sender is { id, name, elo }
     set((state) => {
       if (state.friendRequests.some(r => r.id === sender.id)) return {};
       return { friendRequests: [...state.friendRequests, sender] };
@@ -148,10 +340,22 @@ export const useSocialStore = create((set, get) => ({
   },
 
   friendRequestAccepted: (friend) => {
-    // friend is { id, name, elo, status }
     set((state) => {
-      if (state.friends.some(f => f.id === friend.id)) return {};
-      return { friends: [...state.friends, friend] };
+      const idx = state.friends.findIndex(f => f.id === friend.id);
+      let updated;
+      if (idx !== -1) {
+        updated = [...state.friends];
+        updated[idx] = { ...updated[idx], ...friend };
+      } else {
+        updated = [...state.friends, friend];
+      }
+
+      const { user } = useAuthStore.getState();
+      if (!user) {
+        localStorage.setItem('sudoku_friends', JSON.stringify(updated));
+      }
+
+      return { friends: updated };
     });
     useLobbyStore.getState().addToast(`You are now friends with ${friend.name}!`, 'success');
   },
@@ -169,7 +373,6 @@ export const useSocialStore = create((set, get) => ({
     
     const lobby = useLobbyStore.getState();
     if (lobby.room && lobby.ws && lobby.ws.readyState === 1) {
-      // Send dynamic join invitation payload if the receiver is online
       lobby.ws.send(JSON.stringify({
         type: 'INVITE_FRIEND_TO_LOBBY',
         payload: {
@@ -181,7 +384,6 @@ export const useSocialStore = create((set, get) => ({
     }
   },
 
-  // ELO Matchmaking Queue WebSocket Actions
   startMatchmaking: (difficulty = 'medium', enableAbilities = false) => {
     const lobby = useLobbyStore.getState();
     if (!lobby.isConnected || !lobby.ws || lobby.ws.readyState !== 1) {
@@ -192,7 +394,6 @@ export const useSocialStore = create((set, get) => ({
     set({ matchmakingStatus: 'searching', searchTimer: 0 });
     lobby.addToast('Searching for ELO-matched opponents...', 'info');
 
-    // Join WebSocket Queue
     lobby.ws.send(JSON.stringify({
       type: 'JOIN_MATCHMAKING_QUEUE',
       payload: { playerId: lobby.myPlayerId, difficulty, enableAbilities }
