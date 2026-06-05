@@ -1,6 +1,6 @@
-import { create } from 'zustand';
-import { supabase } from '../lib/supabase';
-import { useLobbyStore } from './useLobbyStore';
+import { create } from "zustand";
+import { supabase } from "../lib/supabase";
+import { useLobbyStore } from "./useLobbyStore";
 
 export const useAuthStore = create((set, get) => ({
   user: null,
@@ -31,37 +31,38 @@ export const useAuthStore = create((set, get) => ({
   fetchAndSyncProfile: async (user) => {
     try {
       set({ loading: true });
-      
+
       let { data: profile, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', user.id)
+        .from("profiles")
+        .select("*")
+        .eq("id", user.id)
         .single();
 
       // If it doesn't exist yet (due to race condition with trigger), retry
       if (error || !profile) {
-        console.warn('Profile not found, retrying profile fetch...', error);
+        console.warn("Profile not found, retrying profile fetch...", error);
         await new Promise((resolve) => setTimeout(resolve, 1000));
         const retryResult = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', user.id)
+          .from("profiles")
+          .select("*")
+          .eq("id", user.id)
           .single();
         profile = retryResult.data;
       }
 
       if (profile) {
-        const currentGuestId = localStorage.getItem('sudoku_player_id');
-        const currentGuestName = localStorage.getItem('sudoku_player_name');
-        const currentGuestAvatar = localStorage.getItem('sudoku_avatar') || 'apex';
-        const currentGuestElo = localStorage.getItem('sudoku_elo') || '1450';
+        const currentGuestId = localStorage.getItem("sudoku_player_id");
+        const currentGuestName = localStorage.getItem("sudoku_player_name");
+        const currentGuestAvatar =
+          localStorage.getItem("sudoku_avatar") || "apex";
+        const currentGuestElo = localStorage.getItem("sudoku_elo") || "1450";
 
         // Save as guest details if currentPlayerId is still a guest (e.g. starting with "p_")
-        if (currentGuestId && currentGuestId.startsWith('p_')) {
-          localStorage.setItem('sudoku_guest_id', currentGuestId);
-          localStorage.setItem('sudoku_guest_name', currentGuestName);
-          localStorage.setItem('sudoku_guest_avatar', currentGuestAvatar);
-          localStorage.setItem('sudoku_guest_elo', currentGuestElo);
+        if (currentGuestId && currentGuestId.startsWith("p_")) {
+          localStorage.setItem("sudoku_guest_id", currentGuestId);
+          localStorage.setItem("sudoku_guest_name", currentGuestName);
+          localStorage.setItem("sudoku_guest_avatar", currentGuestAvatar);
+          localStorage.setItem("sudoku_guest_elo", currentGuestElo);
         }
 
         // Now sync with local storage if not migrated yet
@@ -69,29 +70,34 @@ export const useAuthStore = create((set, get) => ({
         if (!isMigrated) {
           const updates = {};
           if (currentGuestElo) updates.elo = parseInt(currentGuestElo, 10);
-          
+
           // Prioritize Google Display Name if available, otherwise guest name
-          const googleName = user.user_metadata?.full_name || user.user_metadata?.name;
+          const googleName =
+            user.user_metadata?.full_name || user.user_metadata?.name;
           const currentName = profile.display_name;
-          const isDefaultName = !currentName || currentName.startsWith('Solver_');
+          const isDefaultName =
+            !currentName || currentName.startsWith("Solver_");
 
           if (isDefaultName) {
             if (googleName) {
               updates.display_name = googleName;
-            } else if (currentGuestName && !currentGuestName.startsWith('Solver_')) {
+            } else if (
+              currentGuestName &&
+              !currentGuestName.startsWith("Solver_")
+            ) {
               updates.display_name = currentGuestName;
             }
           }
-          
+
           if (currentGuestAvatar && !profile.avatar_id) {
             updates.avatar_id = currentGuestAvatar;
           }
 
           if (Object.keys(updates).length > 0) {
             const { data: updatedProfile, error: updateError } = await supabase
-              .from('profiles')
+              .from("profiles")
               .update(updates)
-              .eq('id', user.id)
+              .eq("id", user.id)
               .select()
               .single();
 
@@ -99,38 +105,44 @@ export const useAuthStore = create((set, get) => ({
               profile = updatedProfile;
             }
           }
-          localStorage.setItem(`sudoku_migrated_${user.id}`, 'true');
+          localStorage.setItem(`sudoku_migrated_${user.id}`, "true");
         }
 
         // Sync local storage to match the database profile
-        localStorage.setItem('sudoku_player_id', profile.id);
-        localStorage.setItem('sudoku_player_name', profile.display_name);
-        localStorage.setItem('sudoku_avatar', profile.avatar_id || 'apex');
-        localStorage.setItem('sudoku_elo', profile.elo.toString());
+        localStorage.setItem("sudoku_player_id", profile.id);
+        localStorage.setItem("sudoku_player_name", profile.display_name);
+        localStorage.setItem("sudoku_avatar", profile.avatar_id || "apex");
+        localStorage.setItem("sudoku_elo", profile.elo.toString());
 
         // Update LobbyStore local states
         const lobbyStore = useLobbyStore.getState();
         set({ profile });
-        
+
         lobbyStore.myPlayerId = profile.id;
         lobbyStore.myPlayerName = profile.display_name;
-        lobbyStore.selectedAvatar = profile.avatar_id || 'apex';
-        
+        lobbyStore.selectedAvatar = profile.avatar_id || "apex";
+
         // Register connection if socket exists
-        if (lobbyStore.ws && lobbyStore.isConnected && lobbyStore.ws.readyState === 1) {
-          lobbyStore.ws.send(JSON.stringify({
-            type: 'REGISTER_PLAYER',
-            payload: {
-              playerId: profile.id,
-              name: profile.display_name,
-              elo: profile.elo,
-              supabaseUserId: user.id
-            }
-          }));
+        if (
+          lobbyStore.ws &&
+          lobbyStore.isConnected &&
+          lobbyStore.ws.readyState === 1
+        ) {
+          lobbyStore.ws.send(
+            JSON.stringify({
+              type: "REGISTER_PLAYER",
+              payload: {
+                playerId: profile.id,
+                name: profile.display_name,
+                elo: profile.elo,
+                supabaseUserId: user.id,
+              },
+            }),
+          );
         }
       }
     } catch (err) {
-      console.error('Error fetching/syncing profile', err);
+      console.error("Error fetching/syncing profile", err);
     } finally {
       set({ loading: false });
     }
@@ -140,15 +152,17 @@ export const useAuthStore = create((set, get) => ({
     if (!supabase) return;
     try {
       const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
+        provider: "google",
         options: {
-          redirectTo: window.location.origin
-        }
+          redirectTo: window.location.origin,
+        },
       });
       if (error) throw error;
     } catch (err) {
-      console.error('Google Sign-In failed:', err);
-      useLobbyStore.getState().addToast(`Google Sign-In failed: ${err.message}`, 'error');
+      console.error("Google Sign-In failed:", err);
+      useLobbyStore
+        .getState()
+        .addToast(`Google Sign-In failed: ${err.message}`, "error");
     }
   },
 
@@ -158,13 +172,15 @@ export const useAuthStore = create((set, get) => ({
       set({ loading: true });
       const { error } = await supabase.auth.signInWithPassword({
         email,
-        password
+        password,
       });
       if (error) throw error;
       return true;
     } catch (err) {
-      console.error('Email Sign-In failed:', err);
-      useLobbyStore.getState().addToast(`Login failed: ${err.message}`, 'error');
+      console.error("Email Sign-In failed:", err);
+      useLobbyStore
+        .getState()
+        .addToast(`Login failed: ${err.message}`, "error");
       set({ loading: false });
       return false;
     }
@@ -174,45 +190,53 @@ export const useAuthStore = create((set, get) => ({
     if (!supabase) return;
     try {
       await supabase.auth.signOut();
-      
-      let guestId = localStorage.getItem('sudoku_guest_id');
-      if (!guestId) {
-        guestId = 'p_' + Math.random().toString(36).substring(2, 11);
-        localStorage.setItem('sudoku_guest_id', guestId);
-      }
-      let guestName = localStorage.getItem('sudoku_guest_name');
-      if (!guestName) {
-        guestName = 'Solver_' + Math.floor(1000 + Math.random() * 9000);
-        localStorage.setItem('sudoku_guest_name', guestName);
-      }
-      let guestAvatar = localStorage.getItem('sudoku_guest_avatar') || 'apex';
-      let guestElo = localStorage.getItem('sudoku_guest_elo') || '1450';
 
-      localStorage.setItem('sudoku_player_id', guestId);
-      localStorage.setItem('sudoku_player_name', guestName);
-      localStorage.setItem('sudoku_avatar', guestAvatar);
-      localStorage.setItem('sudoku_elo', guestElo);
+      let guestId = localStorage.getItem("sudoku_guest_id");
+      if (!guestId) {
+        guestId = "p_" + Math.random().toString(36).substring(2, 11);
+        localStorage.setItem("sudoku_guest_id", guestId);
+      }
+      let guestName = localStorage.getItem("sudoku_guest_name");
+      if (!guestName) {
+        guestName = "Solver_" + Math.floor(1000 + Math.random() * 9000);
+        localStorage.setItem("sudoku_guest_name", guestName);
+      }
+      let guestAvatar = localStorage.getItem("sudoku_guest_avatar") || "apex";
+      let guestElo = localStorage.getItem("sudoku_guest_elo") || "1450";
+
+      localStorage.setItem("sudoku_player_id", guestId);
+      localStorage.setItem("sudoku_player_name", guestName);
+      localStorage.setItem("sudoku_avatar", guestAvatar);
+      localStorage.setItem("sudoku_elo", guestElo);
 
       const lobbyStore = useLobbyStore.getState();
       lobbyStore.myPlayerId = guestId;
       lobbyStore.myPlayerName = guestName;
       lobbyStore.selectedAvatar = guestAvatar;
 
-      if (lobbyStore.ws && lobbyStore.isConnected && lobbyStore.ws.readyState === 1) {
-        lobbyStore.ws.send(JSON.stringify({
-          type: 'REGISTER_PLAYER',
-          payload: {
-            playerId: guestId,
-            name: guestName,
-            elo: parseInt(guestElo, 10)
-          }
-        }));
+      if (
+        lobbyStore.ws &&
+        lobbyStore.isConnected &&
+        lobbyStore.ws.readyState === 1
+      ) {
+        lobbyStore.ws.send(
+          JSON.stringify({
+            type: "REGISTER_PLAYER",
+            payload: {
+              playerId: guestId,
+              name: guestName,
+              elo: parseInt(guestElo, 10),
+            },
+          }),
+        );
       }
 
       set({ user: null, profile: null, isGuest: true });
-      useLobbyStore.getState().addToast('Signed out of Google account.', 'info');
+      useLobbyStore
+        .getState()
+        .addToast("Signed out of Google account.", "info");
     } catch (err) {
-      console.error('Sign-Out failed:', err);
+      console.error("Sign-Out failed:", err);
     }
-  }
+  },
 }));

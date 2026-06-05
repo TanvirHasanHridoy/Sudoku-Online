@@ -183,7 +183,7 @@ export default function App() {
     startMatchmaking,
     cancelMatchmaking,
     acceptFriendRequest,
-    declineFriendRequest
+    declineFriendRequest,
   } = useSocialStore();
 
   // Zustand Store - Auth State
@@ -193,7 +193,7 @@ export default function App() {
     loading: loadingAuth,
     signInWithGoogle,
     signOut,
-    initAuth
+    initAuth,
   } = useAuthStore();
 
   // Local state inputs
@@ -210,14 +210,17 @@ export default function App() {
   const lastSentStateRef = useRef("");
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
 
-
   const AVATARS = [
-    { id: 'apex', name: 'Apex Solver', src: '/avatars/avatar_apex.png' },
-    { id: 'cyber', name: 'Cyber Neon', src: '/avatars/avatar_cyber.png' },
-    { id: 'master', name: 'Grand Master', src: '/avatars/avatar_master.png' },
-    { id: 'nordic', name: 'Nordic Explorer', src: '/avatars/avatar_nordic.png' },
-    { id: 'speed', name: 'Speed Runner', src: '/avatars/avatar_speed.png' },
-    { id: 'zen', name: 'Zen Meditator', src: '/avatars/avatar_zen.png' },
+    { id: "apex", name: "Apex Solver", src: "/avatars/avatar_apex.png" },
+    { id: "cyber", name: "Cyber Neon", src: "/avatars/avatar_cyber.png" },
+    { id: "master", name: "Grand Master", src: "/avatars/avatar_master.png" },
+    {
+      id: "nordic",
+      name: "Nordic Explorer",
+      src: "/avatars/avatar_nordic.png",
+    },
+    { id: "speed", name: "Speed Runner", src: "/avatars/avatar_speed.png" },
+    { id: "zen", name: "Zen Meditator", src: "/avatars/avatar_zen.png" },
   ];
 
   // WebRTC Audio reference
@@ -247,8 +250,11 @@ export default function App() {
   }
 
   const hasRestoredRef = useRef(false);
-  const isMeSpectator = !!room?.players?.find((p) => p.id === myPlayerId)?.isSpectator;
-  const spectatedPlayer = room?.players?.find((p) => p.id === spectatingPlayerId);
+  const isMeSpectator = !!room?.players?.find((p) => p.id === myPlayerId)
+    ?.isSpectator;
+  const spectatedPlayer = room?.players?.find(
+    (p) => p.id === spectatingPlayerId,
+  );
   const hasSpectatedPlayerLeft = !!(spectatingPlayerId && !spectatedPlayer);
 
   // Connect WebSockets, init ELO profile, and restore persisted solo game on mount
@@ -269,26 +275,38 @@ export default function App() {
       const restored = loadPersistedState();
       if (restored) {
         // Restore elapsed timer from persisted state
-        const saved = JSON.parse(localStorage.getItem('sudoku_game_state') || '{}');
+        const saved = JSON.parse(
+          localStorage.getItem("sudoku_game_state") || "{}",
+        );
         if (saved.elapsedSeconds) {
           setTimeout(() => {
             setSeconds(saved.elapsedSeconds);
           }, 0);
         }
-        addToast('🔄 Game restored — pick up where you left off!', 'info');
+        addToast("🔄 Game restored — pick up where you left off!", "info");
         // gameStatus will be 'playing' → useEffect below switches view to 'game'
       }
 
       // Check after 1.5s if not connected, show the connection warning toast
       setTimeout(() => {
         if (!useLobbyStore.getState().isConnected) {
-          addToast("Wait a minute for the server to get connected. It needs up to 60 seconds", "error");
+          addToast(
+            "Wait a minute for the server to get connected. It needs up to 60 seconds",
+            "error",
+          );
         }
       }, 1500);
     }
 
     return () => setEmoteCallback(null);
-  }, [connectWebSocket, setEmoteCallback, initSocial, loadPersistedState, addToast, initAuth]);
+  }, [
+    connectWebSocket,
+    setEmoteCallback,
+    initSocial,
+    loadPersistedState,
+    addToast,
+    initAuth,
+  ]);
 
   // Sync inputName when myPlayerName updates (e.g. from Supabase Profile Sync)
   useEffect(() => {
@@ -330,7 +348,10 @@ export default function App() {
 
   useEffect(() => {
     if (isConnected && room && gameStatus === "playing") {
-      if (lastSentProgressRef.current !== myProgress || lastSentStrikesRef.current !== strikes) {
+      if (
+        lastSentProgressRef.current !== myProgress ||
+        lastSentStrikesRef.current !== strikes
+      ) {
         sendProgress(myProgress, strikes);
         lastSentProgressRef.current = myProgress;
         lastSentStrikesRef.current = strikes;
@@ -403,17 +424,17 @@ export default function App() {
   const isGamePaused = room?.isPaused;
 
   useEffect(() => {
-    if (gameStatus === 'playing' && !isGamePaused) {
+    if (gameStatus === "playing" && !isGamePaused) {
       timerRef.current = setInterval(() => {
         setSeconds((prev) => {
           const next = prev + 1;
           // Persist elapsed seconds to localStorage every second
           try {
-            const raw = localStorage.getItem('sudoku_game_state');
+            const raw = localStorage.getItem("sudoku_game_state");
             if (raw) {
               const s = JSON.parse(raw);
               s.elapsedSeconds = next;
-              localStorage.setItem('sudoku_game_state', JSON.stringify(s));
+              localStorage.setItem("sudoku_game_state", JSON.stringify(s));
             }
           } catch (err) {
             void err;
@@ -446,7 +467,9 @@ export default function App() {
 
     // 1. If room code changed (joined a new room), reset timer
     if (prevRoomCodeRef.current !== room.code) {
-      const savedState = JSON.parse(localStorage.getItem('sudoku_game_state') || '{}');
+      const savedState = JSON.parse(
+        localStorage.getItem("sudoku_game_state") || "{}",
+      );
       if (savedState && savedState.elapsedSeconds && room.isGameStarted) {
         const secondsToSet = savedState.elapsedSeconds;
         setTimeout(() => {
@@ -463,13 +486,15 @@ export default function App() {
     // 2. If game just started in the room, reset timer
     if (room.isGameStarted && !prevGameStartedRef.current) {
       // Check if we are reconnecting (have a saved board that matches)
-      const savedState = JSON.parse(localStorage.getItem('sudoku_game_state') || '{}');
-      const hasMatchingBoard = 
+      const savedState = JSON.parse(
+        localStorage.getItem("sudoku_game_state") || "{}",
+      );
+      const hasMatchingBoard =
         savedState &&
-        savedState.gameStatus === 'playing' &&
+        savedState.gameStatus === "playing" &&
         savedState.solution &&
         room.isGameStarted;
-      
+
       // If we are NOT reconnecting, reset timer to 0
       if (!hasMatchingBoard) {
         setTimeout(() => {
@@ -495,7 +520,7 @@ export default function App() {
   useEffect(() => {
     const isRoomHost = room?.players?.[0]?.id === myPlayerId;
     if (room && room.isMatchmakingRoom && !room.isGameStarted && isRoomHost) {
-      const activePlayers = room.players.filter(p => !p.isSpectator);
+      const activePlayers = room.players.filter((p) => !p.isSpectator);
       if (activePlayers.length === 2) {
         const timer = setTimeout(() => {
           startGame();
@@ -507,10 +532,12 @@ export default function App() {
 
   // Auto-spectate active player if I am a spectator in the room
   useEffect(() => {
-    if (isMeSpectator && room && gameStatus === 'playing') {
-      const activePlayer = room.players.find(p => !p.isSpectator);
+    if (isMeSpectator && room && gameStatus === "playing") {
+      const activePlayer = room.players.find((p) => !p.isSpectator);
       if (activePlayer && spectatingPlayerId !== activePlayer.id) {
-        console.log(`[Spectator Auto-Join] Spectating active player: ${activePlayer.name}`);
+        console.log(
+          `[Spectator Auto-Join] Spectating active player: ${activePlayer.name}`,
+        );
         startSpectating(activePlayer.id);
       }
     }
@@ -525,11 +552,11 @@ export default function App() {
   useEffect(() => {
     // 1. Check Game Status Changes (Start, Win, Lose)
     if (gameStatus !== prevGameStatusRef.current) {
-      if (gameStatus === 'playing' && prevGameStatusRef.current !== 'playing') {
+      if (gameStatus === "playing" && prevGameStatusRef.current !== "playing") {
         playSound.start(soundEnabled);
-      } else if (gameStatus === 'won') {
+      } else if (gameStatus === "won") {
         playSound.win(soundEnabled);
-      } else if (gameStatus === 'lost') {
+      } else if (gameStatus === "lost") {
         playSound.lose(soundEnabled);
       }
       prevGameStatusRef.current = gameStatus;
@@ -559,33 +586,66 @@ export default function App() {
           const currentVal = board[r][c];
           const prevVal = prevBoardRef.current?.[r]?.[c] ?? null;
           const solVal = solution[r][c];
-          
-          if (currentVal !== prevVal && currentVal === solVal && currentVal !== null) {
+
+          if (
+            currentVal !== prevVal &&
+            currentVal === solVal &&
+            currentVal !== null
+          ) {
             correctPlaced = true;
           }
         }
       }
-      
+
       // Play correct chime if a cell was placed correctly, strikes didn't increase, and game is active
-      if (correctPlaced && strikes === prevStrikesRef.current && gameStatus === 'playing') {
+      if (
+        correctPlaced &&
+        strikes === prevStrikesRef.current &&
+        gameStatus === "playing"
+      ) {
         playSound.correct(soundEnabled);
         if (room && room.isGameStarted && room.enableAbilities) {
           const nextStreak = myStreak + 1;
           incrementStreak();
-          const reward = nextStreak === 1 ? 10 : nextStreak === 2 ? 15 : nextStreak === 3 ? 20 : 25;
+          const reward =
+            nextStreak === 1
+              ? 10
+              : nextStreak === 2
+                ? 15
+                : nextStreak === 3
+                  ? 20
+                  : 25;
           addMana(reward);
-          addToast(`🔥 Streak x${nextStreak}! +${reward} Mana`, 'success');
+          addToast(`🔥 Streak x${nextStreak}! +${reward} Mana`, "success");
         }
       }
     }
     prevBoardRef.current = board;
-  }, [board, strikes, gameStatus, hintsRemaining, solution, soundEnabled, room, myStreak, incrementStreak, resetStreak, addMana, addToast]);
+  }, [
+    board,
+    strikes,
+    gameStatus,
+    hintsRemaining,
+    solution,
+    soundEnabled,
+    room,
+    myStreak,
+    incrementStreak,
+    resetStreak,
+    addMana,
+    addToast,
+  ]);
 
   // Track multiplayer opponents for correct moves and strikes to play chiptune warnings
   const prevOpponentsStateRef = useRef({}); // { [playerId]: { progress, strikes } }
 
   useEffect(() => {
-    if (!room || !room.players || !room.isGameStarted || gameStatus !== 'playing') {
+    if (
+      !room ||
+      !room.players ||
+      !room.isGameStarted ||
+      gameStatus !== "playing"
+    ) {
       prevOpponentsStateRef.current = {};
       return;
     }
@@ -593,7 +653,7 @@ export default function App() {
     const currentOpponentsState = {};
     room.players.forEach((p) => {
       if (p.id === myPlayerId || p.isSpectator) return;
-      
+
       const prev = prevOpponentsStateRef.current[p.id];
       if (prev) {
         // If progress increased
@@ -605,10 +665,10 @@ export default function App() {
           playSound.opponentStrike(soundEnabled);
         }
       }
-      
+
       currentOpponentsState[p.id] = {
         progress: p.progress,
-        strikes: p.strikes
+        strikes: p.strikes,
       };
     });
 
@@ -663,7 +723,12 @@ export default function App() {
   // Keyboard support for playing convenience
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (gameStatus !== "playing" || isGamePaused || spectatingPlayerId || isMeSpectator)
+      if (
+        gameStatus !== "playing" ||
+        isGamePaused ||
+        spectatingPlayerId ||
+        isMeSpectator
+      )
         return;
 
       const currentTimeString = formatTime(seconds);
@@ -688,7 +753,7 @@ export default function App() {
         getHint(currentTimeString);
         // Broadcast hint usage to other room players (keyboard shortcut path)
         if (ws && isConnected && ws.readyState === 1 && room) {
-          ws.send(JSON.stringify({ type: 'HINT_USED', payload: {} }));
+          ws.send(JSON.stringify({ type: "HINT_USED", payload: {} }));
         }
       }
     };
@@ -718,20 +783,18 @@ export default function App() {
     if (isGamePaused || spectatingPlayerId || isMeSpectator) return;
     const currentTimeString = formatTime(seconds);
 
-    if (action === 'undo') undo();
-    else if (action === 'redo') redo();
-    else if (action === 'notes') toggleNotesMode();
-    else if (action === 'erase') eraseCell();
-    else if (action === 'hint') {
+    if (action === "undo") undo();
+    else if (action === "redo") redo();
+    else if (action === "notes") toggleNotesMode();
+    else if (action === "erase") eraseCell();
+    else if (action === "hint") {
       getHint(currentTimeString);
       // Broadcast hint usage to other room players
       if (ws && isConnected && ws.readyState === 1 && room) {
-        ws.send(JSON.stringify({ type: 'HINT_USED', payload: {} }));
+        ws.send(JSON.stringify({ type: "HINT_USED", payload: {} }));
       }
     }
   };
-
-
 
   // Clipboard copy helper
   const copyRoomCode = () => {
@@ -755,7 +818,6 @@ export default function App() {
       p.progress < 100 &&
       p.strikes < 3,
   );
-
 
   // Generate join URL for QR code
   const getJoinUrl = () => {
@@ -920,9 +982,9 @@ export default function App() {
           {/* Online User Avatar */}
           <div className="flex items-center gap-2 pl-2 border-l border-border-custom">
             <div className="w-8 h-8 rounded-full bg-accent-custom flex items-center justify-center font-bold text-white shadow-sm overflow-hidden transition-all duration-300">
-              {AVATARS.find(a => a.id === selectedAvatar) ? (
+              {AVATARS.find((a) => a.id === selectedAvatar) ? (
                 <img
-                  src={AVATARS.find(a => a.id === selectedAvatar).src}
+                  src={AVATARS.find((a) => a.id === selectedAvatar).src}
                   alt="My Avatar"
                   className="w-full h-full object-cover"
                 />
@@ -952,7 +1014,10 @@ export default function App() {
                   {isConnected ? `Online (${elo} ELO)` : "Offline"}
                 </span>
                 {!isGuest && (
-                  <div className="w-2.5 h-2.5 rounded-full bg-indigo-500 flex items-center justify-center text-white" title="Linked Account">
+                  <div
+                    className="w-2.5 h-2.5 rounded-full bg-indigo-500 flex items-center justify-center text-white"
+                    title="Linked Account"
+                  >
                     <Check size={8} strokeWidth={4} />
                   </div>
                 )}
@@ -961,7 +1026,7 @@ export default function App() {
           </div>
         </div>
       </header>
- 
+
       {/* Main Container */}
       {activeView === "home" && (
         <main className="max-w-6xl mx-auto px-2 sm:px-4 py-6 md:py-10 grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
@@ -976,32 +1041,44 @@ export default function App() {
                   onClick={() => setShowAvatarPicker(!showAvatarPicker)}
                   title="Click to change avatar"
                 >
-                  {AVATARS.find(a => a.id === selectedAvatar) ? (
+                  {AVATARS.find((a) => a.id === selectedAvatar) ? (
                     <img
-                      src={AVATARS.find(a => a.id === selectedAvatar).src}
+                      src={AVATARS.find((a) => a.id === selectedAvatar).src}
                       alt="My Avatar"
                       className="w-full h-full object-cover"
                     />
                   ) : (
-                    myPlayerName?.charAt(0).toUpperCase() || 'M'
+                    myPlayerName?.charAt(0).toUpperCase() || "M"
                   )}
                 </div>
-                <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-accent-custom border-2 border-bg-custom flex items-center justify-center cursor-pointer" onClick={() => setShowAvatarPicker(!showAvatarPicker)}>
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="white"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+                <div
+                  className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-accent-custom border-2 border-bg-custom flex items-center justify-center cursor-pointer"
+                  onClick={() => setShowAvatarPicker(!showAvatarPicker)}
+                >
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="white">
+                    <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z" />
+                  </svg>
                 </div>
               </div>
- 
+
               {/* Avatar image picker */}
               {showAvatarPicker && (
                 <div className="w-full grid grid-cols-3 gap-2 p-2 bg-accent-glow/30 rounded-xl border border-border-custom/50 animate-scale-in">
-                  {AVATARS.map(avatar => (
+                  {AVATARS.map((avatar) => (
                     <button
                       key={avatar.id}
-                      onClick={() => { setSelectedAvatar(avatar.id); setShowAvatarPicker(false); }}
-                      className={`relative aspect-square rounded-xl overflow-hidden border-2 transition-all hover:scale-105 active:scale-95 ${selectedAvatar === avatar.id ? 'border-accent-custom shadow-md shadow-accent-custom/25' : 'border-transparent'}`}
+                      onClick={() => {
+                        setSelectedAvatar(avatar.id);
+                        setShowAvatarPicker(false);
+                      }}
+                      className={`relative aspect-square rounded-xl overflow-hidden border-2 transition-all hover:scale-105 active:scale-95 ${selectedAvatar === avatar.id ? "border-accent-custom shadow-md shadow-accent-custom/25" : "border-transparent"}`}
                       title={avatar.name}
                     >
-                      <img src={avatar.src} alt={avatar.name} className="w-full h-full object-cover" />
+                      <img
+                        src={avatar.src}
+                        alt={avatar.name}
+                        className="w-full h-full object-cover"
+                      />
                     </button>
                   ))}
                 </div>
@@ -1010,7 +1087,9 @@ export default function App() {
               {/* Editable username */}
               <div className="w-full">
                 <div className="flex items-center justify-between mb-1">
-                  <label className="text-[10px] uppercase font-bold opacity-50 tracking-wider block">Display Name</label>
+                  <label className="text-[10px] uppercase font-bold opacity-50 tracking-wider block">
+                    Display Name
+                  </label>
                   {!isGuest && (
                     <span className="text-[8px] bg-emerald-500/20 text-emerald-500 px-1.5 py-0.5 rounded-full font-bold flex items-center gap-0.5">
                       <Check size={8} /> Verified
@@ -1030,22 +1109,34 @@ export default function App() {
                     const success = setPlayerName(inputName);
                     if (!success) setInputName(myPlayerName);
                   }}
-                  onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") e.target.blur();
+                  }}
                   className="w-full text-center text-sm font-bold bg-accent-glow border border-border-custom rounded-xl px-3 py-2 focus:border-accent-custom focus:outline-none transition-all"
                   placeholder="Your username"
                 />
-                <p className="text-[9px] opacity-40 text-center mt-1">Change once per 24h</p>
+                <p className="text-[9px] opacity-40 text-center mt-1">
+                  Change once per 24h
+                </p>
               </div>
 
               {/* Stats */}
               <div className="w-full grid grid-cols-2 gap-2">
                 <div className="bg-accent-glow/30 rounded-xl p-2 text-center border border-border-custom/30">
-                  <p className="text-[10px] opacity-50 uppercase font-bold">ELO</p>
-                  <p className="text-sm font-extrabold text-accent-custom">{elo}</p>
+                  <p className="text-[10px] opacity-50 uppercase font-bold">
+                    ELO
+                  </p>
+                  <p className="text-sm font-extrabold text-accent-custom">
+                    {elo}
+                  </p>
                 </div>
                 <div className="bg-accent-glow/30 rounded-xl p-2 text-center border border-border-custom/30">
-                  <p className="text-[10px] opacity-50 uppercase font-bold">Rank</p>
-                  <p className="text-[10px] font-extrabold text-accent-custom leading-tight">{rank}</p>
+                  <p className="text-[10px] opacity-50 uppercase font-bold">
+                    Rank
+                  </p>
+                  <p className="text-[10px] font-extrabold text-accent-custom leading-tight">
+                    {rank}
+                  </p>
                 </div>
               </div>
 
@@ -1073,16 +1164,22 @@ export default function App() {
             {friendRequests.length > 0 && (
               <div className="glass-card rounded-2xl p-4">
                 <h3 className="text-[10px] uppercase font-bold opacity-50 tracking-wider mb-3 flex items-center gap-1.5">
-                  <UserPlus size={12} /> Friend Requests ({friendRequests.length})
+                  <UserPlus size={12} /> Friend Requests (
+                  {friendRequests.length})
                 </h3>
                 <div className="space-y-2">
-                  {friendRequests.map(req => (
-                    <div key={req.id} className="flex items-center gap-2 text-xs">
+                  {friendRequests.map((req) => (
+                    <div
+                      key={req.id}
+                      className="flex items-center gap-2 text-xs"
+                    >
                       <div className="w-7 h-7 rounded-full bg-accent-glow border border-border-custom flex items-center justify-center font-bold text-[10px]">
                         {req.name.charAt(0).toUpperCase()}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="font-bold truncate leading-tight">{req.name}</p>
+                        <p className="font-bold truncate leading-tight">
+                          {req.name}
+                        </p>
                         <p className="text-[9px] opacity-50">{req.elo} ELO</p>
                       </div>
                       <div className="flex gap-1">
@@ -1199,7 +1296,9 @@ export default function App() {
                         </label>
                       </div>
                       <button
-                        onClick={() => createRoom(selectedDifficulty, enableAbilities)}
+                        onClick={() =>
+                          createRoom(selectedDifficulty, enableAbilities)
+                        }
                         className="w-full py-3 bg-accent-glow hover:bg-accent-glow/70 border border-border-custom text-text-custom font-bold text-xs rounded-xl active:scale-95 transition-all flex items-center justify-center gap-1.5 mt-1"
                         disabled={!isConnected}
                       >
@@ -1264,14 +1363,28 @@ export default function App() {
                                     <div
                                       className={`w-7 h-7 rounded-full bg-accent-custom text-white font-bold flex items-center justify-center text-xs relative transition-all duration-300 overflow-hidden ${voiceJoined && !voiceMuted ? "speaking-pulse-avatar shadow-md shadow-emerald-500/20" : ""}`}
                                     >
-                                      {AVATARS.find(a => a.id === (isMe ? selectedAvatar : p.avatar)) ? (
+                                      {AVATARS.find(
+                                        (a) =>
+                                          a.id ===
+                                          (isMe ? selectedAvatar : p.avatar),
+                                      ) ? (
                                         <img
-                                          src={AVATARS.find(a => a.id === (isMe ? selectedAvatar : p.avatar)).src}
+                                          src={
+                                            AVATARS.find(
+                                              (a) =>
+                                                a.id ===
+                                                (isMe
+                                                  ? selectedAvatar
+                                                  : p.avatar),
+                                            ).src
+                                          }
                                           alt="Player Avatar"
                                           className="w-full h-full object-cover"
                                         />
+                                      ) : isMe ? (
+                                        "ME"
                                       ) : (
-                                        isMe ? "ME" : p.name.slice(0, 2).toUpperCase()
+                                        p.name.slice(0, 2).toUpperCase()
                                       )}
                                     </div>
                                     <div>
@@ -1523,7 +1636,11 @@ export default function App() {
                             ? "bg-accent-glow border-border-custom hover:border-accent-custom hover:text-accent-custom active:scale-95 cursor-pointer"
                             : "bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700 cursor-not-allowed opacity-50"
                         }`}
-                        title={f.status !== "online" ? `Friend must be online (currently: ${f.status})` : "Invite to Room"}
+                        title={
+                          f.status !== "online"
+                            ? `Friend must be online (currently: ${f.status})`
+                            : "Invite to Room"
+                        }
                       >
                         Invite
                       </button>
@@ -1594,7 +1711,10 @@ export default function App() {
                 </div>
 
                 {/* Lives system */}
-                <div className="flex items-center gap-1" title="Lives Remaining">
+                <div
+                  className="flex items-center gap-1"
+                  title="Lives Remaining"
+                >
                   {[1, 2, 3].map((heartIndex) => (
                     <div
                       key={heartIndex}
@@ -1628,7 +1748,7 @@ export default function App() {
                 <button
                   onClick={() => {
                     exitToHome(() => {
-                      setActiveView('home');
+                      setActiveView("home");
                       setSeconds(0);
                     });
                   }}
@@ -1641,31 +1761,36 @@ export default function App() {
               </div>
             </div>
 
-
-
             {/* Spectator Top Bar Indicator */}
             {spectatingPlayerId && (
-              <div className={`w-full max-w-[460px] glass-panel px-4 py-2 rounded-xl mb-3 border flex items-center justify-between shadow-md transition-all ${
-                hasSpectatedPlayerLeft
-                  ? "border-zinc-500/30 shadow-zinc-500/5 bg-zinc-500/5 opacity-80"
-                  : "border-rose-500/30 animate-pulse shadow-rose-500/10 bg-rose-500/5"
-              }`}>
+              <div
+                className={`w-full max-w-[460px] glass-panel px-4 py-2 rounded-xl mb-3 border flex items-center justify-between shadow-md transition-all ${
+                  hasSpectatedPlayerLeft
+                    ? "border-zinc-500/30 shadow-zinc-500/5 bg-zinc-500/5 opacity-80"
+                    : "border-rose-500/30 animate-pulse shadow-rose-500/10 bg-rose-500/5"
+                }`}
+              >
                 <div className="flex items-center gap-2">
                   {hasSpectatedPlayerLeft ? (
                     <div className="w-2 h-2 rounded-full bg-zinc-500"></div>
                   ) : (
                     <div className="w-2 h-2 rounded-full bg-rose-500 animate-ping"></div>
                   )}
-                  <span className={`text-xs font-bold uppercase tracking-wider ${
-                    hasSpectatedPlayerLeft ? "text-zinc-500" : "text-rose-500"
-                  }`}>
-                    {hasSpectatedPlayerLeft ? "⏹️ Spectating Ended" : "🔴 Live Spectating"}
+                  <span
+                    className={`text-xs font-bold uppercase tracking-wider ${
+                      hasSpectatedPlayerLeft ? "text-zinc-500" : "text-rose-500"
+                    }`}
+                  >
+                    {hasSpectatedPlayerLeft
+                      ? "⏹️ Spectating Ended"
+                      : "🔴 Live Spectating"}
                   </span>
                 </div>
                 <span className="text-xs font-bold">
                   {hasSpectatedPlayerLeft
                     ? "Disconnected"
-                    : room?.players?.find((p) => p.id === spectatingPlayerId)?.name || "Opponent"}
+                    : room?.players?.find((p) => p.id === spectatingPlayerId)
+                        ?.name || "Opponent"}
                 </span>
                 <button
                   onClick={stopSpectating}
@@ -1704,7 +1829,7 @@ export default function App() {
 
               <SudokuGrid
                 board={
-                  (spectatingPlayerId || isMeSpectator)
+                  spectatingPlayerId || isMeSpectator
                     ? spectatedPlayerBoardState?.board ||
                       Array(9)
                         .fill(null)
@@ -1712,13 +1837,15 @@ export default function App() {
                     : board
                 }
                 selectedCell={
-                  (spectatingPlayerId || isMeSpectator)
+                  spectatingPlayerId || isMeSpectator
                     ? spectatedPlayerBoardState?.selectedCell || null
                     : selectedCell
                 }
-                onCellClick={(spectatingPlayerId || isMeSpectator) ? () => {} : selectCell}
+                onCellClick={
+                  spectatingPlayerId || isMeSpectator ? () => {} : selectCell
+                }
                 notes={
-                  (spectatingPlayerId || isMeSpectator)
+                  spectatingPlayerId || isMeSpectator
                     ? spectatedPlayerBoardState?.notes ||
                       Array(9)
                         .fill(null)
@@ -1726,8 +1853,10 @@ export default function App() {
                     : notes
                 }
                 originalCells={originalCells}
-                mistakes={(spectatingPlayerId || isMeSpectator) ? [] : mistakes}
-                shakingCell={(spectatingPlayerId || isMeSpectator) ? null : shakingCell}
+                mistakes={spectatingPlayerId || isMeSpectator ? [] : mistakes}
+                shakingCell={
+                  spectatingPlayerId || isMeSpectator ? null : shakingCell
+                }
                 isSpectatingMode={!!(spectatingPlayerId || isMeSpectator)}
               />
               {hasSpectatedPlayerLeft && (
@@ -1735,129 +1864,157 @@ export default function App() {
                   <div className="text-rose-500 mb-2">
                     <X size={48} className="mx-auto animate-pulse" />
                   </div>
-                  <h3 className="text-lg font-bold text-rose-500">Player Has Left</h3>
+                  <h3 className="text-lg font-bold text-rose-500">
+                    Player Has Left
+                  </h3>
                   <p className="text-xs opacity-75 mt-1 max-w-[280px]">
                     The player you were spectating has left the game lobby.
                   </p>
                 </div>
               )}
-              {room && room.isGameStarted && room.enableAbilities && !isMeSpectator && !spectatingPlayerId && (
-                <SabotageOverlay splashes={activeInkSplashes} onWipe={wipeInkSplatter} />
-              )}
+              {room &&
+                room.isGameStarted &&
+                room.enableAbilities &&
+                !isMeSpectator &&
+                !spectatingPlayerId && (
+                  <SabotageOverlay
+                    splashes={activeInkSplashes}
+                    onWipe={wipeInkSplatter}
+                  />
+                )}
             </div>
 
             {/* Phase 12 Sabotage & Power-up Control Panel - Ultra-compact Single-Row Unified Combat Bar */}
-            {room && room.isGameStarted && room.enableAbilities && !isMeSpectator && !spectatingPlayerId && (
-              <div className="w-full max-w-[460px] glass-panel py-1.5 px-3 rounded-2xl border border-border-custom/50 flex items-center justify-between gap-3 mt-2 animate-scale-in">
-                
-                {/* Left Side: Shrunk 32px Circular SVG Mana Reactor Progress Dial */}
-                <div className="flex items-center gap-1.5 shrink-0 select-none">
-                  <div className="relative w-8 h-8 flex items-center justify-center">
-                    <svg className="w-full h-full transform -rotate-90">
-                      <circle
-                        cx="16"
-                        cy="16"
-                        r="13.5"
-                        className="stroke-border-custom opacity-25"
-                        strokeWidth="2.5"
-                        fill="transparent"
-                      />
-                      <circle
-                        cx="16"
-                        cy="16"
-                        r="13.5"
-                        className="stroke-accent-custom transition-all duration-300 ease-out"
-                        strokeWidth="2.5"
-                        fill="transparent"
-                        strokeDasharray={2 * Math.PI * 13.5}
-                        strokeDashoffset={2 * Math.PI * 13.5 * (1 - myMana / 100)}
-                        strokeLinecap="round"
-                      />
-                    </svg>
-                    {/* Centered Raw Count / Gold Lightning Badge */}
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      {myMana >= 100 ? (
-                        <span className="text-xs animate-bounce-slow" title="Max Mana Charge!">⚡</span>
-                      ) : (
-                        <span className="text-[9.5px] font-black font-sans tabular-nums text-text-custom/90 leading-none">
-                          {myMana}
-                        </span>
-                      )}
+            {room &&
+              room.isGameStarted &&
+              room.enableAbilities &&
+              !isMeSpectator &&
+              !spectatingPlayerId && (
+                <div className="w-full max-w-[460px] glass-panel py-1.5 px-3 rounded-2xl border border-border-custom/50 flex items-center justify-between gap-3 mt-2 animate-scale-in">
+                  {/* Left Side: Shrunk 32px Circular SVG Mana Reactor Progress Dial */}
+                  <div className="flex items-center gap-1.5 shrink-0 select-none">
+                    <div className="relative w-8 h-8 flex items-center justify-center">
+                      <svg className="w-full h-full transform -rotate-90">
+                        <circle
+                          cx="16"
+                          cy="16"
+                          r="13.5"
+                          className="stroke-border-custom opacity-25"
+                          strokeWidth="2.5"
+                          fill="transparent"
+                        />
+                        <circle
+                          cx="16"
+                          cy="16"
+                          r="13.5"
+                          className="stroke-accent-custom transition-all duration-300 ease-out"
+                          strokeWidth="2.5"
+                          fill="transparent"
+                          strokeDasharray={2 * Math.PI * 13.5}
+                          strokeDashoffset={
+                            2 * Math.PI * 13.5 * (1 - myMana / 100)
+                          }
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                      {/* Centered Raw Count / Gold Lightning Badge */}
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        {myMana >= 100 ? (
+                          <span
+                            className="text-xs animate-bounce-slow"
+                            title="Max Mana Charge!"
+                          >
+                            ⚡
+                          </span>
+                        ) : (
+                          <span className="text-[9.5px] font-black font-sans tabular-nums text-text-custom/90 leading-none">
+                            {myMana}
+                          </span>
+                        )}
+                      </div>
                     </div>
+                    {/* Slim Inline Indicator */}
+                    <span className="text-[8.5px] font-black tracking-wider text-accent-custom/80 uppercase font-sans">
+                      Mana
+                    </span>
                   </div>
-                  {/* Slim Inline Indicator */}
-                  <span className="text-[8.5px] font-black tracking-wider text-accent-custom/80 uppercase font-sans">
-                    Mana
-                  </span>
+
+                  {/* Right Side: Micro-Circular Keys (32px) with Floating Cost Badges */}
+                  <div className="flex items-center gap-2.5 justify-end flex-1">
+                    {/* Cleanse Shield */}
+                    <button
+                      onClick={() => myMana >= 35 && triggerAbility("cleanse")}
+                      disabled={myMana < 35}
+                      className={`
+                      relative w-8 h-8 rounded-full border flex items-center justify-center transition-all duration-300 select-none active:scale-90 hover:scale-105
+                      ${
+                        myMana >= 35
+                          ? "bg-teal-500/10 border-teal-500 text-teal-400 hover:bg-teal-500 hover:text-white shadow-[0_0_8px_rgba(20,184,166,0.3)] hover:shadow-[0_0_12px_rgba(20,184,166,0.5)] cursor-pointer animate-pulse-subtle"
+                          : "border-border-custom opacity-30 cursor-not-allowed text-text-custom/60"
+                      }
+                      ${myShieldActive ? "ring-2 ring-teal-500 animate-pulse bg-teal-500 text-white" : ""}
+                    `}
+                      title="Cleanse all sabotages & shield yourself from the next attack for 5s (Cost: 35)"
+                    >
+                      <span className="text-xs leading-none">🛡️</span>
+                      <span className="absolute -top-0.5 -right-0.5 bg-teal-500 text-white text-[6.5px] font-black w-3.5 h-3.5 rounded-full flex items-center justify-center shadow-xs border border-bg-custom leading-none">
+                        35
+                      </span>
+                    </button>
+
+                    {/* Ink Splash */}
+                    <button
+                      onClick={() => myMana >= 65 && triggerAbility("ink")}
+                      disabled={myMana < 65}
+                      className={`
+                      relative w-8 h-8 rounded-full border flex items-center justify-center transition-all duration-300 select-none active:scale-90 hover:scale-105
+                      ${
+                        myMana >= 65
+                          ? "bg-pink-500/10 border-pink-500 text-pink-400 hover:bg-pink-500 hover:text-white shadow-[0_0_8px_rgba(236,72,153,0.3)] hover:shadow-[0_0_12px_rgba(236,72,153,0.5)] cursor-pointer animate-pulse-subtle"
+                          : "border-border-custom opacity-30 cursor-not-allowed text-text-custom/60"
+                      }
+                    `}
+                      title="Splashes obscure neon ink droplets on the opponent's grid (Cost: 65)"
+                    >
+                      <span className="text-xs leading-none">💧</span>
+                      <span className="absolute -top-0.5 -right-0.5 bg-pink-500 text-white text-[6.5px] font-black w-3.5 h-3.5 rounded-full flex items-center justify-center shadow-xs border border-bg-custom leading-none">
+                        65
+                      </span>
+                    </button>
+
+                    {/* Keypad Scramble */}
+                    <button
+                      onClick={() => myMana >= 90 && triggerAbility("scramble")}
+                      disabled={myMana < 90}
+                      className={`
+                      relative w-8 h-8 rounded-full border flex items-center justify-center transition-all duration-300 select-none active:scale-90 hover:scale-105
+                      ${
+                        myMana >= 90
+                          ? "bg-purple-500/10 border-purple-500 text-purple-400 hover:bg-purple-500 hover:text-white shadow-[0_0_8px_rgba(168,85,247,0.3)] hover:shadow-[0_0_12px_rgba(168,85,247,0.5)] cursor-pointer animate-pulse-subtle"
+                          : "border-border-custom opacity-30 cursor-not-allowed text-text-custom/60"
+                      }
+                    `}
+                      title="Physically shuffles opponent's keypad buttons randomly (Cost: 90)"
+                    >
+                      <span className="text-xs leading-none">🌀</span>
+                      <span className="absolute -top-0.5 -right-0.5 bg-purple-500 text-white text-[6.5px] font-black w-3.5 h-3.5 rounded-full flex items-center justify-center shadow-xs border border-bg-custom leading-none">
+                        90
+                      </span>
+                    </button>
+                  </div>
                 </div>
-
-                {/* Right Side: Micro-Circular Keys (32px) with Floating Cost Badges */}
-                <div className="flex items-center gap-2.5 justify-end flex-1">
-                  {/* Cleanse Shield */}
-                  <button
-                    onClick={() => myMana >= 35 && triggerAbility('cleanse')}
-                    disabled={myMana < 35}
-                    className={`
-                      relative w-8 h-8 rounded-full border flex items-center justify-center transition-all duration-300 select-none active:scale-90 hover:scale-105
-                      ${myMana >= 35
-                        ? 'bg-teal-500/10 border-teal-500 text-teal-400 hover:bg-teal-500 hover:text-white shadow-[0_0_8px_rgba(20,184,166,0.3)] hover:shadow-[0_0_12px_rgba(20,184,166,0.5)] cursor-pointer animate-pulse-subtle'
-                        : 'border-border-custom opacity-30 cursor-not-allowed text-text-custom/60'
-                      }
-                      ${myShieldActive ? 'ring-2 ring-teal-500 animate-pulse bg-teal-500 text-white' : ''}
-                    `}
-                    title="Cleanse all sabotages & shield yourself from the next attack for 5s (Cost: 35)"
-                  >
-                    <span className="text-xs leading-none">🛡️</span>
-                    <span className="absolute -top-0.5 -right-0.5 bg-teal-500 text-white text-[6.5px] font-black w-3.5 h-3.5 rounded-full flex items-center justify-center shadow-xs border border-bg-custom leading-none">
-                      35
-                    </span>
-                  </button>
-
-                  {/* Ink Splash */}
-                  <button
-                    onClick={() => myMana >= 65 && triggerAbility('ink')}
-                    disabled={myMana < 65}
-                    className={`
-                      relative w-8 h-8 rounded-full border flex items-center justify-center transition-all duration-300 select-none active:scale-90 hover:scale-105
-                      ${myMana >= 65
-                        ? 'bg-pink-500/10 border-pink-500 text-pink-400 hover:bg-pink-500 hover:text-white shadow-[0_0_8px_rgba(236,72,153,0.3)] hover:shadow-[0_0_12px_rgba(236,72,153,0.5)] cursor-pointer animate-pulse-subtle'
-                        : 'border-border-custom opacity-30 cursor-not-allowed text-text-custom/60'
-                      }
-                    `}
-                    title="Splashes obscure neon ink droplets on the opponent's grid (Cost: 65)"
-                  >
-                    <span className="text-xs leading-none">💧</span>
-                    <span className="absolute -top-0.5 -right-0.5 bg-pink-500 text-white text-[6.5px] font-black w-3.5 h-3.5 rounded-full flex items-center justify-center shadow-xs border border-bg-custom leading-none">
-                      65
-                    </span>
-                  </button>
-
-                  {/* Keypad Scramble */}
-                  <button
-                    onClick={() => myMana >= 90 && triggerAbility('scramble')}
-                    disabled={myMana < 90}
-                    className={`
-                      relative w-8 h-8 rounded-full border flex items-center justify-center transition-all duration-300 select-none active:scale-90 hover:scale-105
-                      ${myMana >= 90
-                        ? 'bg-purple-500/10 border-purple-500 text-purple-400 hover:bg-purple-500 hover:text-white shadow-[0_0_8px_rgba(168,85,247,0.3)] hover:shadow-[0_0_12px_rgba(168,85,247,0.5)] cursor-pointer animate-pulse-subtle'
-                        : 'border-border-custom opacity-30 cursor-not-allowed text-text-custom/60'
-                      }
-                    `}
-                    title="Physically shuffles opponent's keypad buttons randomly (Cost: 90)"
-                  >
-                    <span className="text-xs leading-none">🌀</span>
-                    <span className="absolute -top-0.5 -right-0.5 bg-purple-500 text-white text-[6.5px] font-black w-3.5 h-3.5 rounded-full flex items-center justify-center shadow-xs border border-bg-custom leading-none">
-                      90
-                    </span>
-                  </button>
-                </div>
-              </div>
-            )}
+              )}
 
             {/* Keypad selector */}
             <Keypad
-              onNumberClick={(spectatingPlayerId || isMeSpectator) ? () => {} : (num) => enterNumber(num, formatTime(seconds))}
-              onActionClick={(spectatingPlayerId || isMeSpectator) ? () => {} : handleAction}
+              onNumberClick={
+                spectatingPlayerId || isMeSpectator
+                  ? () => {}
+                  : (num) => enterNumber(num, formatTime(seconds))
+              }
+              onActionClick={
+                spectatingPlayerId || isMeSpectator ? () => {} : handleAction
+              }
               notesMode={notesMode}
               canUndo={history.length > 0}
               canRedo={redoStack.length > 0}
@@ -1885,20 +2042,20 @@ export default function App() {
                   <Users size={16} />
                   Private Room
                 </button>
-              {/* Matchmaking tab is hidden when a game is in progress */}
-              {!room?.isGameStarted && (
-                <button
-                  onClick={() => setActiveTab("matchmaker")}
-                  className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold transition-all ${
-                    activeTab === "matchmaker"
-                      ? "bg-panel-custom text-text-custom shadow-xs"
-                      : "opacity-60 hover:opacity-100"
-                  }`}
-                >
-                  <Award size={16} />
-                  Matchmaking
-                </button>
-              )}
+                {/* Matchmaking tab is hidden when a game is in progress */}
+                {!room?.isGameStarted && (
+                  <button
+                    onClick={() => setActiveTab("matchmaker")}
+                    className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold transition-all ${
+                      activeTab === "matchmaker"
+                        ? "bg-panel-custom text-text-custom shadow-xs"
+                        : "opacity-60 hover:opacity-100"
+                    }`}
+                  >
+                    <Award size={16} />
+                    Matchmaking
+                  </button>
+                )}
               </div>
 
               {/* TAB CONTENT: Lobby Connection */}
@@ -1975,7 +2132,9 @@ export default function App() {
                       </div>
 
                       <button
-                        onClick={() => createRoom(selectedDifficulty, enableAbilities)}
+                        onClick={() =>
+                          createRoom(selectedDifficulty, enableAbilities)
+                        }
                         className="w-full py-3 bg-accent-glow hover:bg-accent-glow/70 border border-border-custom text-text-custom font-bold text-xs rounded-xl active:scale-95 transition-all flex items-center justify-center gap-1.5"
                         disabled={!isConnected}
                       >
@@ -2055,14 +2214,28 @@ export default function App() {
                                           : ""
                                       }`}
                                     >
-                                      {AVATARS.find(a => a.id === (isMe ? selectedAvatar : p.avatar)) ? (
+                                      {AVATARS.find(
+                                        (a) =>
+                                          a.id ===
+                                          (isMe ? selectedAvatar : p.avatar),
+                                      ) ? (
                                         <img
-                                          src={AVATARS.find(a => a.id === (isMe ? selectedAvatar : p.avatar)).src}
+                                          src={
+                                            AVATARS.find(
+                                              (a) =>
+                                                a.id ===
+                                                (isMe
+                                                  ? selectedAvatar
+                                                  : p.avatar),
+                                            ).src
+                                          }
                                           alt="Player Avatar"
                                           className="w-full h-full object-cover"
                                         />
+                                      ) : isMe ? (
+                                        "ME"
                                       ) : (
-                                        isMe ? "ME" : p.name.slice(0, 2).toUpperCase()
+                                        p.name.slice(0, 2).toUpperCase()
                                       )}
                                     </div>
                                     <div>
@@ -2407,16 +2580,22 @@ export default function App() {
               {friendRequests.length > 0 && (
                 <div className="mb-4 bg-accent-glow/10 border border-border-custom/50 rounded-xl p-3 space-y-2">
                   <h4 className="text-[9px] uppercase font-bold opacity-50 tracking-wider flex items-center gap-1">
-                    <UserPlus size={10} /> Pending Requests ({friendRequests.length})
+                    <UserPlus size={10} /> Pending Requests (
+                    {friendRequests.length})
                   </h4>
                   <div className="space-y-2">
-                    {friendRequests.map(req => (
-                      <div key={req.id} className="flex items-center gap-2 text-xs">
+                    {friendRequests.map((req) => (
+                      <div
+                        key={req.id}
+                        className="flex items-center gap-2 text-xs"
+                      >
                         <div className="w-6 h-6 rounded-full bg-accent-glow border border-border-custom flex items-center justify-center font-bold text-[9px]">
-                          {req.name?.charAt(0).toUpperCase() || 'F'}
+                          {req.name?.charAt(0).toUpperCase() || "F"}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="font-bold truncate leading-tight text-[11px]">{req.name}</p>
+                          <p className="font-bold truncate leading-tight text-[11px]">
+                            {req.name}
+                          </p>
                           <p className="text-[8px] opacity-50">{req.elo} ELO</p>
                         </div>
                         <div className="flex gap-0.5">
@@ -2475,7 +2654,11 @@ export default function App() {
                             ? "bg-accent-glow border-border-custom hover:border-accent-custom hover:text-accent-custom active:scale-95 cursor-pointer"
                             : "bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700 cursor-not-allowed opacity-50"
                         }`}
-                        title={f.status !== "online" ? `Friend must be online (currently: ${f.status})` : "Invite to Room"}
+                        title={
+                          f.status !== "online"
+                            ? `Friend must be online (currently: ${f.status})`
+                            : "Invite to Room"
+                        }
                       >
                         Invite
                       </button>
@@ -2778,7 +2961,8 @@ export default function App() {
               Lobby Invitation
             </h3>
             <p className="text-xs text-text-custom opacity-75">
-              <strong>{activeLobbyInvitation.inviterName}</strong> has invited you to join their game.
+              <strong>{activeLobbyInvitation.inviterName}</strong> has invited
+              you to join their game.
             </p>
             <div className="flex gap-2">
               <button
@@ -2802,7 +2986,6 @@ export default function App() {
           </div>
         </div>
       )}
-
 
       {/* Hidden WebRTC Remote Audio Player */}
       {remoteAudioStream && (
