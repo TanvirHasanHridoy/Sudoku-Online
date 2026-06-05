@@ -5,18 +5,18 @@ import { useLobbyStore } from "./useLobbyStore";
 // Helper function to generate a unique username
 const generateUniqueUsername = async (baseName) => {
   if (!supabase) return baseName;
-  
+
   // First, check if the base name is available
   const { data: existing } = await supabase
     .from("profiles")
     .select("id")
     .eq("display_name", baseName)
     .single();
-  
+
   if (!existing) {
     return baseName; // Name is available
   }
-  
+
   // If taken, try appending numbers
   for (let i = 1; i <= 999; i++) {
     const candidateName = `${baseName}_${i}`;
@@ -25,12 +25,12 @@ const generateUniqueUsername = async (baseName) => {
       .select("id")
       .eq("display_name", candidateName)
       .single();
-    
+
     if (!existingCandidate) {
       return candidateName; // Found available name
     }
   }
-  
+
   // Fallback: use timestamp if all else fails
   return `${baseName}_${Date.now()}`;
 };
@@ -52,8 +52,11 @@ export const useAuthStore = create((set, get) => ({
       data: { session },
     } = await supabase.auth.getSession();
     const initialUser = session?.user || null;
-    console.log("[Auth] Initial session check:", initialUser?.id ? `User ${initialUser.id}` : "No user");
-    
+    console.log(
+      "[Auth] Initial session check:",
+      initialUser?.id ? `User ${initialUser.id}` : "No user",
+    );
+
     if (initialUser) {
       set({ user: initialUser, isGuest: false });
       console.log("[Auth] User detected, fetching profile...");
@@ -66,7 +69,12 @@ export const useAuthStore = create((set, get) => ({
     // Listen to auth state changes
     supabase.auth.onAuthStateChange(async (event, session) => {
       const user = session?.user || null;
-      console.log("[Auth] Auth state changed, event:", event, "user:", user?.id ? `User ${user.id}` : "No user");
+      console.log(
+        "[Auth] Auth state changed, event:",
+        event,
+        "user:",
+        user?.id ? `User ${user.id}` : "No user",
+      );
 
       // Only update if user changed to avoid infinite loops or redundant fetches
       const currentUser = get().user;
@@ -74,7 +82,9 @@ export const useAuthStore = create((set, get) => ({
         set({ user, isGuest: !user });
 
         if (user) {
-          console.log("[Auth] New user detected after state change, fetching profile...");
+          console.log(
+            "[Auth] New user detected after state change, fetching profile...",
+          );
           await get().fetchAndSyncProfile(user);
         } else {
           set({ profile: null, loading: false });
@@ -96,7 +106,10 @@ export const useAuthStore = create((set, get) => ({
 
       // If it doesn't exist yet (due to race condition with trigger), retry with exponential backoff
       if (error || !profile) {
-        console.warn("[Auth] Profile not found on first attempt, retrying...", error);
+        console.warn(
+          "[Auth] Profile not found on first attempt, retrying...",
+          error,
+        );
         await new Promise((resolve) => setTimeout(resolve, 1000));
         const retryResult = await supabase
           .from("profiles")
@@ -104,10 +117,13 @@ export const useAuthStore = create((set, get) => ({
           .eq("id", user.id)
           .single();
         profile = retryResult.data;
-        
+
         // If still not found after retry, log error but continue
         if (!profile) {
-          console.error("[Auth] Profile still not found after retry:", retryResult.error);
+          console.error(
+            "[Auth] Profile still not found after retry:",
+            retryResult.error,
+          );
           set({ loading: false });
           return;
         }
@@ -132,7 +148,9 @@ export const useAuthStore = create((set, get) => ({
         // Now sync with local storage if not migrated yet
         const isMigrated = localStorage.getItem(`sudoku_migrated_${user.id}`);
         if (!isMigrated) {
-          console.log("[Auth] First migration for this user, pulling in guest data...");
+          console.log(
+            "[Auth] First migration for this user, pulling in guest data...",
+          );
           const updates = {};
           if (currentGuestElo) updates.elo = parseInt(currentGuestElo, 10);
 
@@ -192,7 +210,9 @@ export const useAuthStore = create((set, get) => ({
             (!currentName || currentName.startsWith("Solver_")) &&
             googleName
           ) {
-            console.log("[Auth] Already migrated, but Google name available and current is default, updating...");
+            console.log(
+              "[Auth] Already migrated, but Google name available and current is default, updating...",
+            );
             // Make the Google name unique
             const uniqueName = await generateUniqueUsername(googleName);
             console.log("[Auth] Using unique name:", uniqueName);
@@ -206,7 +226,10 @@ export const useAuthStore = create((set, get) => ({
               profile = updatedProfile;
               console.log("[Auth] Profile updated with Google name");
             } else {
-              console.error("[Auth] Error updating profile with Google name:", updateError);
+              console.error(
+                "[Auth] Error updating profile with Google name:",
+                updateError,
+              );
             }
           }
         }
@@ -218,7 +241,10 @@ export const useAuthStore = create((set, get) => ({
         localStorage.setItem("sudoku_elo", profile.elo.toString());
 
         // Update LobbyStore local states using setState to trigger reactivity
-        console.log("[Auth] Setting profile in auth store:", profile.display_name);
+        console.log(
+          "[Auth] Setting profile in auth store:",
+          profile.display_name,
+        );
         set({ profile });
 
         useLobbyStore.setState({
