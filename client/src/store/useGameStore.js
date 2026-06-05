@@ -449,8 +449,8 @@ export const useGameStore = create((set, get) => ({
       board: previousState.board,
       notes: previousState.notes,
       mistakes: previousState.mistakes || {},
-      timeline: previousState.timeline || [],
-      strikes: previousState.strikes
+      timeline: previousState.timeline || []
+      // Do not revert strikes, keeping current strikes count active
     }));
 
     saveGameState(get());
@@ -478,8 +478,8 @@ export const useGameStore = create((set, get) => ({
       board: nextState.board,
       notes: nextState.notes,
       mistakes: nextState.mistakes || {},
-      timeline: nextState.timeline || [],
-      strikes: nextState.strikes
+      timeline: nextState.timeline || []
+      // Do not revert strikes, keeping current strikes count active
     }));
 
     saveGameState(get());

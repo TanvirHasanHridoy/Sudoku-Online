@@ -181,6 +181,8 @@ export const useLobbyStore = create((set, get) => ({
           case 'MATCH_FOUND': {
             const { room } = payload;
             set({ room });
+            // Join the matched room authoritatively to sync the connection on the server
+            get().joinRoom(room.code);
             import('./useSocialStore').then(({ useSocialStore }) => {
               useSocialStore.getState().matchFound(payload);
             });
@@ -205,6 +207,10 @@ export const useLobbyStore = create((set, get) => ({
               myShieldActive: false,
               isScrambled: false,
               activeInkSplashes: []
+            });
+            
+            import('./useSocialStore').then(({ useSocialStore }) => {
+              useSocialStore.setState({ matchmakingStatus: 'idle', matchOpponent: null });
             });
             
             // If the game is already started in this room, load the board!
@@ -265,7 +271,7 @@ export const useLobbyStore = create((set, get) => ({
           }
 
           case 'EMOTE_RECEIVED': {
-            const { name, emoji } = payload;
+            const { emoji } = payload;
             const callback = get().emoteCallback;
             if (callback) {
               callback(emoji);
@@ -345,7 +351,11 @@ export const useLobbyStore = create((set, get) => ({
           case 'PLAYER_LEFT': {
             // Another player explicitly exited the game
             const { name: leaverName, playerId: leaverId } = payload;
-            get().addToast(`🚪 ${leaverName} exited the game. Continue playing!`, 'info');
+            if (leaverId === get().spectatingPlayerId) {
+              get().addToast(`🚪 Player you were spectating (${leaverName}) has left the game!`, 'error');
+            } else {
+              get().addToast(`🚪 ${leaverName} exited the game. Continue playing!`, 'info');
+            }
             // Remove the player from local room state so live-sync cards update immediately
             set((state) => {
               if (!state.room) return {};
@@ -487,6 +497,17 @@ export const useLobbyStore = create((set, get) => ({
                   currentSpectators.push(spectatorName);
                 }
                 get().addToast(`👁️ ${spectatorName} is now spectating your game!`, 'success');
+
+                // Immediately sync current gameplay state to the spectator
+                const gameStore = useGameStore.getState();
+                const { board, notes, selectedCell } = gameStore;
+                const { ws, isConnected } = get();
+                if (ws && isConnected && ws.readyState === 1) {
+                  ws.send(JSON.stringify({
+                    type: 'SYNC_GAMEPLAY',
+                    payload: { board, notes, selectedCell }
+                  }));
+                }
               } else {
                 const index = currentSpectators.indexOf(spectatorName);
                 if (index !== -1) {
@@ -567,18 +588,7 @@ export const useLobbyStore = create((set, get) => ({
   startGame: () => {
     const { ws, room } = get();
     if (!ws || ws.readyState !== 1 || !room) return;
-
-    // Host generates the board and solution
-    // (This guarantees both players play the exact same generated seed puzzle!)
     const activeDifficulty = room.difficulty || 'medium';
-    const { puzzle, solution } = useGameStore.getState().board.length > 0 
-      ? { 
-          puzzle: useGameStore.getState().board, 
-          solution: useGameStore.getState().solution 
-        }
-      : {}; 
-
-    // Generate puzzle
     useGameStore.getState().initGame(activeDifficulty);
     const generatedPuzzle = useGameStore.getState().board;
     const generatedSolution = useGameStore.getState().solution;
@@ -691,6 +701,8 @@ export const useLobbyStore = create((set, get) => ({
   },
 
   exitToHome: (onHome) => {
+    get().leaveVoice(); // Clean up WebRTC voice chat connection and drop streams
+
     const { ws, isConnected, room } = get();
 
     // Notify the server so other players are informed and the player is removed from the room
@@ -721,6 +733,10 @@ export const useLobbyStore = create((set, get) => ({
       myShieldActive: false,
       isScrambled: false,
       activeInkSplashes: []
+    });
+
+    import('./useSocialStore').then(({ useSocialStore }) => {
+      useSocialStore.setState({ matchmakingStatus: 'idle', matchOpponent: null });
     });
 
     if (typeof onHome === 'function') onHome();

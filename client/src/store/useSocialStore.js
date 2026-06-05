@@ -182,7 +182,7 @@ export const useSocialStore = create((set, get) => ({
   },
 
   // ELO Matchmaking Queue WebSocket Actions
-  startMatchmaking: (difficulty = 'medium') => {
+  startMatchmaking: (difficulty = 'medium', enableAbilities = false) => {
     const lobby = useLobbyStore.getState();
     if (!lobby.isConnected || !lobby.ws || lobby.ws.readyState !== 1) {
       lobby.addToast('Cannot queue. You are disconnected from server!', 'error');
@@ -195,7 +195,7 @@ export const useSocialStore = create((set, get) => ({
     // Join WebSocket Queue
     lobby.ws.send(JSON.stringify({
       type: 'JOIN_MATCHMAKING_QUEUE',
-      payload: { playerId: lobby.myPlayerId, difficulty }
+      payload: { playerId: lobby.myPlayerId, difficulty, enableAbilities }
     }));
 
     let duration = 0;

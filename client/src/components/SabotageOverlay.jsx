@@ -1,4 +1,3 @@
-import React from 'react';
 
 /**
  * SabotageOverlay renders glowing, glassmorphic neon-magenta ink splatters

@@ -1,11 +1,7 @@
-import React, { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
-  Sun,
-  Moon,
   Volume2,
   VolumeX,
-  MessageSquare,
-  Play,
   Users,
   Wifi,
   ShieldAlert,
@@ -15,12 +11,10 @@ import {
   Palette,
   Award as Trophy,
   AlertTriangle,
-  ArrowRight,
   PlayCircle,
   Timer,
   Clipboard,
   Check,
-  HelpCircle,
   Pause,
   Play as PlayIcon,
   UserPlus,
@@ -114,7 +108,6 @@ export default function App() {
     undo,
     redo,
     loadPersistedState,
-    resetPersistedState,
   } = useGameStore();
 
   // Zustand Store - Lobby State
@@ -126,7 +119,6 @@ export default function App() {
     room,
     pauseRequester,
     showPauseVoteModal,
-    showPlayAgainVoteModal,
     toasts,
     setPlayerName,
     setEmoteCallback,
@@ -136,14 +128,12 @@ export default function App() {
     toggleReady,
     startGame,
     sendProgress,
-    sendEmote,
     requestPause,
     votePause,
     votePlayAgain,
     removeToast,
     addToast,
     // WebRTC states & actions
-    localAudioStream,
     remoteAudioStream,
     isMicMuted,
     isVoiceJoined,
@@ -171,7 +161,6 @@ export default function App() {
     incrementStreak,
     triggerAbility,
     wipeInkSplatter,
-    cleanseAllSabotages
   } = useLobbyStore();
 
   // Zustand Store - Social State
@@ -199,9 +188,12 @@ export default function App() {
   const [friendNameInput, setFriendNameInput] = useState("");
   const [isCopied, setIsCopied] = useState(false);
   const [selectedDifficulty, setSelectedDifficulty] = useState("easy");
-  const [enableAbilities, setEnableAbilities] = useState(true);
+  const [enableAbilities, setEnableAbilities] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const timerRef = useRef(null);
+  const lastSentProgressRef = useRef(null);
+  const lastSentStrikesRef = useRef(null);
+  const lastSentStateRef = useRef("");
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
 
   const AVATARS = [
@@ -228,8 +220,21 @@ export default function App() {
   const [emotes, setEmotes] = useState([]);
   const [activeTab, setActiveTab] = useState("lobby"); // 'lobby' | 'matchmaker'
 
+  // Trigger floating visual emotes on screen
+  function triggerEmoteVisual(emoji) {
+    const id = Date.now() + Math.random();
+    const left = Math.floor(Math.random() * 60) + 20;
+    setEmotes((prev) => [...prev, { id, emoji, left }]);
+
+    setTimeout(() => {
+      setEmotes((prev) => prev.filter((e) => e.id !== id));
+    }, 1500);
+  }
+
   const hasRestoredRef = useRef(false);
   const isMeSpectator = !!room?.players?.find((p) => p.id === myPlayerId)?.isSpectator;
+  const spectatedPlayer = room?.players?.find((p) => p.id === spectatingPlayerId);
+  const hasSpectatedPlayerLeft = !!(spectatingPlayerId && !spectatedPlayer);
 
   // Connect WebSockets, init ELO profile, and restore persisted solo game on mount
   useEffect(() => {
@@ -250,11 +255,20 @@ export default function App() {
         // Restore elapsed timer from persisted state
         const saved = JSON.parse(localStorage.getItem('sudoku_game_state') || '{}');
         if (saved.elapsedSeconds) {
-          setSeconds(saved.elapsedSeconds);
+          setTimeout(() => {
+            setSeconds(saved.elapsedSeconds);
+          }, 0);
         }
         addToast('🔄 Game restored — pick up where you left off!', 'info');
         // gameStatus will be 'playing' → useEffect below switches view to 'game'
       }
+
+      // Check after 1.5s if not connected, show the connection warning toast
+      setTimeout(() => {
+        if (!useLobbyStore.getState().isConnected) {
+          addToast("Wait a minute for the server to get connected. It needs up to 60 seconds", "error");
+        }
+      }, 1500);
     }
 
     return () => setEmoteCallback(null);
@@ -292,9 +306,13 @@ export default function App() {
 
   useEffect(() => {
     if (isConnected && room && gameStatus === "playing") {
-      sendProgress(myProgress, strikes);
+      if (lastSentProgressRef.current !== myProgress || lastSentStrikesRef.current !== strikes) {
+        sendProgress(myProgress, strikes);
+        lastSentProgressRef.current = myProgress;
+        lastSentStrikesRef.current = strikes;
+      }
     }
-  }, [myProgress, strikes, isConnected, gameStatus, sendProgress]);
+  }, [myProgress, strikes, isConnected, gameStatus, sendProgress, room]);
 
   // Sync live gameplay state to server for spectators
   useEffect(() => {
@@ -306,17 +324,21 @@ export default function App() {
       statusInRoom &&
       !statusInRoom.isSpectator
     ) {
-      if (ws && ws.readyState === 1) {
-        ws.send(
-          JSON.stringify({
-            type: "SYNC_GAMEPLAY",
-            payload: {
-              board,
-              notes,
-              selectedCell,
-            },
-          }),
-        );
+      const stateStr = JSON.stringify({ board, notes, selectedCell });
+      if (lastSentStateRef.current !== stateStr) {
+        if (ws && ws.readyState === 1) {
+          ws.send(
+            JSON.stringify({
+              type: "SYNC_GAMEPLAY",
+              payload: {
+                board,
+                notes,
+                selectedCell,
+              },
+            }),
+          );
+          lastSentStateRef.current = stateStr;
+        }
       }
     }
   }, [
@@ -369,7 +391,9 @@ export default function App() {
               s.elapsedSeconds = next;
               localStorage.setItem('sudoku_game_state', JSON.stringify(s));
             }
-          } catch (_) {}
+          } catch (err) {
+            void err;
+          }
           return next;
         });
       }, 1000);
@@ -382,7 +406,10 @@ export default function App() {
   // Switch to game view when playing starts
   useEffect(() => {
     if (gameStatus === "playing") {
-      setActiveView("game");
+      setTimeout(() => {
+        setActiveView("game");
+        setActiveTab("lobby");
+      }, 0);
     }
   }, [gameStatus]);
 
@@ -391,19 +418,20 @@ export default function App() {
   const prevGameStartedRef = useRef(false);
 
   useEffect(() => {
-    if (!room) {
-      prevRoomCodeRef.current = null;
-      prevGameStartedRef.current = false;
-      return;
-    }
+    if (!room) return;
 
     // 1. If room code changed (joined a new room), reset timer
     if (prevRoomCodeRef.current !== room.code) {
       const savedState = JSON.parse(localStorage.getItem('sudoku_game_state') || '{}');
       if (savedState && savedState.elapsedSeconds && room.isGameStarted) {
-        setSeconds(savedState.elapsedSeconds);
+        const secondsToSet = savedState.elapsedSeconds;
+        setTimeout(() => {
+          setSeconds(secondsToSet);
+        }, 0);
       } else {
-        setSeconds(0);
+        setTimeout(() => {
+          setSeconds(0);
+        }, 0);
       }
       prevRoomCodeRef.current = room.code;
     }
@@ -420,13 +448,15 @@ export default function App() {
       
       // If we are NOT reconnecting, reset timer to 0
       if (!hasMatchingBoard) {
-        setSeconds(0);
+        setTimeout(() => {
+          setSeconds(0);
+        }, 0);
       }
       prevGameStartedRef.current = true;
     } else if (!room.isGameStarted) {
       prevGameStartedRef.current = false;
     }
-  }, [room?.code, room?.isGameStarted]);
+  }, [room]);
 
   // Auto-exit to home if we were in a room but it became null (e.g., kicked or left)
   const prevRoomRef = useRef(null);
@@ -437,6 +467,20 @@ export default function App() {
     prevRoomRef.current = room;
   }, [room]);
 
+  // Auto-start game in matchmaking rooms when both players are present
+  useEffect(() => {
+    const isRoomHost = room?.players?.[0]?.id === myPlayerId;
+    if (room && room.isMatchmakingRoom && !room.isGameStarted && isRoomHost) {
+      const activePlayers = room.players.filter(p => !p.isSpectator);
+      if (activePlayers.length === 2) {
+        const timer = setTimeout(() => {
+          startGame();
+        }, 200);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [room, myPlayerId, startGame]);
+
   // Auto-spectate active player if I am a spectator in the room
   useEffect(() => {
     if (isMeSpectator && room && gameStatus === 'playing') {
@@ -446,7 +490,7 @@ export default function App() {
         startSpectating(activePlayer.id);
       }
     }
-  }, [isMeSpectator, room?.players, gameStatus, spectatingPlayerId, startSpectating]);
+  }, [isMeSpectator, room, gameStatus, spectatingPlayerId, startSpectating]);
 
   // Zero-dependency chiptune audio retro synthesizer triggers & mana additions
   const prevBoardRef = useRef(board);
@@ -511,7 +555,7 @@ export default function App() {
       }
     }
     prevBoardRef.current = board;
-  }, [board, strikes, gameStatus, hintsRemaining, solution, soundEnabled, room?.isGameStarted, room?.enableAbilities, myStreak, incrementStreak, resetStreak, addMana, addToast]);
+  }, [board, strikes, gameStatus, hintsRemaining, solution, soundEnabled, room, myStreak, incrementStreak, resetStreak, addMana, addToast]);
 
   // Track multiplayer opponents for correct moves and strikes to play chiptune warnings
   const prevOpponentsStateRef = useRef({}); // { [playerId]: { progress, strikes } }
@@ -545,7 +589,7 @@ export default function App() {
     });
 
     prevOpponentsStateRef.current = currentOpponentsState;
-  }, [room?.players, room?.isGameStarted, gameStatus, myPlayerId, soundEnabled]);
+  }, [room, gameStatus, myPlayerId, soundEnabled]);
 
   // Format timer
   const formatTime = (secs) => {
@@ -663,24 +707,7 @@ export default function App() {
     }
   };
 
-  // Trigger floating visual emotes on screen
-  const triggerEmoteVisual = (emoji) => {
-    const id = Date.now() + Math.random();
-    const left = Math.floor(Math.random() * 60) + 20;
-    setEmotes((prev) => [...prev, { id, emoji, left }]);
 
-    setTimeout(() => {
-      setEmotes((prev) => prev.filter((e) => e.id !== id));
-    }, 1500);
-  };
-
-  // Emit quick reaction emote to socket + float locally
-  const handleEmoteClick = (emoji) => {
-    triggerEmoteVisual(emoji);
-    if (room && isConnected) {
-      sendEmote(emoji);
-    }
-  };
 
   // Clipboard copy helper
   const copyRoomCode = () => {
@@ -704,6 +731,7 @@ export default function App() {
       p.progress < 100 &&
       p.strikes < 3,
   );
+
 
   // Generate join URL for QR code
   const getJoinUrl = () => {
@@ -1163,7 +1191,7 @@ export default function App() {
                                           ))}
                                       </div>
                                       <span className="text-[9px] opacity-60">
-                                        1450 ELO
+                                        {p.elo || 1450} ELO
                                       </span>
                                     </div>
                                   </div>
@@ -1504,18 +1532,31 @@ export default function App() {
               </div>
             </div>
 
+
+
             {/* Spectator Top Bar Indicator */}
             {spectatingPlayerId && (
-              <div className="w-full max-w-[460px] glass-panel px-4 py-2 rounded-xl mb-3 border border-rose-500/30 flex items-center justify-between animate-pulse shadow-md shadow-rose-500/10 bg-rose-500/5">
+              <div className={`w-full max-w-[460px] glass-panel px-4 py-2 rounded-xl mb-3 border flex items-center justify-between shadow-md transition-all ${
+                hasSpectatedPlayerLeft
+                  ? "border-zinc-500/30 shadow-zinc-500/5 bg-zinc-500/5 opacity-80"
+                  : "border-rose-500/30 animate-pulse shadow-rose-500/10 bg-rose-500/5"
+              }`}>
                 <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-rose-500 animate-ping"></div>
-                  <span className="text-xs font-bold uppercase tracking-wider text-rose-500">
-                    🔴 Live Spectating
+                  {hasSpectatedPlayerLeft ? (
+                    <div className="w-2 h-2 rounded-full bg-zinc-500"></div>
+                  ) : (
+                    <div className="w-2 h-2 rounded-full bg-rose-500 animate-ping"></div>
+                  )}
+                  <span className={`text-xs font-bold uppercase tracking-wider ${
+                    hasSpectatedPlayerLeft ? "text-zinc-500" : "text-rose-500"
+                  }`}>
+                    {hasSpectatedPlayerLeft ? "⏹️ Spectating Ended" : "🔴 Live Spectating"}
                   </span>
                 </div>
                 <span className="text-xs font-bold">
-                  {room?.players?.find((p) => p.id === spectatingPlayerId)
-                    ?.name || "Opponent"}
+                  {hasSpectatedPlayerLeft
+                    ? "Disconnected"
+                    : room?.players?.find((p) => p.id === spectatingPlayerId)?.name || "Opponent"}
                 </span>
                 <button
                   onClick={stopSpectating}
@@ -1530,7 +1571,9 @@ export default function App() {
             <div
               className={`relative w-full max-w-[460px] p-1 rounded-2xl transition-all duration-500 ${
                 spectatingPlayerId
-                  ? "ring-4 ring-rose-500/30 bg-rose-500/5"
+                  ? hasSpectatedPlayerLeft
+                    ? "ring-4 ring-zinc-500/20 bg-zinc-500/5"
+                    : "ring-4 ring-rose-500/30 bg-rose-500/5"
                   : (myActiveSpectators || []).length > 0
                     ? "ring-4 ring-emerald-500/30 bg-emerald-500/5"
                     : ""
@@ -1578,6 +1621,17 @@ export default function App() {
                 shakingCell={(spectatingPlayerId || isMeSpectator) ? null : shakingCell}
                 isSpectatingMode={!!(spectatingPlayerId || isMeSpectator)}
               />
+              {hasSpectatedPlayerLeft && (
+                <div className="absolute inset-0 bg-zinc-950/80 backdrop-blur-sm rounded-xl flex flex-col items-center justify-center text-center p-6 z-20 animate-fade-in border border-border-custom">
+                  <div className="text-rose-500 mb-2">
+                    <X size={48} className="mx-auto animate-pulse" />
+                  </div>
+                  <h3 className="text-lg font-bold text-rose-500">Player Has Left</h3>
+                  <p className="text-xs opacity-75 mt-1 max-w-[280px]">
+                    The player you were spectating has left the game lobby.
+                  </p>
+                </div>
+              )}
               {room && room.isGameStarted && room.enableAbilities && !isMeSpectator && !spectatingPlayerId && (
                 <SabotageOverlay splashes={activeInkSplashes} onWipe={wipeInkSplatter} />
               )}
@@ -1693,7 +1747,7 @@ export default function App() {
 
             {/* Keypad selector */}
             <Keypad
-              onNumberClick={(spectatingPlayerId || isMeSpectator) ? () => {} : enterNumber}
+              onNumberClick={(spectatingPlayerId || isMeSpectator) ? () => {} : (num) => enterNumber(num, formatTime(seconds))}
               onActionClick={(spectatingPlayerId || isMeSpectator) ? () => {} : handleAction}
               notesMode={notesMode}
               canUndo={history.length > 0}
@@ -1923,7 +1977,7 @@ export default function App() {
                                           ))}
                                       </div>
                                       <span className="text-[9px] opacity-60">
-                                        1450 ELO
+                                        {p.elo || 1450} ELO
                                       </span>
                                     </div>
                                   </div>

@@ -30,7 +30,6 @@ const rooms = new Map();
 // Global Connected Clients and Matchmaking Queue
 const connectedClients = new Map();     // Map<playerId, { id, socket, name, elo }>
 const matchmakingQueue = [];            // Array of { playerId, name, elo, difficulty, socket, queuedAt }
-const botIntervals = new Map();        // Map<roomCode, intervalId>
 
 // Helper: Generate unique 6-digit room code
 function generateRoomCode() {
@@ -59,10 +58,12 @@ function getSanitizedRoom(room) {
     code: room.code,
     difficulty: room.difficulty,
     enableAbilities: room.enableAbilities,
+    board: room.board,
     isGameStarted: room.isGameStarted,
     isPaused: room.isPaused,
     pauseVotes: room.pauseVotes,
     playAgainVotes: room.playAgainVotes,
+    isMatchmakingRoom: !!room.isMatchmakingRoom,
     players: room.players.map(p => ({
       id: p.id,
       name: p.name,
@@ -73,7 +74,8 @@ function getSanitizedRoom(room) {
       mana: p.mana || 0,
       isSpectator: p.isSpectator,
       isVoiceJoined: !!p.isVoiceJoined,
-      isVoiceMuted: !!p.isVoiceMuted
+      isVoiceMuted: !!p.isVoiceMuted,
+      elo: p.elo || 1450
     }))
   };
 }
@@ -92,6 +94,8 @@ wss.on('connection', (ws) => {
         case 'CREATE_ROOM': {
           const { name, playerId, difficulty, avatar, enableAbilities } = payload;
           const code = generateRoomCode();
+          const client = connectedClients.get(playerId);
+          const elo = client ? client.elo : 1450;
 
           currentPlayer = {
             id: playerId,
@@ -102,6 +106,7 @@ wss.on('connection', (ws) => {
             strikes: 0,
             mana: 0,
             isSpectator: false,
+            elo: elo,
             socket: ws
           };
 
@@ -159,11 +164,13 @@ wss.on('connection', (ws) => {
             }
           }
 
-          // 2. Forced spectator: anyone who enters after game started becomes spectator
+          // Forced spectator: anyone who enters after game started becomes spectator
           const forcedSpectator = room.isGameStarted ? true : !!isSpectator;
 
           // Check if player already in the room
           const existingPlayerIndex = room.players.findIndex(p => p.id === playerId);
+          const client = connectedClients.get(playerId);
+          const elo = client ? client.elo : 1450;
           
           currentPlayer = {
             id: playerId,
@@ -174,6 +181,7 @@ wss.on('connection', (ws) => {
             strikes: 0,
             mana: 0,
             isSpectator: forcedSpectator,
+            elo: elo,
             socket: ws
           };
 
@@ -234,7 +242,7 @@ wss.on('connection', (ws) => {
           }
 
           // Only allow start if all players are ready (excluding spectators)
-          const allReady = activePlayers.every(p => p.isReady);
+          const allReady = room.isMatchmakingRoom || activePlayers.every(p => p.isReady);
 
           if (!allReady) {
             ws.send(JSON.stringify({
@@ -262,64 +270,6 @@ wss.on('connection', (ws) => {
             }
           });
 
-          // Trigger simulated opponent bot progress updates if one is present
-          const bot = room.players.find(p => p.id.startsWith('opp_'));
-          if (bot) {
-            if (botIntervals.has(room.code)) {
-              clearInterval(botIntervals.get(room.code));
-            }
-            const roomCode = room.code;
-            const botId = bot.id;
-            const intervalId = setInterval(() => {
-              const activeRoom = rooms.get(roomCode);
-              if (!activeRoom || !activeRoom.isGameStarted) return;
-              if (activeRoom.isPaused) return;
-
-              const activeBot = activeRoom.players.find(p => p.id === botId);
-              if (!activeBot) {
-                clearInterval(intervalId);
-                botIntervals.delete(roomCode);
-                return;
-              }
-
-              // Increment progress by 2% to 6%
-              activeBot.progress = Math.min(100, activeBot.progress + Math.floor(Math.random() * 5 + 2));
-              
-              // 5% chance of strike (if active strikes < 3)
-              if (Math.random() < 0.05 && activeBot.strikes < 3) {
-                activeBot.strikes++;
-              }
-
-              // Broadcast progress update
-              broadcastToRoom(roomCode, {
-                type: 'PROGRESS_UPDATED',
-                payload: {
-                  playerId: activeBot.id,
-                  progress: activeBot.progress,
-                  strikes: activeBot.strikes,
-                  mana: activeBot.mana
-                }
-              });
-
-              // Check if finished or eliminated
-              if (activeBot.progress >= 100 || activeBot.strikes >= 3) {
-                clearInterval(intervalId);
-                botIntervals.delete(roomCode);
-
-                broadcastToRoom(roomCode, {
-                  type: 'PLAYER_FINISHED',
-                  payload: {
-                    playerId: activeBot.id,
-                    name: activeBot.name,
-                    progress: activeBot.progress,
-                    strikes: activeBot.strikes
-                  }
-                });
-              }
-            }, 4000);
-
-            botIntervals.set(roomCode, intervalId);
-          }
           break;
         }
 
@@ -1036,7 +986,7 @@ wss.on('connection', (ws) => {
         }
 
         case 'JOIN_MATCHMAKING_QUEUE': {
-          const { playerId, difficulty } = payload;
+          const { playerId, difficulty, enableAbilities } = payload;
           if (!playerId) return;
 
           const client = connectedClients.get(playerId);
@@ -1053,11 +1003,12 @@ wss.on('connection', (ws) => {
             name: client.name,
             elo: client.elo,
             difficulty: difficulty || 'medium',
+            enableAbilities: !!enableAbilities,
             socket: ws,
             queuedAt: Date.now()
           });
 
-          console.log(`[Queue Join] Player: ${client.name} (ELO: ${client.elo}) for ${difficulty}`);
+          console.log(`[Queue Join] Player: ${client.name} (ELO: ${client.elo}) for ${difficulty} (Abilities: ${!!enableAbilities})`);
           break;
         }
 
@@ -1139,13 +1090,9 @@ wss.on('connection', (ws) => {
           });
         }
 
-        if (currentRoom.players.length === 0 || currentRoom.players.every(p => p.id.startsWith('opp_'))) {
+        if (currentRoom.players.length === 0) {
           rooms.delete(currentRoomCode);
-          if (botIntervals.has(currentRoomCode)) {
-            clearInterval(botIntervals.get(currentRoomCode));
-            botIntervals.delete(currentRoomCode);
-          }
-          console.log(`[WS Room Deleted] Room ${currentRoomCode} is empty or only bots remain.`);
+          console.log(`[WS Room Deleted] Room ${currentRoomCode} is empty.`);
         } else {
           // Send PLAYER_LEFT so clients can update live-sync immediately and show a named toast
           broadcastToRoom(currentRoomCode, {
@@ -1172,158 +1119,99 @@ setInterval(() => {
     for (let j = i + 1; j < matchmakingQueue.length; j++) {
       const playerB = matchmakingQueue[j];
 
-      if (playerA.difficulty === playerB.difficulty) {
-        const durationA = (Date.now() - playerA.queuedAt) / 1000;
-        const durationB = (Date.now() - playerB.queuedAt) / 1000;
-        const tolerance = Math.max(50, Math.max(durationA, durationB) * 25);
+      // Match players purely based on ELO proximity tolerance & matching abilities preference
+      if (playerA.enableAbilities !== playerB.enableAbilities) continue;
 
-        if (Math.abs(playerA.elo - playerB.elo) <= tolerance) {
-          console.log(`[Match Found!] ${playerA.name} (${playerA.elo}) matched with ${playerB.name} (${playerB.elo})`);
+      const durationA = (Date.now() - playerA.queuedAt) / 1000;
+      const durationB = (Date.now() - playerB.queuedAt) / 1000;
+      const tolerance = Math.max(50, Math.max(durationA, durationB) * 25);
 
-          // Remove both from queue
-          matchmakingQueue.splice(j, 1);
-          matchmakingQueue.splice(i, 1);
-          i--;
+      if (Math.abs(playerA.elo - playerB.elo) <= tolerance) {
+        console.log(`[Match Found!] ${playerA.name} (${playerA.elo}) matched with ${playerB.name} (${playerB.elo})`);
 
-          // Create the room
-          const roomCode = generateRoomCode();
-          
-          const playerAConnection = {
-            id: playerA.playerId,
-            name: playerA.name,
-            avatar: 'apex',
-            isReady: false,
-            progress: 0,
-            strikes: 0,
-            mana: 0,
-            isSpectator: false,
-            socket: playerA.socket
-          };
+        // Remove both from queue
+        matchmakingQueue.splice(j, 1);
+        matchmakingQueue.splice(i, 1);
+        i--;
 
-          const playerBConnection = {
-            id: playerB.playerId,
-            name: playerB.name,
-            avatar: 'cyber',
-            isReady: false,
-            progress: 0,
-            strikes: 0,
-            mana: 0,
-            isSpectator: false,
-            socket: playerB.socket
-          };
+        // Calculate difficulty based on ELO rating
+        const averageElo = (playerA.elo + playerB.elo) / 2;
+        let matchedDifficulty = 'medium';
+        if (averageElo < 1200) matchedDifficulty = 'beginner';
+        else if (averageElo < 1400) matchedDifficulty = 'easy';
+        else if (averageElo < 1600) matchedDifficulty = 'medium';
+        else if (averageElo < 1800) matchedDifficulty = 'hard';
+        else matchedDifficulty = 'expert';
 
-          const room = {
-            code: roomCode,
-            difficulty: playerA.difficulty,
-            enableAbilities: true,
-            board: null,
-            solution: null,
-            isGameStarted: false,
-            isPaused: false,
-            pauseVotes: {},
-            pauseRequesterId: null,
-            lastPauseRequestTime: 0,
-            playAgainVotes: {},
-            players: [playerAConnection, playerBConnection]
-          };
+        // Create the room
+        const roomCode = generateRoomCode();
+        
+        const playerAConnection = {
+          id: playerA.playerId,
+          name: playerA.name,
+          avatar: 'apex',
+          isReady: true,
+          progress: 0,
+          strikes: 0,
+          mana: 0,
+          isSpectator: false,
+          elo: playerA.elo,
+          socket: playerA.socket
+        };
 
-          rooms.set(roomCode, room);
+        const playerBConnection = {
+          id: playerB.playerId,
+          name: playerB.name,
+          avatar: 'cyber',
+          isReady: true,
+          progress: 0,
+          strikes: 0,
+          mana: 0,
+          isSpectator: false,
+          elo: playerB.elo,
+          socket: playerB.socket
+        };
 
-          const matchPayloadA = {
-            room: getSanitizedRoom(room),
-            myPlayerId: playerA.playerId,
-            opponent: { name: playerB.name, elo: playerB.elo }
-          };
+        const room = {
+          code: roomCode,
+          difficulty: matchedDifficulty,
+          enableAbilities: playerA.enableAbilities,
+          board: null,
+          solution: null,
+          isGameStarted: false,
+          isPaused: false,
+          pauseVotes: {},
+          pauseRequesterId: null,
+          lastPauseRequestTime: 0,
+          playAgainVotes: {},
+          players: [playerAConnection, playerBConnection],
+          isMatchmakingRoom: true
+        };
 
-          const matchPayloadB = {
-            room: getSanitizedRoom(room),
-            myPlayerId: playerB.playerId,
-            opponent: { name: playerA.name, elo: playerA.elo }
-          };
+        rooms.set(roomCode, room);
 
-          playerA.socket.send(JSON.stringify({ type: 'MATCH_FOUND', payload: matchPayloadA }));
-          playerB.socket.send(JSON.stringify({ type: 'MATCH_FOUND', payload: matchPayloadB }));
-          
-          break;
-        }
+        const matchPayloadA = {
+          room: getSanitizedRoom(room),
+          myPlayerId: playerA.playerId,
+          opponent: { name: playerB.name, elo: playerB.elo }
+        };
+
+        const matchPayloadB = {
+          room: getSanitizedRoom(room),
+          myPlayerId: playerB.playerId,
+          opponent: { name: playerA.name, elo: playerA.elo }
+        };
+
+        playerA.socket.send(JSON.stringify({ type: 'MATCH_FOUND', payload: matchPayloadA }));
+        playerB.socket.send(JSON.stringify({ type: 'MATCH_FOUND', payload: matchPayloadB }));
+        
+        break;
       }
     }
   }
 }, 1500);
 
-// ELO Matchmaking Queue Bot Simulator Fallback (Matches bots after 5 seconds of waiting)
-setInterval(() => {
-  const now = Date.now();
-  for (let i = 0; i < matchmakingQueue.length; i++) {
-    const player = matchmakingQueue[i];
-    const waitTime = (now - player.queuedAt) / 1000;
 
-    if (waitTime >= 5) {
-      matchmakingQueue.splice(i, 1);
-      i--;
-
-      console.log(`[Queue Timeout] Match with Bot for ${player.name} (${player.elo} ELO)`);
-
-      const roomCode = generateRoomCode();
-      const botId = 'opp_' + Math.random().toString(36).substring(2, 6);
-      
-      const eloTarget = player.elo;
-      const botNames = ['ApexSolver_99', 'NordicMaster', 'ZenPuzzler', 'SpeedRunner_7', 'SudokuKing'];
-      const chosenBotName = botNames[Math.floor(Math.random() * botNames.length)];
-      const botElo = eloTarget + Math.floor(Math.random() * 120 - 60);
-
-      const playerConnection = {
-        id: player.playerId,
-        name: player.name,
-        avatar: 'apex',
-        isReady: false,
-        progress: 0,
-        strikes: 0,
-        mana: 0,
-        isSpectator: false,
-        socket: player.socket
-      };
-
-      const botConnection = {
-        id: botId,
-        name: chosenBotName,
-        avatar: 'zen',
-        isReady: true,
-        progress: 0,
-        strikes: 0,
-        mana: 0,
-        isSpectator: false,
-        socket: null
-      };
-
-      const room = {
-        code: roomCode,
-        difficulty: player.difficulty,
-        enableAbilities: true,
-        board: null,
-        solution: null,
-        isGameStarted: false,
-        isPaused: false,
-        pauseVotes: {},
-        pauseRequesterId: null,
-        lastPauseRequestTime: 0,
-        playAgainVotes: {},
-        players: [playerConnection, botConnection]
-      };
-
-      rooms.set(roomCode, room);
-
-      const matchPayload = {
-        room: getSanitizedRoom(room),
-        myPlayerId: player.playerId,
-        opponent: { name: chosenBotName, elo: botElo }
-      };
-
-      player.socket.send(JSON.stringify({ type: 'MATCH_FOUND', payload: matchPayload }));
-      break;
-    }
-  }
-}, 1000);
 
 app.get('/health', (req, res) => {
   res.send({ status: 'ok', activeRooms: rooms.size });

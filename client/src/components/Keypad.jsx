@@ -15,16 +15,24 @@ export default function Keypad({
   const [shuffledButtons, setShuffledButtons] = React.useState([1, 2, 3, 4, 5, 6, 7, 8, 9]);
 
   React.useEffect(() => {
+    let active = true;
     if (isScrambled) {
       const arr = [1, 2, 3, 4, 5, 6, 7, 8, 9];
       for (let i = arr.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [arr[i], arr[j]] = [arr[j], arr[i]];
       }
-      setShuffledButtons(arr);
+      setTimeout(() => {
+        if (active) setShuffledButtons(arr);
+      }, 0);
     } else {
-      setShuffledButtons([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+      setTimeout(() => {
+        if (active) setShuffledButtons([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+      }, 0);
     }
+    return () => {
+      active = false;
+    };
   }, [isScrambled]);
 
   return (
