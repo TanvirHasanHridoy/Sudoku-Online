@@ -15,7 +15,9 @@ export const useAuthStore = create((set, get) => ({
     }
 
     // Check current session immediately
-    const { data: { session } } = await supabase.auth.getSession();
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
     const initialUser = session?.user || null;
     if (initialUser) {
       set({ user: initialUser, isGuest: false });
@@ -27,7 +29,7 @@ export const useAuthStore = create((set, get) => ({
     // Listen to auth state changes
     supabase.auth.onAuthStateChange(async (event, session) => {
       const user = session?.user || null;
-      
+
       // Only update if user changed to avoid infinite loops or redundant fetches
       const currentUser = get().user;
       if (user?.id !== currentUser?.id) {
@@ -122,9 +124,13 @@ export const useAuthStore = create((set, get) => ({
           localStorage.setItem(`sudoku_migrated_${user.id}`, "true");
         } else {
           // Even if migrated, check if we should still try to pull in Google name if current name is default
-          const googleName = user.user_metadata?.full_name || user.user_metadata?.name;
+          const googleName =
+            user.user_metadata?.full_name || user.user_metadata?.name;
           const currentName = profile.display_name;
-          if ((!currentName || currentName.startsWith('Solver_')) && googleName) {
+          if (
+            (!currentName || currentName.startsWith("Solver_")) &&
+            googleName
+          ) {
             const { data: updatedProfile, error: updateError } = await supabase
               .from("profiles")
               .update({ display_name: googleName })
@@ -145,11 +151,11 @@ export const useAuthStore = create((set, get) => ({
 
         // Update LobbyStore local states using setState to trigger reactivity
         set({ profile });
-        
+
         useLobbyStore.setState({
           myPlayerId: profile.id,
           myPlayerName: profile.display_name,
-          selectedAvatar: profile.avatar_id || "apex"
+          selectedAvatar: profile.avatar_id || "apex",
         });
 
         const lobbyStore = useLobbyStore.getState();
