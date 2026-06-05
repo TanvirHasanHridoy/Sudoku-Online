@@ -1013,7 +1013,7 @@ export default function App() {
                 <span className="text-[9px] font-semibold opacity-65">
                   {isConnected ? `Online (${elo} ELO)` : "Offline"}
                 </span>
-                {!isGuest && (
+                {(!isGuest || profile) && (
                   <div
                     className="w-2.5 h-2.5 rounded-full bg-indigo-500 flex items-center justify-center text-white"
                     title="Linked Account"
@@ -1090,14 +1090,16 @@ export default function App() {
                   <label className="text-[10px] uppercase font-bold opacity-50 tracking-wider block">
                     Display Name
                   </label>
-                  {!isGuest && (
+                  {(!isGuest || profile) ? (
                     <span className="text-[8px] bg-emerald-500/20 text-emerald-500 px-1.5 py-0.5 rounded-full font-bold flex items-center gap-0.5">
                       <Check size={8} /> Verified
                     </span>
-                  )}
-                  {isGuest && (
+                  ) : (
                     <span className="text-[8px] bg-amber-500/20 text-amber-500 px-1.5 py-0.5 rounded-full font-bold">
                       Guest
+                    </span>
+                  )}
+                </div>
                     </span>
                   )}
                 </div>

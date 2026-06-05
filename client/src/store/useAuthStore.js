@@ -8,22 +8,36 @@ export const useAuthStore = create((set, get) => ({
   loading: true,
   isGuest: true,
 
-  initAuth: () => {
+  initAuth: async () => {
     if (!supabase) {
       set({ loading: false });
       return;
     }
 
+    // Check current session immediately
+    const { data: { session } } = await supabase.auth.getSession();
+    const initialUser = session?.user || null;
+    if (initialUser) {
+      set({ user: initialUser, isGuest: false });
+      await get().fetchAndSyncProfile(initialUser);
+    } else {
+      set({ loading: false });
+    }
+
     // Listen to auth state changes
     supabase.auth.onAuthStateChange(async (event, session) => {
       const user = session?.user || null;
-      set({ user, isGuest: !user });
+      
+      // Only update if user changed to avoid infinite loops or redundant fetches
+      const currentUser = get().user;
+      if (user?.id !== currentUser?.id) {
+        set({ user, isGuest: !user });
 
-      if (user) {
-        // Fetch or wait for profile to be created
-        await get().fetchAndSyncProfile(user);
-      } else {
-        set({ profile: null, loading: false });
+        if (user) {
+          await get().fetchAndSyncProfile(user);
+        } else {
+          set({ profile: null, loading: false });
+        }
       }
     });
   },
@@ -106,6 +120,21 @@ export const useAuthStore = create((set, get) => ({
             }
           }
           localStorage.setItem(`sudoku_migrated_${user.id}`, "true");
+        } else {
+          // Even if migrated, check if we should still try to pull in Google name if current name is default
+          const googleName = user.user_metadata?.full_name || user.user_metadata?.name;
+          const currentName = profile.display_name;
+          if ((!currentName || currentName.startsWith('Solver_')) && googleName) {
+            const { data: updatedProfile, error: updateError } = await supabase
+              .from("profiles")
+              .update({ display_name: googleName })
+              .eq("id", user.id)
+              .select()
+              .single();
+            if (!updateError && updatedProfile) {
+              profile = updatedProfile;
+            }
+          }
         }
 
         // Sync local storage to match the database profile
@@ -114,14 +143,16 @@ export const useAuthStore = create((set, get) => ({
         localStorage.setItem("sudoku_avatar", profile.avatar_id || "apex");
         localStorage.setItem("sudoku_elo", profile.elo.toString());
 
-        // Update LobbyStore local states
-        const lobbyStore = useLobbyStore.getState();
+        // Update LobbyStore local states using setState to trigger reactivity
         set({ profile });
+        
+        useLobbyStore.setState({
+          myPlayerId: profile.id,
+          myPlayerName: profile.display_name,
+          selectedAvatar: profile.avatar_id || "apex"
+        });
 
-        lobbyStore.myPlayerId = profile.id;
-        lobbyStore.myPlayerName = profile.display_name;
-        lobbyStore.selectedAvatar = profile.avatar_id || "apex";
-
+        const lobbyStore = useLobbyStore.getState();
         // Register connection if socket exists
         if (
           lobbyStore.ws &&
@@ -209,11 +240,13 @@ export const useAuthStore = create((set, get) => ({
       localStorage.setItem("sudoku_avatar", guestAvatar);
       localStorage.setItem("sudoku_elo", guestElo);
 
-      const lobbyStore = useLobbyStore.getState();
-      lobbyStore.myPlayerId = guestId;
-      lobbyStore.myPlayerName = guestName;
-      lobbyStore.selectedAvatar = guestAvatar;
+      useLobbyStore.setState({
+        myPlayerId: guestId,
+        myPlayerName: guestName,
+        selectedAvatar: guestAvatar,
+      });
 
+      const lobbyStore = useLobbyStore.getState();
       if (
         lobbyStore.ws &&
         lobbyStore.isConnected &&
