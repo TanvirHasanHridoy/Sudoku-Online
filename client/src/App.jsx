@@ -193,8 +193,7 @@ export default function App() {
     loading: loadingAuth,
     signInWithGoogle,
     signOut,
-    initAuth,
-    signInWithEmailAndPassword
+    initAuth
   } = useAuthStore();
 
   // Local state inputs
@@ -210,9 +209,7 @@ export default function App() {
   const lastSentStrikesRef = useRef(null);
   const lastSentStateRef = useRef("");
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
-  const [showDevLogin, setShowDevLogin] = useState(false);
-  const [devEmail, setDevEmail] = useState("");
-  const [devPassword, setDevPassword] = useState("");
+
 
   const AVATARS = [
     { id: 'apex', name: 'Apex Solver', src: '/avatars/avatar_apex.png' },
@@ -835,22 +832,13 @@ export default function App() {
               <span className="opacity-70 font-semibold">Loading...</span>
             </div>
           ) : isGuest ? (
-            <div className="flex gap-1.5">
-              <button
-                onClick={signInWithGoogle}
-                className="px-3 py-1.5 rounded-xl border border-border-custom hover:bg-accent-glow hover:border-accent-custom hover:text-accent-custom active:scale-95 transition-all flex items-center gap-1.5 text-xs font-bold text-text-custom cursor-pointer"
-              >
-                <LogIn size={14} />
-                <span>Link Google</span>
-              </button>
-              <button
-                onClick={() => setShowDevLogin(true)}
-                className="px-3 py-1.5 rounded-xl border border-dashed border-border-custom hover:bg-accent-glow/50 active:scale-95 transition-all flex items-center gap-1 text-[11px] font-semibold text-accent-custom cursor-pointer"
-                title="Developer test account login"
-              >
-                <span>Dev Login</span>
-              </button>
-            </div>
+            <button
+              onClick={signInWithGoogle}
+              className="px-3 py-1.5 rounded-xl border border-border-custom hover:bg-accent-glow hover:border-accent-custom hover:text-accent-custom active:scale-95 transition-all flex items-center gap-1.5 text-xs font-bold text-text-custom cursor-pointer"
+            >
+              <LogIn size={14} />
+              <span>Link Google</span>
+            </button>
           ) : (
             <div className="flex items-center gap-2">
               <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl border border-border-custom bg-panel-custom/50">
@@ -2779,69 +2767,6 @@ export default function App() {
         </div>
       )}
 
-      {/* DEV LOGIN MODAL */}
-      {showDevLogin && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-fade-in">
-          <div className="glass-card rounded-2xl p-6 max-w-sm w-full text-center space-y-4 animate-scale-in border border-border-custom shadow-2xl">
-            <div className="flex justify-between items-center border-b border-border-custom pb-2">
-              <h3 className="text-sm font-bold text-accent-custom flex items-center gap-1.5">
-                Developer Login
-              </h3>
-              <button 
-                onClick={() => setShowDevLogin(false)}
-                className="text-text-custom opacity-50 hover:opacity-100 transition-opacity cursor-pointer"
-              >
-                <X size={16} />
-              </button>
-            </div>
-            <p className="text-[11px] opacity-75 text-left leading-normal text-text-custom">
-              Sign in with one of the test email accounts you created in the Supabase Dashboard. No verification code is required.
-            </p>
-            <form 
-              onSubmit={async (e) => {
-                e.preventDefault();
-                if (!devEmail || !devPassword) return;
-                const success = await signInWithEmailAndPassword(devEmail, devPassword);
-                if (success) {
-                  setShowDevLogin(false);
-                  setDevEmail("");
-                  setDevPassword("");
-                }
-              }}
-              className="space-y-3"
-            >
-              <div className="space-y-1 text-left">
-                <label className="text-[9px] uppercase font-extrabold opacity-60 tracking-wider text-text-custom">Email Address</label>
-                <input
-                  type="email"
-                  required
-                  placeholder="test@example.com"
-                  value={devEmail}
-                  onChange={(e) => setDevEmail(e.target.value)}
-                  className="w-full px-3 py-2 bg-accent-glow/30 border border-border-custom rounded-xl text-xs focus:outline-none focus:border-accent-custom text-text-custom"
-                />
-              </div>
-              <div className="space-y-1 text-left">
-                <label className="text-[9px] uppercase font-extrabold opacity-60 tracking-wider text-text-custom">Password</label>
-                <input
-                  type="password"
-                  required
-                  placeholder="••••••••"
-                  value={devPassword}
-                  onChange={(e) => setDevPassword(e.target.value)}
-                  className="w-full px-3 py-2 bg-accent-glow/30 border border-border-custom rounded-xl text-xs focus:outline-none focus:border-accent-custom text-text-custom"
-                />
-              </div>
-              <button
-                type="submit"
-                className="w-full py-2.5 bg-accent-custom hover:bg-accent-hover text-white font-bold rounded-xl text-xs active:scale-[0.98] transition-all cursor-pointer shadow-md shadow-accent-custom/25"
-              >
-                Login to Test Account
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
 
       {/* Hidden WebRTC Remote Audio Player */}
       {remoteAudioStream && (
