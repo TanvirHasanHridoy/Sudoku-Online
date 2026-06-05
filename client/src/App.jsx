@@ -1089,7 +1089,7 @@ export default function App() {
                   <label className="text-[10px] uppercase font-bold opacity-50 tracking-wider block">
                     Display Name
                   </label>
-                  {(!isGuest || profile) ? (
+                  {!isGuest || profile ? (
                     <span className="text-[8px] bg-emerald-500/20 text-emerald-500 px-1.5 py-0.5 rounded-full font-bold flex items-center gap-0.5">
                       <Check size={8} /> Verified
                     </span>
