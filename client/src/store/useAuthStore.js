@@ -69,7 +69,7 @@ export const useAuthStore = create((set, get) => ({
     // 1. Register auth state listener FIRST — before any async work —
     //    so we never miss events (e.g. SIGNED_IN triggered when the
     //    Supabase client auto-detects tokens in the URL hash fragment).
-    supabase.auth.onAuthStateChange(async (event, session) => {
+    supabase.auth.onAuthStateChange((event, session) => {
       const user = session?.user || null;
       console.log(
         "[Auth] Auth state changed, event:",
@@ -87,7 +87,10 @@ export const useAuthStore = create((set, get) => ({
           console.log(
             "[Auth] New user detected after state change, fetching profile...",
           );
-          await get().fetchAndSyncProfile(user);
+          // Defer execution to let the session registration release internal locks first
+          setTimeout(() => {
+            get().fetchAndSyncProfile(user);
+          }, 0);
         } else {
           set({ profile: null, loading: false });
         }
@@ -448,6 +451,8 @@ export const useAuthStore = create((set, get) => ({
 
   checkUsernameAvailable: async (name) => {
     if (!supabase) return true;
+    if (!name || typeof name !== 'string' || !name.trim()) return false;
+    
     const { user } = get();
     const { data, error } = await supabase
       .from("profiles")

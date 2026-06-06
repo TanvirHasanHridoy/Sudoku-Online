@@ -42,6 +42,10 @@ const matchmakingQueue = [];            // Array of { playerId, name, elo, diffi
 const disconnectTimeouts = new Map();   // Map<playerId, NodeJS.Timeout>
 const pendingPenalties = new Map();     // Map<playerId, Number>
 
+// Metered TURN server response caching (12 hours lifetime)
+let cachedMeteredIceServers = null;
+let cachedMeteredExpiry = 0;
+
 // Helper: Get detailed player status and lobby info
 function getPlayerDetailedStatus(friendId) {
   let foundClient = null;
@@ -756,6 +760,13 @@ wss.on('connection', (ws) => {
             console.log(`[WS Server] ICE servers sent to client (${label}, count: ${iceServers.length}).`);
           };
 
+          // 0. Check for valid cached Metered ICE servers
+          const now = Date.now();
+          if (cachedMeteredIceServers && now < cachedMeteredExpiry) {
+            sendIceServers(cachedMeteredIceServers, 'Cached Metered');
+            break;
+          }
+
           if (domain && apiKey) {
             console.log(`[WS Server] Fetching private ICE servers from Metered API: ${domain}`);
             let meteredSucceeded = false;
@@ -766,6 +777,8 @@ wss.on('connection', (ws) => {
                 const iceServers = await res.json();
                 if (iceServers && Array.isArray(iceServers) && iceServers.length > 0) {
                   sendIceServers(iceServers, 'Metered GET');
+                  cachedMeteredIceServers = iceServers;
+                  cachedMeteredExpiry = Date.now() + 12 * 60 * 60 * 1000; // 12 hours cache
                   meteredSucceeded = true;
                 }
               }
@@ -786,6 +799,8 @@ wss.on('connection', (ws) => {
                       const iceServers = await listRes.json();
                       if (iceServers && Array.isArray(iceServers) && iceServers.length > 0) {
                         sendIceServers(iceServers, 'Metered POST->GET');
+                        cachedMeteredIceServers = iceServers;
+                        cachedMeteredExpiry = Date.now() + 12 * 60 * 60 * 1000; // 12 hours cache
                         meteredSucceeded = true;
                       }
                     }
