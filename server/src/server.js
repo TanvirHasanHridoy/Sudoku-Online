@@ -703,46 +703,20 @@ wss.on('connection', (ws) => {
 
               if (res.ok) {
                 const creds = await res.json();
-                if (creds && creds.username && creds.password) {
-                  const iceServers = [
-                    { urls: `stun:${domain}:80` },
-                    {
-                      urls: `turn:${domain}:80`,
-                      username: creds.username,
-                      credential: creds.password,
-                      credentialType: 'password'
-                    },
-                    {
-                      urls: `turn:${domain}:443`,
-                      username: creds.username,
-                      credential: creds.password,
-                      credentialType: 'password'
-                    },
-                    {
-                      urls: `turn:${domain}:443?transport=tcp`,
-                      username: creds.username,
-                      credential: creds.password,
-                      credentialType: 'password'
-                    },
-                    {
-                      urls: `turns:${domain}:443`,
-                      username: creds.username,
-                      credential: creds.password,
-                      credentialType: 'password'
-                    },
-                    {
-                      urls: `turns:${domain}:443?transport=tcp`,
-                      username: creds.username,
-                      credential: creds.password,
-                      credentialType: 'password'
+                if (creds && creds.apiKey) {
+                  console.log(`[WS Server] Obtained public API key: ${creds.apiKey}. Fetching official ICE servers list...`);
+                  const listRes = await fetch(`https://${domain}/api/v1/turn/credentials?apiKey=${creds.apiKey}`);
+                  if (listRes.ok) {
+                    const iceServers = await listRes.json();
+                    if (iceServers && Array.isArray(iceServers)) {
+                      ws.send(JSON.stringify({
+                        type: 'ICE_SERVERS_RESPONSE',
+                        payload: { iceServers }
+                      }));
+                      console.log('[WS Server] Successfully fetched and sent official ICE servers via two-step POST -> GET workflow.');
+                      break;
                     }
-                  ];
-                  ws.send(JSON.stringify({
-                    type: 'ICE_SERVERS_RESPONSE',
-                    payload: { iceServers }
-                  }));
-                  console.log('[WS Server] Successfully generated and sent private ICE servers via POST Secret Key.');
-                  break;
+                  }
                 }
               } else {
                 const errBody = await res.json().catch(() => ({}));

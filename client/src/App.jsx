@@ -538,6 +538,14 @@ export default function App() {
     }
   }, [gameStatus]);
 
+  // Robust fallback: if room is active and game is started, guarantee we are in the game view
+  useEffect(() => {
+    if (room && room.isGameStarted && activeView !== "game") {
+      setActiveView("game");
+      setActiveTab("lobby");
+    }
+  }, [room, activeView]);
+
   // Reset seconds to 0 when a new multiplayer room is joined or a fresh match is started
   const prevRoomCodeRef = useRef(null);
   const prevGameStartedRef = useRef(false);
