@@ -51,6 +51,7 @@ export const useLobbyStore = create((set, get) => ({
   voicePromptActive: null,
   voiceDebugLogs: [],
   voiceConnectionState: 'idle',
+  iceServersList: null,
   
   // Live Spectating States
   spectatingPlayerId: null,
@@ -279,6 +280,12 @@ export const useLobbyStore = create((set, get) => ({
               useSocialStore.setState({ matchmakingStatus: 'idle', matchOpponent: null });
             });
             
+            // Request dynamic ICE servers credentials from signaling server
+            const { ws } = get();
+            if (ws && ws.readyState === 1) {
+              ws.send(JSON.stringify({ type: 'FETCH_ICE_SERVERS', payload: {} }));
+            }
+
             // If the game is already started in this room, load the board!
             if (payload.room.isGameStarted && payload.board) {
               const { difficulty } = payload.room;
@@ -565,6 +572,13 @@ export const useLobbyStore = create((set, get) => ({
                 set({ voicePromptActive: { playerId, playerName: name } });
               }
             }
+            break;
+          }
+
+          case 'ICE_SERVERS_RESPONSE': {
+            const { iceServers } = payload;
+            set({ iceServersList: iceServers });
+            get().addVoiceDebugLog(`Loaded ${iceServers?.length || 0} ICE servers dynamically.`);
             break;
           }
 
@@ -939,7 +953,7 @@ export const useLobbyStore = create((set, get) => ({
     get().addVoiceDebugLog(`Initializing RTCPeerConnection for peer: ${peerId}`);
 
     const pc = new RTCPeerConnection({
-      iceServers: [
+      iceServers: get().iceServersList || [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
         { urls: 'stun:openrelay.metered.ca:80' },

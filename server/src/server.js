@@ -2,6 +2,13 @@ import express from 'express';
 import { createServer } from 'http';
 import { WebSocketServer } from 'ws';
 import cors from 'cors';
+import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
 const app = express();
 app.use(cors());
@@ -170,7 +177,7 @@ wss.on('connection', (ws) => {
   let currentRoomCode = null;
   let registeredPlayerId = null;
 
-  ws.on('message', (message) => {
+  ws.on('message', async (message) => {
     try {
       const { type, payload } = JSON.parse(message.toString());
       console.log(`[WS Msg Received] Type: ${type}`, payload);
@@ -666,6 +673,137 @@ wss.on('connection', (ws) => {
           break;
         }
 
+        case 'FETCH_ICE_SERVERS': {
+          const appName = process.env.METERED_APP_NAME;
+          const apiKey = process.env.METERED_API_KEY || process.env.METERED_SECRET_KEY;
+          const domain = process.env.METERED_DOMAIN || (appName ? `${appName}.metered.live` : null);
+
+          if (domain && apiKey) {
+            console.log(`[WS Server] Fetching private ICE servers from Metered API: ${domain}`);
+            try {
+              // 1. Try GET credentials endpoint (expects frontend API Key)
+              let res = await fetch(`https://${domain}/api/v1/turn/credentials?apiKey=${apiKey}`);
+              if (res.ok) {
+                const iceServers = await res.json();
+                if (iceServers && Array.isArray(iceServers)) {
+                  ws.send(JSON.stringify({
+                    type: 'ICE_SERVERS_RESPONSE',
+                    payload: { iceServers }
+                  }));
+                  console.log('[WS Server] Successfully sent private ICE servers to client via GET API Key.');
+                  break;
+                }
+              }
+
+              // 2. Try POST credential endpoint (expects API Secret Key / secretKey)
+              console.log('[WS Server] GET endpoint returned non-OK or empty. Retrying with POST credential endpoint (Secret Key)...');
+              res = await fetch(`https://${domain}/api/v1/turn/credential?secretKey=${apiKey}`, {
+                method: 'POST'
+              });
+
+              if (res.ok) {
+                const creds = await res.json();
+                if (creds && creds.username && creds.password) {
+                  const iceServers = [
+                    { urls: `stun:${domain}:80` },
+                    {
+                      urls: `turn:${domain}:80`,
+                      username: creds.username,
+                      credential: creds.password,
+                      credentialType: 'password'
+                    },
+                    {
+                      urls: `turn:${domain}:443`,
+                      username: creds.username,
+                      credential: creds.password,
+                      credentialType: 'password'
+                    },
+                    {
+                      urls: `turn:${domain}:443?transport=tcp`,
+                      username: creds.username,
+                      credential: creds.password,
+                      credentialType: 'password'
+                    },
+                    {
+                      urls: `turns:${domain}:443`,
+                      username: creds.username,
+                      credential: creds.password,
+                      credentialType: 'password'
+                    },
+                    {
+                      urls: `turns:${domain}:443?transport=tcp`,
+                      username: creds.username,
+                      credential: creds.password,
+                      credentialType: 'password'
+                    }
+                  ];
+                  ws.send(JSON.stringify({
+                    type: 'ICE_SERVERS_RESPONSE',
+                    payload: { iceServers }
+                  }));
+                  console.log('[WS Server] Successfully generated and sent private ICE servers via POST Secret Key.');
+                  break;
+                }
+              } else {
+                const errBody = await res.json().catch(() => ({}));
+                console.error(`[WS Server] Metered API POST returned status ${res.status}:`, errBody);
+                if (errBody.message && errBody.message.includes('subscribe')) {
+                  ws.send(JSON.stringify({
+                    type: 'ERROR',
+                    payload: { message: `TURN Server: ${errBody.message}. Please subscribe/select a plan on your Metered dashboard.` }
+                  }));
+                }
+              }
+            } catch (err) {
+              console.error('[WS Server] Failed fetching from Metered API:', err);
+            }
+          } else {
+            console.warn('[WS Server] Metered credentials not configured in environment. Using fallback OpenRelay servers.');
+          }
+
+          // Fallback to OpenRelay
+          const fallbackServers = [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' },
+            { urls: 'stun:openrelay.metered.ca:80' },
+            {
+              urls: 'turn:openrelay.metered.ca:80',
+              username: 'openrelayproject',
+              credential: 'openrelayproject',
+              credentialType: 'password'
+            },
+            {
+              urls: 'turn:openrelay.metered.ca:443',
+              username: 'openrelayproject',
+              credential: 'openrelayproject',
+              credentialType: 'password'
+            },
+            {
+              urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+              username: 'openrelayproject',
+              credential: 'openrelayproject',
+              credentialType: 'password'
+            },
+            {
+              urls: 'turns:openrelay.metered.ca:443',
+              username: 'openrelayproject',
+              credential: 'openrelayproject',
+              credentialType: 'password'
+            },
+            {
+              urls: 'turns:openrelay.metered.ca:443?transport=tcp',
+              username: 'openrelayproject',
+              credential: 'openrelayproject',
+              credentialType: 'password'
+            }
+          ];
+
+          ws.send(JSON.stringify({
+            type: 'ICE_SERVERS_RESPONSE',
+            payload: { iceServers: fallbackServers }
+          }));
+          break;
+        }
         case 'SIGNAL_DATA': {
           const { targetId, signal } = payload;
           const room = rooms.get(currentRoomCode);
