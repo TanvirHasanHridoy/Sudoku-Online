@@ -238,6 +238,15 @@ export default function App() {
   const localUsernameError = getUsernameValidationError(inputName);
   const usernameError = localUsernameError || dbUsernameError;
 
+  // Derived opponent state — must be declared before any useEffect that references it
+  const activeOpponent = room?.players?.find(
+    (p) =>
+      p.id !== myPlayerId &&
+      !p.isSpectator &&
+      p.progress < 100 &&
+      p.strikes < 3,
+  );
+
   // React to opponent disconnect state and countdown 15s grace period
   useEffect(() => {
     let interval = null;
@@ -929,13 +938,6 @@ export default function App() {
   const spectators = room?.players?.filter((p) => p.isSpectator) || [];
   const allPlayersReady = activePlayers.length === 1 || activePlayers.every((p) => p.isReady);
   const myStatusInRoom = room?.players?.find((p) => p.id === myPlayerId);
-  const activeOpponent = room?.players?.find(
-    (p) =>
-      p.id !== myPlayerId &&
-      !p.isSpectator &&
-      p.progress < 100 &&
-      p.strikes < 3,
-  );
 
   // Generate join URL for QR code
   const getJoinUrl = () => {
