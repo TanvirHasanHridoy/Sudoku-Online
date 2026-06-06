@@ -787,7 +787,9 @@ wss.on('connection', (ws) => {
                 // 2. Try POST credential endpoint (expects API Secret Key / secretKey)
                 console.log('[WS Server] GET endpoint returned non-OK or empty. Retrying with POST credential endpoint (Secret Key)...');
                 res = await fetch(`https://${domain}/api/v1/turn/credential?secretKey=${apiKey}`, {
-                  method: 'POST'
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ expiryInSeconds: 86400 }) // 24-hour auto-cleanup
                 });
 
                 if (res.ok) {
