@@ -549,12 +549,21 @@ export const useLobbyStore = create((set, get) => ({
               return { room: { ...state.room, players: updatedPlayers } };
             });
 
-            // Prompt player to join if someone else joined voice and the player is not in voice
             const state = get();
-            if (isJoined && playerId !== state.myPlayerId && !state.isVoiceJoined) {
-              const otherPlayer = state.room?.players?.find(p => p.id === playerId);
-              const name = otherPlayer ? otherPlayer.name : 'Your opponent';
-              set({ voicePromptActive: { playerId, playerName: name } });
+            if (isJoined && playerId !== state.myPlayerId) {
+              if (state.isVoiceJoined) {
+                const isInitiator = state.myPlayerId.localeCompare(playerId) < 0;
+                if (isInitiator) {
+                  state.addVoiceDebugLog(`Opponent joined voice. We are the initiator. Calling...`);
+                  state.initiateCall(playerId);
+                } else {
+                  state.addVoiceDebugLog(`Opponent joined voice. We are the callee. Waiting for offer.`);
+                }
+              } else {
+                const otherPlayer = state.room?.players?.find(p => p.id === playerId);
+                const name = otherPlayer ? otherPlayer.name : 'Your opponent';
+                set({ voicePromptActive: { playerId, playerName: name } });
+              }
             }
             break;
           }
@@ -846,12 +855,17 @@ export const useLobbyStore = create((set, get) => ({
         get().addVoiceDebugLog('Sent voice active state to signaling server.');
       }
 
-      // If another player is already connected and has joined voice, initiate WebRTC handshake
+      // If another player is already connected and has joined voice, check if we should initiate WebRTC handshake
       if (room && room.players) {
         const otherPlayer = room.players.find(p => p.id !== myPlayerId && p.isVoiceJoined);
         if (otherPlayer) {
-          get().addVoiceDebugLog(`Opponent ${otherPlayer.name} is already in voice. Initiating WebRTC handshake.`);
-          await get().initiateCall(otherPlayer.id);
+          const isInitiator = myPlayerId.localeCompare(otherPlayer.id) < 0;
+          if (isInitiator) {
+            get().addVoiceDebugLog(`Opponent ${otherPlayer.name} is in voice. We are the initiator. Calling...`);
+            await get().initiateCall(otherPlayer.id);
+          } else {
+            get().addVoiceDebugLog(`Opponent ${otherPlayer.name} is in voice. We are the callee. Waiting for offer.`);
+          }
         } else {
           get().addVoiceDebugLog('Waiting for opponent to join voice...');
         }

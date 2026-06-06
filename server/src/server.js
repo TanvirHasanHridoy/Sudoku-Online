@@ -274,6 +274,8 @@ wss.on('connection', (ws) => {
           if (existingPlayerIndex !== -1) {
             // Reconnect logic: restore socket reference and retain original isSpectator state
             room.players[existingPlayerIndex].socket = ws;
+            room.players[existingPlayerIndex].isVoiceJoined = false;
+            room.players[existingPlayerIndex].isVoiceMuted = false;
             currentPlayer = room.players[existingPlayerIndex];
           } else {
             room.players.push(currentPlayer);
@@ -1232,6 +1234,18 @@ wss.on('connection', (ws) => {
 
     // Mark the player's socket as disconnected (null) rather than immediately deleting them
     currentPlayer.socket = null;
+    currentPlayer.isVoiceJoined = false;
+    currentPlayer.isVoiceMuted = false;
+
+    // Broadcast voice state updated to others immediately so their connection is torn down
+    broadcastToRoom(currentRoomCode, {
+      type: 'VOICE_STATE_UPDATED',
+      payload: {
+        playerId: currentPlayer.id,
+        isMuted: false,
+        isJoined: false
+      }
+    });
 
     // Set a timeout to clean up after 8 seconds (grace period for page reloads)
     setTimeout(() => {
