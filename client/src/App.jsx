@@ -143,6 +143,8 @@ export default function App() {
     leaveVoice,
     toggleMicMute,
     voicePromptActive,
+    voiceDebugLogs,
+    voiceConnectionState,
     // Spectating states & actions
     spectatingPlayerId,
     spectatedPlayerBoardState,
@@ -2481,8 +2483,22 @@ export default function App() {
                               Voice Channel
                             </span>
                           </div>
-                          <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-accent-glow border border-border-custom text-text-custom opacity-70">
-                            {isVoiceJoined ? "Connected" : "Disconnected"}
+                          <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border border-border-custom ${
+                            voiceConnectionState === 'connected'
+                              ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
+                              : voiceConnectionState === 'connecting'
+                              ? "bg-amber-500/10 border-amber-500/20 text-amber-400 animate-pulse"
+                              : voiceConnectionState === 'failed'
+                              ? "bg-rose-500/10 border-rose-500/20 text-rose-400"
+                              : "bg-accent-glow border-border-custom text-text-custom opacity-70"
+                          }`}>
+                            {voiceConnectionState === 'connected'
+                              ? "Connected"
+                              : voiceConnectionState === 'connecting'
+                              ? "Connecting..."
+                              : voiceConnectionState === 'failed'
+                              ? "Connection Failed"
+                              : "Disconnected"}
                           </span>
                         </div>
 
@@ -2525,6 +2541,27 @@ export default function App() {
                               </button>
                             </>
                           )}
+                        </div>
+
+                        {/* Collapsible WebRTC Diagnostics Panel */}
+                        <div className="mt-2 border-t border-border-custom/30 pt-2">
+                          <details className="group">
+                            <summary className="text-[10px] text-text-custom/60 group-open:text-accent-custom font-bold cursor-pointer select-none flex items-center justify-between hover:text-text-custom transition-all">
+                              <span>WebRTC Diagnostics Console</span>
+                              <span className="text-[8px] opacity-75 group-open:rotate-180 transition-transform">▼</span>
+                            </summary>
+                            <div className="mt-1.5 p-2 bg-slate-950/80 rounded-lg max-h-32 overflow-y-auto font-mono text-[9px] text-indigo-200/90 border border-border-custom/25 space-y-1 scrollbar-thin">
+                              {voiceDebugLogs.length === 0 ? (
+                                <div className="text-text-custom/40 italic text-center py-1">No logs recorded yet.</div>
+                              ) : (
+                                voiceDebugLogs.map((log, index) => (
+                                  <div key={index} className="leading-normal border-b border-border-custom/5 pb-0.5 last:border-0 last:pb-0 break-all select-all">
+                                    {log}
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          </details>
                         </div>
                       </div>
 

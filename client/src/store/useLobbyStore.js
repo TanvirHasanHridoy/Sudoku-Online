@@ -49,6 +49,8 @@ export const useLobbyStore = create((set, get) => ({
   isVoiceJoined: false,
   peerConnection: null,
   voicePromptActive: null,
+  voiceDebugLogs: [],
+  voiceConnectionState: 'idle',
   
   // Live Spectating States
   spectatingPlayerId: null,
@@ -63,6 +65,15 @@ export const useLobbyStore = create((set, get) => ({
   activeInkSplashes: [], // [ { id, top, left, size, opacity } ]
 
   // Actions
+  addVoiceDebugLog: (msg) => {
+    const time = new Date().toLocaleTimeString();
+    const formatted = `[${time}] ${msg}`;
+    console.log(formatted);
+    set((state) => ({
+      voiceDebugLogs: [...state.voiceDebugLogs.slice(-49), formatted]
+    }));
+  },
+
   setPlayerName: (name) => {
     const trimmed = name.trim();
     if (!trimmed) return false;
@@ -812,7 +823,8 @@ export const useLobbyStore = create((set, get) => ({
   // WebRTC P2P Voice Call Actions
   joinVoice: async () => {
     try {
-      console.log('[Voice] Requesting local microphone stream...');
+      get().addVoiceDebugLog('Requesting local microphone stream...');
+      set({ voiceConnectionState: 'connecting' });
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       
       set({ 
@@ -820,6 +832,8 @@ export const useLobbyStore = create((set, get) => ({
         isVoiceJoined: true,
         isMicMuted: false 
       });
+
+      get().addVoiceDebugLog('Microphone access granted.');
 
       const { ws, myPlayerId, room } = get();
       
@@ -829,25 +843,31 @@ export const useLobbyStore = create((set, get) => ({
           type: 'UPDATE_VOICE_STATE',
           payload: { isMuted: false, isJoined: true }
         }));
+        get().addVoiceDebugLog('Sent voice active state to signaling server.');
       }
 
       // If another player is already connected and has joined voice, initiate WebRTC handshake
       if (room && room.players) {
         const otherPlayer = room.players.find(p => p.id !== myPlayerId && p.isVoiceJoined);
         if (otherPlayer) {
+          get().addVoiceDebugLog(`Opponent ${otherPlayer.name} is already in voice. Initiating WebRTC handshake.`);
           await get().initiateCall(otherPlayer.id);
+        } else {
+          get().addVoiceDebugLog('Waiting for opponent to join voice...');
         }
       }
 
       get().addToast('Joined voice channel successfully!', 'success');
     } catch (err) {
       console.error('[Voice] Failed getting local audio', err);
+      set({ voiceConnectionState: 'failed' });
+      get().addVoiceDebugLog(`Microphone access failed: ${err.message}`);
       get().addToast('Microphone access denied! Enable browser permissions.', 'error');
     }
   },
 
   leaveVoice: () => {
-    console.log('[Voice] Leaving voice channel, tearing down streams...');
+    get().addVoiceDebugLog('Leaving voice channel. Stopping audio tracks and closing connections.');
     const { localAudioStream, peerConnection, ws } = get();
 
     if (localAudioStream) {
@@ -863,7 +883,8 @@ export const useLobbyStore = create((set, get) => ({
       remoteAudioStream: null,
       peerConnection: null,
       isVoiceJoined: false,
-      isMicMuted: false
+      isMicMuted: false,
+      voiceConnectionState: 'idle'
     });
 
     if (ws && ws.readyState === 1) {
@@ -871,6 +892,7 @@ export const useLobbyStore = create((set, get) => ({
         type: 'UPDATE_VOICE_STATE',
         payload: { isMuted: false, isJoined: false }
       }));
+      get().addVoiceDebugLog('Sent voice inactive state to signaling server.');
     }
   },
 
@@ -899,6 +921,8 @@ export const useLobbyStore = create((set, get) => ({
     if (get().peerConnection) {
       get().peerConnection.close();
     }
+
+    get().addVoiceDebugLog(`Initializing RTCPeerConnection for peer: ${peerId}`);
 
     const pc = new RTCPeerConnection({
       iceServers: [
@@ -943,35 +967,47 @@ export const useLobbyStore = create((set, get) => ({
 
     // WebRTC connection state monitoring
     pc.oniceconnectionstatechange = () => {
-      console.log(`[Voice WebRTC] ICE connection state changed to: ${pc.iceConnectionState}`);
+      get().addVoiceDebugLog(`ICE Connection State: ${pc.iceConnectionState}`);
+      if (pc.iceConnectionState === 'failed') {
+        get().addToast('Voice connection failed. Relaying...', 'error');
+      }
     };
     pc.onconnectionstatechange = () => {
-      console.log(`[Voice WebRTC] Connection state changed to: ${pc.connectionState}`);
+      get().addVoiceDebugLog(`WebRTC Connection State: ${pc.connectionState}`);
+      set({ voiceConnectionState: pc.connectionState });
+      if (pc.connectionState === 'connected') {
+        get().addToast('Voice connected!', 'success');
+      } else if (pc.connectionState === 'failed') {
+        get().addToast('Voice connection failed.', 'error');
+      }
     };
     pc.onicegatheringstatechange = () => {
-      console.log(`[Voice WebRTC] ICE gathering state: ${pc.iceGatheringState}`);
+      get().addVoiceDebugLog(`ICE Gathering State: ${pc.iceGatheringState}`);
     };
 
     if (localAudioStream) {
       localAudioStream.getTracks().forEach((track) => {
         pc.addTrack(track, localAudioStream);
       });
+      get().addVoiceDebugLog('Added local microphone audio track to peer connection.');
     }
 
     pc.ontrack = (event) => {
-      console.log('[Voice] Received remote audio stream track', event.streams);
+      get().addVoiceDebugLog(`ontrack event: track received (streams count: ${event.streams ? event.streams.length : 0})`);
       let stream = event.streams && event.streams[0];
       if (!stream && event.track) {
-        console.log('[Voice] Constructing new MediaStream from track');
+        get().addVoiceDebugLog('ontrack event: stream missing. Creating Fallback MediaStream.');
         stream = new MediaStream([event.track]);
       }
       if (stream) {
         set({ remoteAudioStream: stream });
+        get().addVoiceDebugLog('Bound remote audio stream successfully.');
       }
     };
 
     pc.onicecandidate = (event) => {
       if (event.candidate) {
+        get().addVoiceDebugLog(`Gathered local ICE candidate: ${event.candidate.candidate.split(' ')[7] || 'stun/relay'} (${event.candidate.protocol})`);
         const { ws } = get();
         if (ws && ws.readyState === 1) {
           ws.send(JSON.stringify({
@@ -982,6 +1018,8 @@ export const useLobbyStore = create((set, get) => ({
             }
           }));
         }
+      } else {
+        get().addVoiceDebugLog('Local ICE candidate gathering completed.');
       }
     };
 
@@ -993,12 +1031,13 @@ export const useLobbyStore = create((set, get) => ({
     const { ws, localAudioStream } = get();
     if (!localAudioStream) return;
 
-    console.log('[Voice] Initiating voice connection call...');
+    get().addVoiceDebugLog('Initiating WebRTC call. Generating SDP offer...');
     const pc = get().createPeerConnectionInstance(targetId);
 
     try {
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
+      get().addVoiceDebugLog('Set local description (SDP offer). Sending to signaling server...');
 
       ws.send(JSON.stringify({
         type: 'SIGNAL_DATA',
@@ -1008,6 +1047,7 @@ export const useLobbyStore = create((set, get) => ({
         }
       }));
     } catch (err) {
+      get().addVoiceDebugLog(`Failed to create SDP offer: ${err.message}`);
       console.error('[Voice] Error creating SDP offer', err);
     }
   },
@@ -1018,19 +1058,21 @@ export const useLobbyStore = create((set, get) => ({
 
     try {
       if (signal.type === 'offer') {
-        console.log('[Voice] Processing SDP offer...');
+        get().addVoiceDebugLog('Received SDP offer from peer. Processing...');
         if (!pc) {
           pc = get().createPeerConnectionInstance(senderId);
         }
         await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: signal.sdp }));
+        get().addVoiceDebugLog('Remote description (SDP offer) set successfully.');
 
         // Drain queued ICE candidates
         if (pc.queuedCandidates && pc.queuedCandidates.length > 0) {
-          console.log(`[Voice] Draining ${pc.queuedCandidates.length} queued ICE candidates`);
+          get().addVoiceDebugLog(`Draining ${pc.queuedCandidates.length} queued ICE candidates...`);
           for (const cand of pc.queuedCandidates) {
             try {
               await pc.addIceCandidate(cand);
             } catch (e) {
+              get().addVoiceDebugLog(`Failed to add queued candidate: ${e.message}`);
               console.warn('[Voice] Failed adding queued candidate', e);
             }
           }
@@ -1039,6 +1081,7 @@ export const useLobbyStore = create((set, get) => ({
 
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
+        get().addVoiceDebugLog('Set local description (SDP answer). Sending to peer...');
 
         ws.send(JSON.stringify({
           type: 'SIGNAL_DATA',
@@ -1048,17 +1091,19 @@ export const useLobbyStore = create((set, get) => ({
           }
         }));
       } else if (signal.type === 'answer') {
-        console.log('[Voice] Processing SDP answer...');
+        get().addVoiceDebugLog('Received SDP answer from peer. Processing...');
         if (pc) {
           await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: signal.sdp }));
+          get().addVoiceDebugLog('Remote description (SDP answer) set successfully.');
 
           // Drain queued ICE candidates
           if (pc.queuedCandidates && pc.queuedCandidates.length > 0) {
-            console.log(`[Voice] Draining ${pc.queuedCandidates.length} queued ICE candidates`);
+            get().addVoiceDebugLog(`Draining ${pc.queuedCandidates.length} queued ICE candidates...`);
             for (const cand of pc.queuedCandidates) {
               try {
                 await pc.addIceCandidate(cand);
               } catch (e) {
+                get().addVoiceDebugLog(`Failed to add queued candidate: ${e.message}`);
                 console.warn('[Voice] Failed adding queued candidate', e);
               }
             }
@@ -1066,20 +1111,22 @@ export const useLobbyStore = create((set, get) => ({
           }
         }
       } else if (signal.type === 'candidate') {
-        console.log('[Voice] Processing ICE candidate...');
         if (!pc) {
-          console.log('[Voice] PeerConnection not initialized yet on candidate arrival. Creating one.');
+          get().addVoiceDebugLog('Received ICE candidate before RTCPeerConnection initialized. Creating connection...');
           pc = get().createPeerConnectionInstance(senderId);
         }
         if (pc && signal.candidate) {
+          const candDesc = signal.candidate.candidate ? signal.candidate.candidate.split(' ')[7] || 'stun/relay' : 'end-of-candidates';
           if (pc.remoteDescription && pc.remoteDescription.type) {
             try {
               await pc.addIceCandidate(signal.candidate);
+              get().addVoiceDebugLog(`Added remote ICE candidate directly: ${candDesc}`);
             } catch (e) {
+              get().addVoiceDebugLog(`Failed to add remote candidate directly: ${e.message}`);
               console.warn('[Voice] Failed adding ICE candidate directly', e);
             }
           } else {
-            console.log('[Voice] Remote description not set yet. Queuing ICE candidate.');
+            get().addVoiceDebugLog(`Remote description not set. Queued remote ICE candidate: ${candDesc}`);
             if (!pc.queuedCandidates) {
               pc.queuedCandidates = [];
             }
