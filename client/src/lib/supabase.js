@@ -22,6 +22,8 @@ export const supabase = (supabaseUrl && supabaseAnonKey)
         detectSessionInUrl: true,
         persistSession: true,
         autoRefreshToken: true,
+        // Override lock to prevent gotrue-js lock manager deadlocks in browser environments
+        lock: async (name, acquireTimeout, fn) => fn(),
       },
     })
   : null;
