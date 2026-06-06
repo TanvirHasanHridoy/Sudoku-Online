@@ -172,16 +172,6 @@ export const useLobbyStore = create((set, get) => ({
       if (activeRoomCode) {
         console.log(`[Auto Reconnect] Restoring multiplayer session for Room: ${activeRoomCode}`);
         get().joinRoom(activeRoomCode);
-
-        // Auto-rejoin voice chat on the server if we were previously connected
-        const { isVoiceJoined, isMicMuted } = get();
-        if (isVoiceJoined) {
-          socket.send(JSON.stringify({
-            type: 'UPDATE_VOICE_STATE',
-            payload: { isMuted: isMicMuted, isJoined: true }
-          }));
-          get().addVoiceDebugLog('[Voice Rejoin] Sent voice active state to server on socket reconnect.');
-        }
       }
     };
 
@@ -471,30 +461,6 @@ export const useLobbyStore = create((set, get) => ({
             const { playerId, name, room } = payload;
             get().addToast(`⚡ ${name} reconnected!`, 'success');
             set({ room });
-
-            // Automatically renegotiate voice call if both players were in voice!
-            const state = get();
-            if (state.isVoiceJoined) {
-              state.addVoiceDebugLog(`Opponent ${name} reconnected. Renegotiating WebRTC call...`);
-              if (state.peerConnection) {
-                state.peerConnection.close();
-              }
-              set({ peerConnection: null, remoteAudioStream: null });
-              
-              // Polite initiator logic: renegotiate WebRTC handshake
-              const otherPlayer = room.players.find(p => p.id === playerId);
-              if (otherPlayer && otherPlayer.isVoiceJoined) {
-                const isInitiator = state.myPlayerId.localeCompare(playerId) < 0;
-                if (isInitiator) {
-                  state.addVoiceDebugLog(`We are the initiator. Generating fresh WebRTC offer...`);
-                  setTimeout(() => {
-                    get().initiateCall(playerId);
-                  }, 500); // 500ms delay to allow peer connection instance setup
-                } else {
-                  state.addVoiceDebugLog(`We are the callee. Waiting for fresh WebRTC offer...`);
-                }
-              }
-            }
             break;
           }
 
@@ -646,6 +612,12 @@ export const useLobbyStore = create((set, get) => ({
             });
 
             const state = get();
+            // Spectators should completely ignore voice updates (not show voice prompt, etc.)
+            const isSpectator = state.room?.players?.find(p => p.id === state.myPlayerId)?.isSpectator;
+            if (isSpectator) {
+              break;
+            }
+
             if (isJoined && playerId !== state.myPlayerId) {
               if (state.isVoiceJoined) {
                 const isInitiator = state.myPlayerId.localeCompare(playerId) < 0;
@@ -738,19 +710,15 @@ export const useLobbyStore = create((set, get) => ({
     };
 
     socket.onclose = () => {
-      // Clean up peer connections but preserve local microphone stream and isVoiceJoined flag for auto-resumption
-      const { peerConnection } = get();
-      if (peerConnection) {
-        peerConnection.close();
-      }
+      get().leaveVoice(); // Safely clean up local tracks & connections
       set({ 
         ws: null, 
         isConnected: false, 
         room: null,
-        peerConnection: null,
-        remoteAudioStream: null,
         spectatingPlayerId: null,
         spectatedPlayerBoardState: null,
+        spectatedPlayerABoard: null,
+        spectatedPlayerBBoard: null,
         myActiveSpectators: []
       });
       get().addToast('Disconnected from competitive lobby server. Retrying...', 'error');
