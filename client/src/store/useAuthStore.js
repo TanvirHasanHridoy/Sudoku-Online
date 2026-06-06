@@ -2,24 +2,41 @@ import { create } from "zustand";
 import { supabase } from "../lib/supabase";
 import { useLobbyStore } from "./useLobbyStore";
 
+// Helper function to sanitize usernames to match constraints
+const sanitizeUsername = (name) => {
+  if (!name) return "";
+  // Replace spaces and special characters with underscores
+  let sanitized = name.replace(/[^a-zA-Z0-9_]/g, '_');
+  // Remove consecutive underscores
+  sanitized = sanitized.replace(/_+/g, '_');
+  // Trim underscores from ends
+  sanitized = sanitized.replace(/^_+|_+$/g, '');
+  // Limit to 16 characters
+  return sanitized.substring(0, 16);
+};
+
 // Helper function to generate a unique username
 const generateUniqueUsername = async (baseName) => {
   if (!supabase) return baseName;
+
+  const sanitizedBase = sanitizeUsername(baseName) || "Player";
 
   // First, check if the base name is available
   const { data: existing } = await supabase
     .from("profiles")
     .select("id")
-    .eq("display_name", baseName)
+    .eq("display_name", sanitizedBase)
     .single();
 
   if (!existing) {
-    return baseName; // Name is available
+    return sanitizedBase; // Name is available
   }
 
-  // If taken, try appending numbers
+  // If taken, try appending numbers. Check that candidate length does not exceed 16.
   for (let i = 1; i <= 999; i++) {
-    const candidateName = `${baseName}_${i}`;
+    const suffix = `_${i}`;
+    const allowedBaseLength = 16 - suffix.length;
+    const candidateName = `${sanitizedBase.substring(0, allowedBaseLength)}${suffix}`;
     const { data: existingCandidate } = await supabase
       .from("profiles")
       .select("id")
@@ -32,7 +49,8 @@ const generateUniqueUsername = async (baseName) => {
   }
 
   // Fallback: use timestamp if all else fails
-  return `${baseName}_${Date.now()}`;
+  const fallbackSuffix = `_${Date.now().toString().slice(-4)}`;
+  return `${sanitizedBase.substring(0, 16 - fallbackSuffix.length)}${fallbackSuffix}`;
 };
 
 export const useAuthStore = create((set, get) => ({
@@ -51,9 +69,7 @@ export const useAuthStore = create((set, get) => ({
     // 1. Register auth state listener FIRST — before any async work —
     //    so we never miss events (e.g. SIGNED_IN triggered when the
     //    Supabase client auto-detects tokens in the URL hash fragment).
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (event, session) => {
+    supabase.auth.onAuthStateChange(async (event, session) => {
       const user = session?.user || null;
       console.log(
         "[Auth] Auth state changed, event:",
@@ -329,6 +345,22 @@ export const useAuthStore = create((set, get) => ({
   signOut: async () => {
     if (!supabase) return;
     try {
+      const lobbyStore = useLobbyStore.getState();
+      const inActiveGame = lobbyStore.room && lobbyStore.room.isGameStarted;
+
+      let confirmMsg = "Are you sure you want to sign out?";
+      if (inActiveGame) {
+        confirmMsg = "You are currently in an active game! If you sign out, you will quit the game and leave the match. Are you sure you want to sign out?";
+      }
+
+      if (!window.confirm(confirmMsg)) {
+        return;
+      }
+
+      if (inActiveGame) {
+        lobbyStore.exitToHome();
+      }
+
       await supabase.auth.signOut();
 
       let guestId = localStorage.getItem("sudoku_guest_id");
@@ -338,7 +370,8 @@ export const useAuthStore = create((set, get) => ({
       }
       let guestName = localStorage.getItem("sudoku_guest_name");
       if (!guestName) {
-        guestName = "Solver_" + Math.floor(1000 + Math.random() * 9000);
+        // System default username: short 7 character limit (e.g. S_28492)
+        guestName = "S_" + Math.floor(10000 + Math.random() * 90000);
         localStorage.setItem("sudoku_guest_name", guestName);
       }
       let guestAvatar = localStorage.getItem("sudoku_guest_avatar") || "apex";
@@ -355,7 +388,6 @@ export const useAuthStore = create((set, get) => ({
         selectedAvatar: guestAvatar,
       });
 
-      const lobbyStore = useLobbyStore.getState();
       if (
         lobbyStore.ws &&
         lobbyStore.isConnected &&
@@ -380,5 +412,92 @@ export const useAuthStore = create((set, get) => ({
     } catch (err) {
       console.error("Sign-Out failed:", err);
     }
+  },
+
+  checkUsernameAvailable: async (name) => {
+    if (!supabase) return true;
+    const { user } = get();
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("id")
+      .ilike("display_name", name.trim());
+
+    if (error) {
+      console.error("[Auth] Error checking name availability:", error);
+      return true;
+    }
+
+    if (data && data.length > 0) {
+      const otherUser = data.find(p => p.id !== user?.id);
+      return !otherUser;
+    }
+
+    return true;
+  },
+
+  updateUsername: async (newName) => {
+    const trimmed = newName.trim();
+    if (!trimmed) return { success: false, error: "Username cannot be empty" };
+
+    if (trimmed.length > 16) {
+      return { success: false, error: "Username must be 16 characters or less" };
+    }
+    if (/\s/.test(trimmed)) {
+      return { success: false, error: "Username cannot contain spaces" };
+    }
+    if (!/^[a-zA-Z0-9_]+$/.test(trimmed)) {
+      return { success: false, error: "Username can only contain letters, numbers, and underscores" };
+    }
+
+    const available = await get().checkUsernameAvailable(trimmed);
+    if (!available) {
+      return { success: false, error: "Username is already taken" };
+    }
+
+    const { user, profile } = get();
+    const lobbyStore = useLobbyStore.getState();
+    const currentElo = Number(localStorage.getItem("sudoku_elo")) || 1450;
+
+    localStorage.setItem("sudoku_player_name", trimmed);
+    useLobbyStore.setState({ myPlayerName: trimmed });
+
+    if (lobbyStore.ws && lobbyStore.isConnected && lobbyStore.ws.readyState === 1) {
+      lobbyStore.ws.send(JSON.stringify({
+        type: "UPDATE_NAME",
+        payload: { name: trimmed }
+      }));
+    }
+
+    if (user && supabase) {
+      try {
+        const { error } = await supabase
+          .from("profiles")
+          .update({ display_name: trimmed })
+          .eq("id", user.id);
+
+        if (error) throw error;
+
+        if (profile) {
+          set({ profile: { ...profile, display_name: trimmed } });
+        }
+
+        if (lobbyStore.ws && lobbyStore.isConnected && lobbyStore.ws.readyState === 1) {
+          lobbyStore.ws.send(JSON.stringify({
+            type: "REGISTER_PLAYER",
+            payload: {
+              playerId: profile ? profile.id : lobbyStore.myPlayerId,
+              name: trimmed,
+              elo: currentElo,
+              supabaseUserId: user.id
+            }
+          }));
+        }
+      } catch (err) {
+        console.error("[Auth] Failed saving username to database:", err);
+        return { success: false, error: "Database error: " + err.message };
+      }
+    }
+
+    return { success: true };
   },
 }));

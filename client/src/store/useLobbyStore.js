@@ -10,7 +10,7 @@ const getCachedPlayer = () => {
   }
   let name = localStorage.getItem('sudoku_player_name');
   if (!name) {
-    name = 'Solver_' + Math.floor(1000 + Math.random() * 9000);
+    name = 'S_' + Math.floor(10000 + Math.random() * 90000);
     localStorage.setItem('sudoku_player_name', name);
   }
   let avatar = localStorage.getItem('sudoku_avatar') || 'apex';
@@ -48,6 +48,7 @@ export const useLobbyStore = create((set, get) => ({
   isMicMuted: false,
   isVoiceJoined: false,
   peerConnection: null,
+  voicePromptActive: null,
   
   // Live Spectating States
   spectatingPlayerId: null,
@@ -185,10 +186,14 @@ export const useLobbyStore = create((set, get) => ({
           case 'FRIENDS_STATUS_LIST': {
             import('./useSocialStore').then(({ useSocialStore }) => {
               const { friends } = useSocialStore.getState();
-              const updatedFriends = friends.map(f => ({
-                ...f,
-                status: payload.statuses[f.id] || 'offline'
-              }));
+              const updatedFriends = friends.map(f => {
+                const info = payload.statuses[f.id] || { status: 'offline' };
+                return {
+                  ...f,
+                  status: info.status,
+                  roomCode: info.roomCode || null
+                };
+              });
               useSocialStore.setState({ friends: updatedFriends });
             });
             break;
@@ -198,7 +203,24 @@ export const useLobbyStore = create((set, get) => ({
               const { friends } = useSocialStore.getState();
               const updatedFriends = friends.map(f => {
                 if (f.id === payload.friendId) {
-                  return { ...f, status: payload.status };
+                  return { 
+                    ...f, 
+                    status: payload.status,
+                    roomCode: payload.roomCode || null
+                  };
+                }
+                return f;
+              });
+              useSocialStore.setState({ friends: updatedFriends });
+            });
+            break;
+          }
+          case 'FRIEND_NAME_UPDATE': {
+            import('./useSocialStore').then(({ useSocialStore }) => {
+              const { friends } = useSocialStore.getState();
+              const updatedFriends = friends.map(f => {
+                if (f.id === payload.friendId) {
+                  return { ...f, name: payload.name };
                 }
                 return f;
               });
@@ -515,6 +537,14 @@ export const useLobbyStore = create((set, get) => ({
               );
               return { room: { ...state.room, players: updatedPlayers } };
             });
+
+            // Prompt player to join if someone else joined voice and the player is not in voice
+            const state = get();
+            if (isJoined && playerId !== state.myPlayerId && !state.isVoiceJoined) {
+              const otherPlayer = state.room?.players?.find(p => p.id === playerId);
+              const name = otherPlayer ? otherPlayer.name : 'Your opponent';
+              set({ voicePromptActive: { playerId, playerName: name } });
+            }
             break;
           }
 
@@ -768,7 +798,8 @@ export const useLobbyStore = create((set, get) => ({
       myStreak: 0,
       myShieldActive: false,
       isScrambled: false,
-      activeInkSplashes: []
+      activeInkSplashes: [],
+      voicePromptActive: null
     });
 
     import('./useSocialStore').then(({ useSocialStore }) => {
@@ -872,12 +903,41 @@ export const useLobbyStore = create((set, get) => ({
     const pc = new RTCPeerConnection({
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' }
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:openrelay.metered.ca:80' },
+        {
+          urls: 'turn:openrelay.metered.ca:80',
+          username: 'openrelayproject',
+          credential: 'openrelayproject'
+        },
+        {
+          urls: 'turn:openrelay.metered.ca:443',
+          username: 'openrelayproject',
+          credential: 'openrelayproject'
+        },
+        {
+          urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+          username: 'openrelayproject',
+          credential: 'openrelayproject'
+        },
+        {
+          urls: 'turns:openrelay.metered.ca:443',
+          username: 'openrelayproject',
+          credential: 'openrelayproject'
+        }
       ]
     });
 
     // Initialize ICE candidates queue to prevent RTCPeerConnection race conditions
     pc.queuedCandidates = [];
+
+    // WebRTC connection state monitoring
+    pc.oniceconnectionstatechange = () => {
+      console.log(`[Voice WebRTC] ICE connection state changed to: ${pc.iceConnectionState}`);
+    };
+    pc.onconnectionstatechange = () => {
+      console.log(`[Voice WebRTC] Connection state changed to: ${pc.connectionState}`);
+    };
 
     if (localAudioStream) {
       localAudioStream.getTracks().forEach((track) => {
@@ -987,6 +1047,10 @@ export const useLobbyStore = create((set, get) => ({
         }
       } else if (signal.type === 'candidate') {
         console.log('[Voice] Processing ICE candidate...');
+        if (!pc) {
+          console.log('[Voice] PeerConnection not initialized yet on candidate arrival. Creating one.');
+          pc = get().createPeerConnectionInstance(senderId);
+        }
         if (pc && signal.candidate) {
           if (pc.remoteDescription && pc.remoteDescription.type) {
             try {

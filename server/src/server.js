@@ -31,8 +31,8 @@ const rooms = new Map();
 const connectedClients = new Map();     // Map<playerId, { id, socket, name, elo }>
 const matchmakingQueue = [];            // Array of { playerId, name, elo, difficulty, socket, queuedAt }
 
-// Helper: Get player status ('offline' | 'online' | 'in-game')
-function getPlayerStatus(friendId) {
+// Helper: Get detailed player status and lobby info
+function getPlayerDetailedStatus(friendId) {
   let foundClient = null;
   for (const client of connectedClients.values()) {
     if (client.id === friendId || (client.supabaseUserId && client.supabaseUserId === friendId)) {
@@ -41,16 +41,19 @@ function getPlayerStatus(friendId) {
     }
   }
 
-  if (!foundClient) return 'offline';
+  if (!foundClient) return { status: 'offline' };
 
   // Check if they are in any room
   for (const room of rooms.values()) {
     if (room.players.some(p => p.id === foundClient.id)) {
-      return 'in-game';
+      return {
+        status: room.isGameStarted ? 'in-game' : 'in-lobby',
+        roomCode: room.code
+      };
     }
   }
 
-  return 'online';
+  return { status: 'online' };
 }
 
 // Helper: Broadcast status change of playerId to all connected friends
@@ -58,6 +61,9 @@ function broadcastOnlineStatusChange(playerId, status) {
   const client = connectedClients.get(playerId);
   const targetId = client ? client.id : playerId;
   const supabaseUserId = client ? client.supabaseUserId : null;
+
+  // Get detailed status (including roomCode if in-lobby)
+  const detailed = getPlayerDetailedStatus(targetId);
 
   for (const otherClient of connectedClients.values()) {
     if (otherClient.id === targetId) continue;
@@ -73,7 +79,36 @@ function broadcastOnlineStatusChange(playerId, status) {
           type: 'FRIEND_STATUS_UPDATE',
           payload: {
             friendId: matchedFriendId,
-            status
+            status: detailed.status,
+            roomCode: detailed.roomCode || null
+          }
+        }));
+      }
+    }
+  }
+}
+
+// Helper: Broadcast name change of playerId to all connected friends
+function broadcastFriendNameChange(playerId, newName) {
+  const client = connectedClients.get(playerId);
+  const targetId = client ? client.id : playerId;
+  const supabaseUserId = client ? client.supabaseUserId : null;
+
+  for (const otherClient of connectedClients.values()) {
+    if (otherClient.id === targetId) continue;
+    
+    // Check if the other client has targetId or supabaseUserId in their friends list
+    const isFriend = otherClient.friendsList && 
+      (otherClient.friendsList.has(targetId) || (supabaseUserId && otherClient.friendsList.has(supabaseUserId)));
+      
+    if (isFriend) {
+      const matchedFriendId = otherClient.friendsList.has(targetId) ? targetId : supabaseUserId;
+      if (otherClient.socket && otherClient.socket.readyState === 1) {
+        otherClient.socket.send(JSON.stringify({
+          type: 'FRIEND_NAME_UPDATE',
+          payload: {
+            friendId: matchedFriendId,
+            name: newName
           }
         }));
       }
@@ -322,6 +357,11 @@ wss.on('connection', (ws) => {
             }
           });
 
+          // Broadcast status change to 'in-game' for all players in the room
+          room.players.forEach(p => {
+            broadcastOnlineStatusChange(p.id, 'in-game');
+          });
+
           break;
         }
 
@@ -388,38 +428,58 @@ wss.on('connection', (ws) => {
 
           console.log(`[WS Leave] Player ${currentPlayer.name} explicitly left room ${currentRoomCode}`);
 
-          // Notify remaining players before removing
-          broadcastToRoom(currentRoomCode, {
-            type: 'PLAYER_LEFT',
-            payload: {
-              playerId: currentPlayer.id,
-              name: currentPlayer.name
-            }
-          }, currentPlayer.id);
+          const isHost = room.players[0]?.id === currentPlayer.id;
 
-          // Remove player from room
-          room.players = room.players.filter(p => p.id !== currentPlayer.id);
-          delete room.pauseVotes[currentPlayer.id];
-          delete room.playAgainVotes[currentPlayer.id];
-
-          // Reset pauseRequesterId if the leaver was the requester
-          if (room.pauseRequesterId === currentPlayer.id) {
-            room.pauseRequesterId = null;
-            room.pauseVotes = {};
-            // Dismiss any active vote modals
+          if (isHost && !room.isGameStarted) {
+            // Host is dissolving the room before game starts!
+            console.log(`[WS Leave] Host ${currentPlayer.name} dissolved room ${currentRoomCode}`);
             broadcastToRoom(currentRoomCode, {
-              type: 'PAUSE_DISMISSED',
-              payload: { room: getSanitizedRoom(room) }
-            });
-          }
+              type: 'KICKED',
+              payload: { message: 'The host has dismissed the room.' }
+            }, currentPlayer.id); // exclude the host
 
-          if (room.players.length === 0) {
+            // Remove room and update status of all players remaining
+            room.players.forEach(p => {
+              if (p.id !== currentPlayer.id) {
+                broadcastOnlineStatusChange(p.id, 'online');
+              }
+            });
             rooms.delete(currentRoomCode);
           } else {
+            // Normal leave flow for guests or mid-game host exit
+            // Notify remaining players before removing
             broadcastToRoom(currentRoomCode, {
-              type: 'ROOM_UPDATED',
-              payload: { room: getSanitizedRoom(room) }
-            });
+              type: 'PLAYER_LEFT',
+              payload: {
+                playerId: currentPlayer.id,
+                name: currentPlayer.name
+              }
+            }, currentPlayer.id);
+
+            // Remove player from room
+            room.players = room.players.filter(p => p.id !== currentPlayer.id);
+            delete room.pauseVotes[currentPlayer.id];
+            delete room.playAgainVotes[currentPlayer.id];
+
+            // Reset pauseRequesterId if the leaver was the requester
+            if (room.pauseRequesterId === currentPlayer.id) {
+              room.pauseRequesterId = null;
+              room.pauseVotes = {};
+              // Dismiss any active vote modals
+              broadcastToRoom(currentRoomCode, {
+                type: 'PAUSE_DISMISSED',
+                payload: { room: getSanitizedRoom(room) }
+              });
+            }
+
+            if (room.players.length === 0) {
+              rooms.delete(currentRoomCode);
+            } else {
+              broadcastToRoom(currentRoomCode, {
+                type: 'ROOM_UPDATED',
+                payload: { room: getSanitizedRoom(room) }
+              });
+            }
           }
 
           const playerLeaverId = currentPlayer.id;
@@ -669,6 +729,8 @@ wss.on('connection', (ws) => {
               payload: { room: getSanitizedRoom(room) }
             });
           }
+
+          broadcastFriendNameChange(registeredPlayerId || currentPlayer.id, trimmedName);
           break;
         }
 
@@ -935,7 +997,7 @@ wss.on('connection', (ws) => {
           
           const statuses = {};
           for (const friendId of currentPlayer.friendsList) {
-            statuses[friendId] = getPlayerStatus(friendId);
+            statuses[friendId] = getPlayerDetailedStatus(friendId);
           }
           
           ws.send(JSON.stringify({

@@ -195,7 +195,7 @@ export const useSocialStore = create((set, get) => ({
           .single();
 
         if (profileError || !targetProfile) {
-          lobbyStore.addToast(`Player "${trimmedName}" not found.`, 'error');
+          lobbyStore.addToast(`Player '${trimmedName}' not found.`, 'error');
           return;
         }
 
@@ -210,7 +210,14 @@ export const useSocialStore = create((set, get) => ({
         }
 
         if (existing && existing.length > 0) {
-          lobbyStore.addToast(`Friend request already sent or active with ${trimmedName}!`, 'error');
+          const relation = existing[0];
+          if (relation.status === 'accepted') {
+            lobbyStore.addToast(`${trimmedName} is already in your friends list.`, 'error');
+          } else if (relation.user_id === user.id) {
+            lobbyStore.addToast(`Friend request to '${trimmedName}' is already pending.`, 'error');
+          } else {
+            lobbyStore.addToast(`'${trimmedName}' has already sent you a friend request. Accept it below!`, 'error');
+          }
           return;
         }
 

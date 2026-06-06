@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Volume2,
   VolumeX,
@@ -123,7 +123,6 @@ export default function App() {
     showPauseVoteModal,
     activeLobbyInvitation,
     toasts,
-    setPlayerName,
     setEmoteCallback,
     connectWebSocket,
     createRoom,
@@ -143,6 +142,7 @@ export default function App() {
     joinVoice,
     leaveVoice,
     toggleMicMute,
+    voicePromptActive,
     // Spectating states & actions
     spectatingPlayerId,
     spectatedPlayerBoardState,
@@ -193,6 +193,7 @@ export default function App() {
     signInWithGoogle,
     signOut,
     initAuth,
+    updateUsername,
   } = useAuthStore();
 
   // Local state inputs
@@ -208,6 +209,77 @@ export default function App() {
   const lastSentStrikesRef = useRef(null);
   const lastSentStateRef = useRef("");
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
+
+  // Real-time username checking & validation states
+  const [dbUsernameError, setDbUsernameError] = useState("");
+  const [usernameSuccess, setUsernameSuccess] = useState(false);
+  const [isCheckingUsername, setIsCheckingUsername] = useState(false);
+
+  // Helper for local synchronous name validation
+  const getUsernameValidationError = (name) => {
+    if (!name) return "";
+    const trimmed = name.trim();
+    if (trimmed === myPlayerName) return "";
+    if (trimmed.length > 16) return "Max 16 characters";
+    if (/\s/.test(trimmed)) return "No spaces allowed";
+    if (!/^[a-zA-Z0-9_]+$/.test(trimmed)) return "Alphanumeric & underscores only";
+    return "";
+  };
+
+  const localUsernameError = getUsernameValidationError(inputName);
+  const usernameError = localUsernameError || dbUsernameError;
+
+  useEffect(() => {
+    const trimmed = inputName.trim();
+    if (!trimmed || trimmed === myPlayerName || localUsernameError) {
+      return;
+    }
+
+    let active = true;
+
+    const timer = setTimeout(async () => {
+      if (!active) return;
+      setIsCheckingUsername(true);
+      try {
+        const available = await useAuthStore.getState().checkUsernameAvailable(trimmed);
+        if (!active) return;
+        if (available) {
+          setUsernameSuccess(true);
+          setDbUsernameError("");
+        } else {
+          setUsernameSuccess(false);
+          setDbUsernameError("Username already taken");
+        }
+      } catch (err) {
+        console.error("Failed checking username availability:", err);
+      } finally {
+        if (active) setIsCheckingUsername(false);
+      }
+    }, 400);
+
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [inputName, myPlayerName, localUsernameError]);
+
+  const handleUsernameSave = async () => {
+    const trimmed = inputName.trim();
+    if (trimmed === myPlayerName) return;
+    if (usernameError) {
+      addToast(usernameError, "error");
+      setInputName(myPlayerName);
+      return;
+    }
+    const res = await updateUsername(trimmed);
+    if (res.success) {
+      setUsernameSuccess(false);
+      setDbUsernameError("");
+    } else {
+      addToast(res.error, "error");
+      setInputName(myPlayerName);
+    }
+  };
 
   const AVATARS = [
     { id: "apex", name: "Apex Solver", src: "/avatars/avatar_apex.png" },
@@ -227,9 +299,16 @@ export default function App() {
 
   // Sync WebRTC remote audio stream to element
   useEffect(() => {
-    if (remoteAudioRef.current && remoteAudioStream) {
-      console.log("[Voice UI] Binding remote audio stream to audio element");
-      remoteAudioRef.current.srcObject = remoteAudioStream;
+    if (remoteAudioRef.current) {
+      if (remoteAudioStream) {
+        console.log("[Voice UI] Binding remote audio stream to audio element");
+        remoteAudioRef.current.srcObject = remoteAudioStream;
+        remoteAudioRef.current.play().catch((err) => {
+          console.warn("[Voice UI] Autoplay blocked or failed:", err);
+        });
+      } else {
+        remoteAudioRef.current.srcObject = null;
+      }
     }
   }, [remoteAudioStream]);
 
@@ -808,7 +887,7 @@ export default function App() {
   const isHost = room?.players?.[0]?.id === myPlayerId;
   const activePlayers = room?.players?.filter((p) => !p.isSpectator) || [];
   const spectators = room?.players?.filter((p) => p.isSpectator) || [];
-  const allPlayersReady = activePlayers.every((p) => p.isReady);
+  const allPlayersReady = activePlayers.length === 1 || activePlayers.every((p) => p.isReady);
   const myStatusInRoom = room?.players?.find((p) => p.id === myPlayerId);
   const activeOpponent = room?.players?.find(
     (p) =>
@@ -995,12 +1074,14 @@ export default function App() {
               <input
                 type="text"
                 value={inputName}
-                onChange={(e) => setInputName(e.target.value)}
-                onBlur={() => {
-                  const success = setPlayerName(inputName);
-                  if (!success) {
-                    setInputName(myPlayerName); // Revert UI field value if blocked by 24h limit
-                  }
+                onChange={(e) => {
+                  setInputName(e.target.value);
+                  setUsernameSuccess(false);
+                  setDbUsernameError("");
+                }}
+                onBlur={handleUsernameSave}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") e.target.blur();
                 }}
                 className="text-xs font-bold leading-tight bg-transparent border-b border-transparent hover:border-border-custom focus:border-accent-custom focus:outline-none w-24 transition-all"
                 title="Click to edit name"
@@ -1102,19 +1183,35 @@ export default function App() {
                 <input
                   type="text"
                   value={inputName}
-                  onChange={(e) => setInputName(e.target.value)}
-                  onBlur={() => {
-                    const success = setPlayerName(inputName);
-                    if (!success) setInputName(myPlayerName);
+                  onChange={(e) => {
+                    setInputName(e.target.value);
+                    setUsernameSuccess(false);
+                    setDbUsernameError("");
                   }}
+                  onBlur={handleUsernameSave}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") e.target.blur();
                   }}
-                  className="w-full text-center text-sm font-bold bg-accent-glow border border-border-custom rounded-xl px-3 py-2 focus:border-accent-custom focus:outline-none transition-all"
+                  className={`w-full text-center text-sm font-bold bg-accent-glow border rounded-xl px-3 py-2 focus:outline-none transition-all ${usernameError ? 'border-rose-500 focus:border-rose-500' : usernameSuccess ? 'border-emerald-500 focus:border-emerald-500' : 'border-border-custom focus:border-accent-custom'}`}
                   placeholder="Your username"
                 />
+                {usernameError && (
+                  <p className="text-[9px] text-rose-500 text-center font-semibold mt-1">
+                    ⚠️ {usernameError}
+                  </p>
+                )}
+                {isCheckingUsername && (
+                  <p className="text-[9px] text-indigo-400 text-center font-semibold mt-1">
+                    Checking availability...
+                  </p>
+                )}
+                {usernameSuccess && (
+                  <p className="text-[9px] text-emerald-500 text-center font-semibold mt-1">
+                    ✓ Username is available!
+                  </p>
+                )}
                 <p className="text-[9px] opacity-40 text-center mt-1">
-                  Change once per 24h
+                  Constraint: Max 16 chars, no spaces
                 </p>
               </div>
 
@@ -1465,25 +1562,35 @@ export default function App() {
                           })}
                         </div>
                       </div>
-                      <div className="flex gap-2 pt-2">
+                      <div className="flex flex-col gap-2 pt-2">
+                        <div className="flex gap-2">
+                          {activePlayers.length > 1 && (
+                            <button
+                              onClick={toggleReady}
+                              className={`flex-1 py-3 rounded-xl font-bold text-sm shadow-md transition-all active:scale-[0.98] ${myStatusInRoom?.isReady ? "bg-amber-600 hover:bg-amber-500 text-white" : "bg-accent-custom hover:bg-accent-hover text-white"}`}
+                            >
+                              {myStatusInRoom?.isReady
+                                ? "Unready Lobby"
+                                : "Ready to Start"}
+                            </button>
+                          )}
+                          {isHost && (
+                            <button
+                              onClick={startGame}
+                              disabled={!allPlayersReady}
+                              className={`${activePlayers.length === 1 ? "w-full" : "px-6"} py-3 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold rounded-xl text-sm transition-all active:scale-[0.98]`}
+                              title="Start Match"
+                            >
+                              Start Game
+                            </button>
+                          )}
+                        </div>
                         <button
-                          onClick={toggleReady}
-                          className={`flex-1 py-3 rounded-xl font-bold text-sm shadow-md transition-all active:scale-[0.98] ${myStatusInRoom?.isReady ? "bg-amber-600 hover:bg-amber-500 text-white" : "bg-accent-custom hover:bg-accent-hover text-white"}`}
+                          onClick={() => exitToHome(() => setActiveView("home"))}
+                          className="w-full py-2.5 bg-slate-800 hover:bg-slate-700/80 border border-slate-700/50 text-slate-300 font-bold rounded-xl text-xs transition-all active:scale-[0.98] mt-1"
                         >
-                          {myStatusInRoom?.isReady
-                            ? "Unready Lobby"
-                            : "Ready to Start"}
+                          {isHost ? "Dismiss Room" : "Leave Room"}
                         </button>
-                        {isHost && (
-                          <button
-                            onClick={startGame}
-                            disabled={!allPlayersReady}
-                            className="px-4 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold rounded-xl text-sm transition-all active:scale-[0.98]"
-                            title="Start Match (All Players Ready)"
-                          >
-                            Start Game
-                          </button>
-                        )}
                       </div>
                     </div>
                   )}
@@ -1613,9 +1720,11 @@ export default function App() {
                         className={`w-2 h-2 rounded-full ${
                           f.status === "online"
                             ? "bg-emerald-500 animate-pulse"
-                            : f.status === "in-game"
-                              ? "bg-amber-500 animate-pulse"
-                              : "bg-slate-300 dark:bg-slate-700"
+                            : f.status === "in-lobby"
+                              ? "bg-cyan-500 animate-pulse"
+                              : f.status === "in-game"
+                                ? "bg-amber-500 animate-pulse"
+                                : "bg-slate-300 dark:bg-slate-700"
                         }`}
                       />
                       <div>
@@ -1642,9 +1751,17 @@ export default function App() {
                       >
                         Invite
                       </button>
+                    ) : f.status === "in-lobby" && f.roomCode ? (
+                      <button
+                        onClick={() => joinRoom(f.roomCode)}
+                        className="px-2 py-1 border transition-all rounded-md text-[9px] font-bold bg-emerald-500/10 border-emerald-500/30 hover:border-emerald-500 hover:text-emerald-500 hover:bg-emerald-500/20 active:scale-95 cursor-pointer text-emerald-500"
+                        title="Join Friend's Lobby Room"
+                      >
+                        Join Room
+                      </button>
                     ) : (
                       <span className="text-[9px] uppercase font-bold opacity-45 px-1">
-                        {f.status}
+                        {f.status === "in-lobby" ? "lobby" : f.status}
                       </span>
                     )}
                   </div>
@@ -2413,30 +2530,40 @@ export default function App() {
 
                       {/* READY UP ACTION BUTTON */}
                       {!room.isGameStarted ? (
-                        <div className="flex gap-2 pt-2">
-                          <button
-                            onClick={toggleReady}
-                            className={`flex-1 py-3 rounded-xl font-bold text-sm shadow-md transition-all active:scale-[0.98] ${
-                              myStatusInRoom?.isReady
-                                ? "bg-amber-600 hover:bg-amber-500 text-white"
-                                : "bg-accent-custom hover:bg-accent-hover text-white"
-                            }`}
-                          >
-                            {myStatusInRoom?.isReady
-                              ? "Unready Lobby"
-                              : "Ready to Start"}
-                          </button>
+                        <div className="flex flex-col gap-2 pt-2">
+                          <div className="flex gap-2">
+                            {activePlayers.length > 1 && (
+                              <button
+                                onClick={toggleReady}
+                                className={`flex-1 py-3 rounded-xl font-bold text-sm shadow-md transition-all active:scale-[0.98] ${
+                                  myStatusInRoom?.isReady
+                                    ? "bg-amber-600 hover:bg-amber-500 text-white"
+                                    : "bg-accent-custom hover:bg-accent-hover text-white"
+                                }`}
+                              >
+                                {myStatusInRoom?.isReady
+                                  ? "Unready Lobby"
+                                  : "Ready to Start"}
+                              </button>
+                            )}
 
-                          {isHost && (
-                            <button
-                              onClick={startGame}
-                              disabled={!allPlayersReady}
-                              className="px-4 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold rounded-xl text-sm transition-all active:scale-[0.98]"
-                              title="Start Match (All Players Ready)"
-                            >
-                              Start Game
-                            </button>
-                          )}
+                            {isHost && (
+                              <button
+                                onClick={startGame}
+                                disabled={!allPlayersReady}
+                                className={`${activePlayers.length === 1 ? "w-full" : "px-6"} py-3 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold rounded-xl text-sm transition-all active:scale-[0.98]`}
+                                title="Start Match"
+                              >
+                                Start Game
+                              </button>
+                            )}
+                          </div>
+                          <button
+                            onClick={() => exitToHome(() => setActiveView("home"))}
+                            className="w-full py-2.5 bg-slate-800 hover:bg-slate-700/80 border border-slate-700/50 text-slate-300 font-bold rounded-xl text-xs transition-all active:scale-[0.98] mt-1"
+                          >
+                            {isHost ? "Dismiss Room" : "Leave Room"}
+                          </button>
                         </div>
                       ) : (
                         isHost &&
@@ -2986,14 +3113,42 @@ export default function App() {
       )}
 
       {/* Hidden WebRTC Remote Audio Player */}
-      {remoteAudioStream && (
-        <audio
-          ref={remoteAudioRef}
-          autoPlay
-          playsInline
-          controls={false}
-          className="hidden"
-        />
+      <audio
+        ref={remoteAudioRef}
+        autoPlay
+        playsInline
+        controls={false}
+        style={{ position: 'absolute', opacity: 0, width: '1px', height: '1px', pointerEvents: 'none' }}
+      />
+
+      {/* NON-BLOCKING VOICE PROMPT POPUP */}
+      {voicePromptActive && (
+        <div className="fixed bottom-24 left-4 right-4 sm:left-auto sm:right-4 sm:w-80 bg-slate-900 border border-indigo-500/30 text-white p-4 rounded-xl shadow-2xl flex flex-col gap-2 z-50 animate-scale-in">
+          <div className="flex items-center gap-2">
+            <span className="animate-pulse flex h-2 w-2 rounded-full bg-emerald-500"></span>
+            <p className="text-xs font-bold">{voicePromptActive.playerName} joined voice chat!</p>
+          </div>
+          <p className="text-[11px] opacity-75">Connect with your opponent for real-time talk and strategy.</p>
+          <div className="flex gap-2 justify-end mt-1">
+            <button 
+              onClick={() => {
+                useLobbyStore.setState({ voicePromptActive: null });
+              }}
+              className="px-2.5 py-1 text-[10px] uppercase font-bold text-slate-400 hover:text-white transition-all cursor-pointer"
+            >
+              Dismiss
+            </button>
+            <button 
+              onClick={() => {
+                joinVoice();
+                useLobbyStore.setState({ voicePromptActive: null });
+              }}
+              className="px-3 py-1 text-[10px] uppercase font-bold bg-indigo-600 hover:bg-indigo-500 rounded-lg transition-all flex items-center gap-1 cursor-pointer"
+            >
+              Join Voice
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
