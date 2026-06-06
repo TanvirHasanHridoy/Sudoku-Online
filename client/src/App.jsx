@@ -2861,6 +2861,39 @@ export default function App() {
                             </>
                           )}
                         </div>
+
+                        {/* Collapsible WebRTC Diagnostics Panel */}
+                        <div className="mt-2 border-t border-border-custom/30 pt-2">
+                          <details className="group" open>
+                            <summary className="text-[10px] text-text-custom/60 group-open:text-accent-custom font-bold cursor-pointer select-none flex items-center justify-between hover:text-text-custom transition-all">
+                              <span>WebRTC Diagnostics Console</span>
+                              <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                                <button
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    navigator.clipboard.writeText(voiceDebugLogs.join('\n'));
+                                    addToast('Diagnostics logs copied to clipboard!', 'success');
+                                  }}
+                                  className="text-[8px] font-bold px-1.5 py-0.5 bg-accent-glow hover:bg-accent-custom hover:text-white border border-border-custom rounded-md active:scale-95 transition-all cursor-pointer"
+                                >
+                                  Copy Logs
+                                </button>
+                                <span className="text-[8px] opacity-75 group-open:rotate-180 transition-transform">▼</span>
+                              </div>
+                            </summary>
+                            <div className="mt-1.5 p-2 bg-slate-950/80 rounded-lg max-h-32 overflow-y-auto font-mono text-[9px] text-indigo-200/90 border border-border-custom/25 space-y-1 scrollbar-thin">
+                              {voiceDebugLogs.length === 0 ? (
+                                <div className="text-text-custom/40 italic text-center py-1">No logs recorded yet.</div>
+                              ) : (
+                                voiceDebugLogs.map((log, index) => (
+                                  <div key={index} className="leading-normal border-b border-border-custom/5 pb-0.5 last:border-0 last:pb-0 break-all select-all">
+                                    {log}
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          </details>
+                        </div>
                       </div>
 
                       {/* READY UP ACTION BUTTON */}
