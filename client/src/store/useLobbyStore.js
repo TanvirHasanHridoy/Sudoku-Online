@@ -908,22 +908,32 @@ export const useLobbyStore = create((set, get) => ({
         {
           urls: 'turn:openrelay.metered.ca:80',
           username: 'openrelayproject',
-          credential: 'openrelayproject'
+          credential: 'openrelayproject',
+          credentialType: 'password'
         },
         {
           urls: 'turn:openrelay.metered.ca:443',
           username: 'openrelayproject',
-          credential: 'openrelayproject'
+          credential: 'openrelayproject',
+          credentialType: 'password'
         },
         {
           urls: 'turn:openrelay.metered.ca:443?transport=tcp',
           username: 'openrelayproject',
-          credential: 'openrelayproject'
+          credential: 'openrelayproject',
+          credentialType: 'password'
         },
         {
           urls: 'turns:openrelay.metered.ca:443',
           username: 'openrelayproject',
-          credential: 'openrelayproject'
+          credential: 'openrelayproject',
+          credentialType: 'password'
+        },
+        {
+          urls: 'turns:openrelay.metered.ca:443?transport=tcp',
+          username: 'openrelayproject',
+          credential: 'openrelayproject',
+          credentialType: 'password'
         }
       ]
     });
@@ -938,6 +948,9 @@ export const useLobbyStore = create((set, get) => ({
     pc.onconnectionstatechange = () => {
       console.log(`[Voice WebRTC] Connection state changed to: ${pc.connectionState}`);
     };
+    pc.onicegatheringstatechange = () => {
+      console.log(`[Voice WebRTC] ICE gathering state: ${pc.iceGatheringState}`);
+    };
 
     if (localAudioStream) {
       localAudioStream.getTracks().forEach((track) => {
@@ -946,8 +959,15 @@ export const useLobbyStore = create((set, get) => ({
     }
 
     pc.ontrack = (event) => {
-      console.log('[Voice] Received remote audio stream track', event.streams[0]);
-      set({ remoteAudioStream: event.streams[0] });
+      console.log('[Voice] Received remote audio stream track', event.streams);
+      let stream = event.streams && event.streams[0];
+      if (!stream && event.track) {
+        console.log('[Voice] Constructing new MediaStream from track');
+        stream = new MediaStream([event.track]);
+      }
+      if (stream) {
+        set({ remoteAudioStream: stream });
+      }
     };
 
     pc.onicecandidate = (event) => {
@@ -1009,7 +1029,7 @@ export const useLobbyStore = create((set, get) => ({
           console.log(`[Voice] Draining ${pc.queuedCandidates.length} queued ICE candidates`);
           for (const cand of pc.queuedCandidates) {
             try {
-              await pc.addIceCandidate(new RTCIceCandidate(cand));
+              await pc.addIceCandidate(cand);
             } catch (e) {
               console.warn('[Voice] Failed adding queued candidate', e);
             }
@@ -1037,7 +1057,7 @@ export const useLobbyStore = create((set, get) => ({
             console.log(`[Voice] Draining ${pc.queuedCandidates.length} queued ICE candidates`);
             for (const cand of pc.queuedCandidates) {
               try {
-                await pc.addIceCandidate(new RTCIceCandidate(cand));
+                await pc.addIceCandidate(cand);
               } catch (e) {
                 console.warn('[Voice] Failed adding queued candidate', e);
               }
@@ -1054,7 +1074,7 @@ export const useLobbyStore = create((set, get) => ({
         if (pc && signal.candidate) {
           if (pc.remoteDescription && pc.remoteDescription.type) {
             try {
-              await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
+              await pc.addIceCandidate(signal.candidate);
             } catch (e) {
               console.warn('[Voice] Failed adding ICE candidate directly', e);
             }
