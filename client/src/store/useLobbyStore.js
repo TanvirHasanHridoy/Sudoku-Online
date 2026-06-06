@@ -56,6 +56,8 @@ export const useLobbyStore = create((set, get) => ({
   // Live Spectating States
   spectatingPlayerId: null,
   spectatedPlayerBoardState: null, // { board, notes, selectedCell }
+  spectatedPlayerABoard: null, // { board, notes, selectedCell }
+  spectatedPlayerBBoard: null, // { board, notes, selectedCell }
   myActiveSpectators: [], // [ "PlayerName1", "PlayerName2", ... ]
 
   // Phase 12 Sabotage & Power-up States
@@ -170,6 +172,16 @@ export const useLobbyStore = create((set, get) => ({
       if (activeRoomCode) {
         console.log(`[Auto Reconnect] Restoring multiplayer session for Room: ${activeRoomCode}`);
         get().joinRoom(activeRoomCode);
+
+        // Auto-rejoin voice chat on the server if we were previously connected
+        const { isVoiceJoined, isMicMuted } = get();
+        if (isVoiceJoined) {
+          socket.send(JSON.stringify({
+            type: 'UPDATE_VOICE_STATE',
+            payload: { isMuted: isMicMuted, isJoined: true }
+          }));
+          get().addVoiceDebugLog('[Voice Rejoin] Sent voice active state to server on socket reconnect.');
+        }
       }
     };
 
@@ -442,6 +454,83 @@ export const useLobbyStore = create((set, get) => ({
             break;
           }
 
+          case 'PLAYER_DISCONNECTED': {
+            const { playerId, name } = payload;
+            get().addToast(`⚠️ ${name} disconnected. Waiting 15s to reconnect...`, 'error');
+            set((state) => {
+              if (!state.room) return {};
+              const updatedPlayers = state.room.players.map(p => 
+                p.id === playerId ? { ...p, disconnected: true } : p
+              );
+              return { room: { ...state.room, players: updatedPlayers } };
+            });
+            break;
+          }
+
+          case 'PLAYER_RECONNECTED': {
+            const { playerId, name, room } = payload;
+            get().addToast(`⚡ ${name} reconnected!`, 'success');
+            set({ room });
+
+            // Automatically renegotiate voice call if both players were in voice!
+            const state = get();
+            if (state.isVoiceJoined) {
+              state.addVoiceDebugLog(`Opponent ${name} reconnected. Renegotiating WebRTC call...`);
+              if (state.peerConnection) {
+                state.peerConnection.close();
+              }
+              set({ peerConnection: null, remoteAudioStream: null });
+              
+              // Polite initiator logic: renegotiate WebRTC handshake
+              const otherPlayer = room.players.find(p => p.id === playerId);
+              if (otherPlayer && otherPlayer.isVoiceJoined) {
+                const isInitiator = state.myPlayerId.localeCompare(playerId) < 0;
+                if (isInitiator) {
+                  state.addVoiceDebugLog(`We are the initiator. Generating fresh WebRTC offer...`);
+                  setTimeout(() => {
+                    get().initiateCall(playerId);
+                  }, 500); // 500ms delay to allow peer connection instance setup
+                } else {
+                  state.addVoiceDebugLog(`We are the callee. Waiting for fresh WebRTC offer...`);
+                }
+              }
+            }
+            break;
+          }
+
+          case 'GAME_OVER_LEAVER': {
+            const { winnerId, winnerName, leaverId, leaverName, eloAdjustment } = payload;
+            
+            // If we are the winner, adjust ELO up
+            if (winnerId === get().myPlayerId) {
+              import('./useSocialStore').then(({ useSocialStore }) => {
+                useSocialStore.getState().adjustElo(eloAdjustment);
+              });
+              get().addToast(`🏆 Match won by forfeit! ${leaverName} left the game. (+${eloAdjustment} ELO)`, 'success');
+              useGameStore.setState({ gameStatus: 'won' });
+            } else if (leaverId === get().myPlayerId) {
+              // If we are the leaver (explicitly left, or timeout)
+              import('./useSocialStore').then(({ useSocialStore }) => {
+                useSocialStore.getState().adjustElo(-eloAdjustment);
+              });
+              get().addToast(`💀 Match forfeited! You left the game. (-${eloAdjustment} ELO)`, 'error');
+              useGameStore.setState({ gameStatus: 'lost' });
+            }
+            
+            // Exit room tracking
+            localStorage.removeItem('sudoku_active_room_code');
+            break;
+          }
+
+          case 'FORFEIT_PENALTY': {
+            const { eloAdjustment } = payload;
+            import('./useSocialStore').then(({ useSocialStore }) => {
+              useSocialStore.getState().adjustElo(eloAdjustment); // eloAdjustment is negative
+            });
+            get().addToast(`💀 You lost ${Math.abs(eloAdjustment)} ELO for forfeiting your last match.`, 'error');
+            break;
+          }
+
           case 'HINT_USED': {
             // Another player just used a hint
             get().addToast(`💡 ${payload.name} used a hint!`, 'info');
@@ -621,9 +710,21 @@ export const useLobbyStore = create((set, get) => ({
           }
 
           case 'GAMEPLAY_SYNCED': {
-            const { board, notes, selectedCell } = payload;
-            set({
-              spectatedPlayerBoardState: { board, notes, selectedCell }
+            const { playerId, board, notes, selectedCell } = payload;
+            set((state) => {
+              const activePlayers = state.room?.players?.filter(p => !p.isSpectator) || [];
+              const isPlayerA = activePlayers[0]?.id === playerId;
+              const isPlayerB = activePlayers[1]?.id === playerId;
+
+              const updates = {
+                spectatedPlayerBoardState: { board, notes, selectedCell }
+              };
+              if (isPlayerA) {
+                updates.spectatedPlayerABoard = { board, notes, selectedCell };
+              } else if (isPlayerB) {
+                updates.spectatedPlayerBBoard = { board, notes, selectedCell };
+              }
+              return updates;
             });
             break;
           }
@@ -637,11 +738,17 @@ export const useLobbyStore = create((set, get) => ({
     };
 
     socket.onclose = () => {
-      get().leaveVoice(); // Safely clean up local tracks & connections
+      // Clean up peer connections but preserve local microphone stream and isVoiceJoined flag for auto-resumption
+      const { peerConnection } = get();
+      if (peerConnection) {
+        peerConnection.close();
+      }
       set({ 
         ws: null, 
         isConnected: false, 
         room: null,
+        peerConnection: null,
+        remoteAudioStream: null,
         spectatingPlayerId: null,
         spectatedPlayerBoardState: null,
         myActiveSpectators: []
@@ -805,6 +912,17 @@ export const useLobbyStore = create((set, get) => ({
 
     const { ws, isConnected, room } = get();
 
+    // Apply forfeit penalty immediately if leaving a started multiplayer game
+    if (room && room.isGameStarted && !room.isSpectator) {
+      const activePlayers = room.players ? room.players.filter(p => !p.isSpectator) : [];
+      if (activePlayers.length > 1) {
+        import('./useSocialStore').then(({ useSocialStore }) => {
+          useSocialStore.getState().adjustElo(-15);
+        });
+        get().addToast('You left the active match and forfeited 15 ELO.', 'error');
+      }
+    }
+
     // Notify the server so other players are informed and the player is removed from the room
     if (ws && isConnected && ws.readyState === 1 && room) {
       ws.send(JSON.stringify({
@@ -827,6 +945,8 @@ export const useLobbyStore = create((set, get) => ({
       showPlayAgainVoteModal: false,
       spectatingPlayerId: null,
       spectatedPlayerBoardState: null,
+      spectatedPlayerABoard: null,
+      spectatedPlayerBBoard: null,
       myActiveSpectators: [],
       myMana: 0,
       myStreak: 0,
@@ -846,6 +966,13 @@ export const useLobbyStore = create((set, get) => ({
   // WebRTC P2P Voice Call Actions
   joinVoice: async () => {
     try {
+      const { myPlayerId, room } = get();
+      const isSpectator = room?.players?.find(p => p.id === myPlayerId)?.isSpectator;
+      if (isSpectator) {
+        get().addToast('Spectators cannot join the voice channel.', 'error');
+        return;
+      }
+
       get().addVoiceDebugLog('Requesting local microphone stream...');
       set({ voiceConnectionState: 'connecting' });
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -858,7 +985,7 @@ export const useLobbyStore = create((set, get) => ({
 
       get().addVoiceDebugLog('Microphone access granted.');
 
-      const { ws, myPlayerId, room } = get();
+      const { ws } = get();
       
       // Notify server of active voice status
       if (ws && ws.readyState === 1) {

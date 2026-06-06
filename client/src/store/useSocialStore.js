@@ -3,6 +3,16 @@ import { supabase } from '../lib/supabase';
 import { useLobbyStore } from './useLobbyStore';
 import { useAuthStore } from './useAuthStore';
 
+export const getRankTierFromElo = (elo) => {
+  if (elo >= 2000) return 'Grandmaster';
+  if (elo >= 1800) return 'Master I';
+  if (elo >= 1600) return 'Platinum II';
+  if (elo >= 1400) return 'Diamond IV';
+  if (elo >= 1200) return 'Gold III';
+  if (elo >= 1000) return 'Silver II';
+  return 'Bronze I';
+};
+
 export const useSocialStore = create((set, get) => ({
   elo: Number(localStorage.getItem('sudoku_elo')) || 1450,
   rank: 'Diamond IV',
@@ -12,6 +22,8 @@ export const useSocialStore = create((set, get) => ({
   matchOpponent: null,
   matchSearchInterval: null,
   searchTimer: 0,
+  leaderboard: [],
+  loadingLeaderboard: false,
 
   initSocial: () => {
     const updateRank = () => {
@@ -37,17 +49,7 @@ export const useSocialStore = create((set, get) => ({
   },
 
   updateRankTier: () => {
-    const { elo } = get();
-    let currentRank = 'Bronze I';
-
-    if (elo >= 2000) currentRank = 'Grandmaster';
-    else if (elo >= 1800) currentRank = 'Master I';
-    else if (elo >= 1600) currentRank = 'Platinum II';
-    else if (elo >= 1400) currentRank = 'Diamond IV';
-    else if (elo >= 1200) currentRank = 'Gold III';
-    else if (elo >= 1000) currentRank = 'Silver II';
-
-    set({ rank: currentRank });
+    set({ rank: getRankTierFromElo(get().elo) });
   },
 
   adjustElo: async (points) => {
@@ -451,5 +453,40 @@ export const useSocialStore = create((set, get) => ({
     setTimeout(() => {
       set({ matchmakingStatus: 'idle', matchOpponent: null });
     }, 2500);
+  },
+
+  fetchLeaderboard: async () => {
+    if (!supabase) {
+      // Mock fallback data for offline/unconfigured environments
+      const mockLeaderboard = [
+        { id: '1', display_name: 'ApexMaster', elo: 2150, avatar_id: 'apex' },
+        { id: '2', display_name: 'CyberNeon', elo: 1980, avatar_id: 'cyber' },
+        { id: '3', display_name: 'GrandMaster', elo: 1890, avatar_id: 'master' },
+        { id: '4', display_name: 'ZenSolver', elo: 1720, avatar_id: 'zen' },
+        { id: '5', display_name: 'SpeedRunner', elo: 1610, avatar_id: 'speed' },
+        { id: '6', display_name: 'NordicExplorer', elo: 1540, avatar_id: 'nordic' },
+        { id: '7', display_name: 'Solver_9921', elo: 1450, avatar_id: 'apex' },
+      ];
+      set({ leaderboard: mockLeaderboard, loadingLeaderboard: false });
+      return;
+    }
+
+    try {
+      set({ loadingLeaderboard: true });
+      const { data: profiles, error } = await supabase
+        .from('profiles')
+        .select('id, display_name, elo, avatar_id')
+        .order('elo', { ascending: false })
+        .limit(20);
+
+      if (error) throw error;
+      if (profiles) {
+        set({ leaderboard: profiles });
+      }
+    } catch (err) {
+      console.warn('[Social] Failed to fetch leaderboard:', err);
+    } finally {
+      set({ loadingLeaderboard: false });
+    }
   }
 }));

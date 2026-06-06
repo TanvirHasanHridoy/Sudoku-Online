@@ -38,6 +38,10 @@ const rooms = new Map();
 const connectedClients = new Map();     // Map<playerId, { id, socket, name, elo }>
 const matchmakingQueue = [];            // Array of { playerId, name, elo, difficulty, socket, queuedAt }
 
+// Competitive disconnect tracking registries
+const disconnectTimeouts = new Map();   // Map<playerId, NodeJS.Timeout>
+const pendingPenalties = new Map();     // Map<playerId, Number>
+
 // Helper: Get detailed player status and lobby info
 function getPlayerDetailedStatus(friendId) {
   let foundClient = null;
@@ -167,7 +171,8 @@ function getSanitizedRoom(room) {
       isSpectator: p.isSpectator,
       isVoiceJoined: !!p.isVoiceJoined,
       isVoiceMuted: !!p.isVoiceMuted,
-      elo: p.elo || 1450
+      elo: p.elo || 1450,
+      disconnected: !!p.disconnected
     }))
   };
 }
@@ -280,10 +285,46 @@ wss.on('connection', (ws) => {
 
           if (existingPlayerIndex !== -1) {
             // Reconnect logic: restore socket reference and retain original isSpectator state
+            if (disconnectTimeouts.has(playerId)) {
+              clearTimeout(disconnectTimeouts.get(playerId));
+              disconnectTimeouts.delete(playerId);
+            }
             room.players[existingPlayerIndex].socket = ws;
+            room.players[existingPlayerIndex].disconnected = false;
             room.players[existingPlayerIndex].isVoiceJoined = false;
             room.players[existingPlayerIndex].isVoiceMuted = false;
             currentPlayer = room.players[existingPlayerIndex];
+
+            currentRoomCode = code;
+            broadcastOnlineStatusChange(playerId, 'in-game');
+
+            // Notify player of successful join
+            ws.send(JSON.stringify({
+              type: 'ROOM_JOINED',
+              payload: {
+                room: getSanitizedRoom(room),
+                myPlayerId: playerId,
+                board: room.board,
+                solution: room.solution
+              }
+            }));
+
+            // Notify opponent of player reconnected (renegotiate voice chat)
+            broadcastToRoom(code, {
+              type: 'PLAYER_RECONNECTED',
+              payload: {
+                playerId: playerId,
+                name: currentPlayer.name,
+                room: getSanitizedRoom(room)
+              }
+            }, playerId);
+
+            // Notify everyone in the room
+            broadcastToRoom(code, {
+              type: 'ROOM_UPDATED',
+              payload: { room: getSanitizedRoom(room) }
+            });
+            break;
           } else {
             room.players.push(currentPlayer);
           }
@@ -456,6 +497,29 @@ wss.on('connection', (ws) => {
             rooms.delete(currentRoomCode);
           } else {
             // Normal leave flow for guests or mid-game host exit
+            const isMatchStarted = room.isGameStarted;
+            const leaverId = currentPlayer.id;
+            const leaverName = currentPlayer.name;
+
+            // If game is started and is multiplayer, apply forfeit ELO adjustments immediately
+            const activePlayers = room.players.filter(p => !p.isSpectator);
+            if (isMatchStarted && activePlayers.length > 1 && !currentPlayer.isSpectator) {
+              const winner = room.players.find(p => p.id !== leaverId && !p.isSpectator);
+              if (winner) {
+                console.log(`[WS Forfeit] Player ${leaverName} explicitly left active match. Winner: ${winner.name}`);
+                broadcastToRoom(currentRoomCode, {
+                  type: 'GAME_OVER_LEAVER',
+                  payload: {
+                    winnerId: winner.id,
+                    winnerName: winner.name,
+                    leaverId: leaverId,
+                    leaverName: leaverName,
+                    eloAdjustment: 15
+                  }
+                });
+              }
+            }
+
             // Notify remaining players before removing
             broadcastToRoom(currentRoomCode, {
               type: 'PLAYER_LEFT',
@@ -1100,6 +1164,19 @@ wss.on('connection', (ws) => {
           console.log(`[WS Registered] Player: ${name} (ID: ${playerId}) (Supabase: ${supabaseUserId})`);
           
           broadcastOnlineStatusChange(playerId, 'online');
+
+          // Apply pending ELO penalties on registration connect
+          if (pendingPenalties.has(playerId)) {
+            const penalty = pendingPenalties.get(playerId);
+            console.log(`[WS Penalty] Applying pending forfeit ELO penalty of -${penalty} to player ${name}`);
+            ws.send(JSON.stringify({
+              type: 'FORFEIT_PENALTY',
+              payload: {
+                eloAdjustment: -penalty
+              }
+            }));
+            pendingPenalties.delete(playerId);
+          }
           break;
         }
 
@@ -1359,46 +1436,121 @@ wss.on('connection', (ws) => {
       }
     });
 
-    // Set a timeout to clean up after 8 seconds (grace period for page reloads)
-    setTimeout(() => {
-      const currentRoom = rooms.get(currentRoomCode);
-      if (!currentRoom) return;
+    // Determine if we should wait for 15s (multiplayer match started) or 8s (grace period for reloading)
+    const activePlayers = room.players.filter(p => !p.isSpectator);
+    const isMultiplayerGame = room.isGameStarted && activePlayers.length > 1;
 
-      const player = currentRoom.players.find(p => p.id === disconnectedId);
-      // If the player still has no active socket (socket is null or closed), clean them up
-      if (player && (!player.socket || player.socket.readyState !== 1)) {
-        currentRoom.players = currentRoom.players.filter(p => p.id !== disconnectedId);
+    if (isMultiplayerGame && !currentPlayer.isSpectator) {
+      currentPlayer.disconnected = true;
 
-        // Clean up votes
-        delete currentRoom.pauseVotes[disconnectedId];
-        delete currentRoom.playAgainVotes[disconnectedId];
-
-        // If the disconnected player had an active pause request, dismiss it
-        if (currentRoom.pauseRequesterId === disconnectedId) {
-          currentRoom.pauseRequesterId = null;
-          currentRoom.pauseVotes = {};
-          broadcastToRoom(currentRoomCode, {
-            type: 'PAUSE_DISMISSED',
-            payload: { room: getSanitizedRoom(currentRoom) }
-          });
+      // Broadcast PLAYER_DISCONNECTED with 15s grace period parameters
+      broadcastToRoom(currentRoomCode, {
+        type: 'PLAYER_DISCONNECTED',
+        payload: {
+          playerId: disconnectedId,
+          name: disconnectedName,
+          secondsRemaining: 15
         }
+      });
 
-        if (currentRoom.players.length === 0) {
-          rooms.delete(currentRoomCode);
-          console.log(`[WS Room Deleted] Room ${currentRoomCode} is empty.`);
-        } else {
-          // Send PLAYER_LEFT so clients can update live-sync immediately and show a named toast
-          broadcastToRoom(currentRoomCode, {
-            type: 'PLAYER_LEFT',
-            payload: { playerId: disconnectedId, name: disconnectedName }
-          });
-          broadcastToRoom(currentRoomCode, {
-            type: 'ROOM_UPDATED',
-            payload: { room: getSanitizedRoom(currentRoom) }
-          });
-        }
+      if (disconnectTimeouts.has(disconnectedId)) {
+        clearTimeout(disconnectTimeouts.get(disconnectedId));
       }
-    }, 8000);
+
+      const timeoutId = setTimeout(() => {
+        disconnectTimeouts.delete(disconnectedId);
+        
+        const currentRoom = rooms.get(currentRoomCode);
+        if (!currentRoom) return;
+
+        const player = currentRoom.players.find(p => p.id === disconnectedId);
+        // If the player still has no active socket, process match forfeit ELO adjustments
+        if (player && (!player.socket || player.socket.readyState !== 1)) {
+          console.log(`[WS Forfeit] Player ${disconnectedName} timed out after disconnect. Forfeiting match.`);
+          const winner = currentRoom.players.find(p => p.id !== disconnectedId && !p.isSpectator);
+
+          if (winner) {
+            broadcastToRoom(currentRoomCode, {
+              type: 'GAME_OVER_LEAVER',
+              payload: {
+                winnerId: winner.id,
+                winnerName: winner.name,
+                leaverId: disconnectedId,
+                leaverName: disconnectedName,
+                eloAdjustment: 15
+              }
+            });
+
+            // Store pending penalty to apply on next registration connect
+            pendingPenalties.set(disconnectedId, 15);
+          }
+
+          // Clean up room players list
+          currentRoom.players = currentRoom.players.filter(p => p.id !== disconnectedId);
+          delete currentRoom.pauseVotes[disconnectedId];
+          delete currentRoom.playAgainVotes[disconnectedId];
+
+          const remainingActive = currentRoom.players.filter(p => !p.isSpectator);
+          if (remainingActive.length === 0) {
+            rooms.delete(currentRoomCode);
+            console.log(`[WS Room Deleted] Room ${currentRoomCode} deleted after forfeit.`);
+          } else {
+            broadcastToRoom(currentRoomCode, {
+              type: 'ROOM_UPDATED',
+              payload: { room: getSanitizedRoom(currentRoom) }
+            });
+          }
+        }
+      }, 15000);
+
+      disconnectTimeouts.set(disconnectedId, timeoutId);
+    } else {
+      currentPlayer.disconnected = true;
+
+      if (disconnectTimeouts.has(disconnectedId)) {
+        clearTimeout(disconnectTimeouts.get(disconnectedId));
+      }
+
+      // Default 8-second grace period for solo games or unstarted lobby rooms
+      const timeoutId = setTimeout(() => {
+        disconnectTimeouts.delete(disconnectedId);
+        
+        const currentRoom = rooms.get(currentRoomCode);
+        if (!currentRoom) return;
+
+        const player = currentRoom.players.find(p => p.id === disconnectedId);
+        if (player && (!player.socket || player.socket.readyState !== 1)) {
+          currentRoom.players = currentRoom.players.filter(p => p.id !== disconnectedId);
+          delete currentRoom.pauseVotes[disconnectedId];
+          delete currentRoom.playAgainVotes[disconnectedId];
+
+          if (currentRoom.pauseRequesterId === disconnectedId) {
+            currentRoom.pauseRequesterId = null;
+            currentRoom.pauseVotes = {};
+            broadcastToRoom(currentRoomCode, {
+              type: 'PAUSE_DISMISSED',
+              payload: { room: getSanitizedRoom(currentRoom) }
+            });
+          }
+
+          if (currentRoom.players.length === 0) {
+            rooms.delete(currentRoomCode);
+            console.log(`[WS Room Deleted] Room ${currentRoomCode} is empty.`);
+          } else {
+            broadcastToRoom(currentRoomCode, {
+              type: 'PLAYER_LEFT',
+              payload: { playerId: disconnectedId, name: disconnectedName }
+            });
+            broadcastToRoom(currentRoomCode, {
+              type: 'ROOM_UPDATED',
+              payload: { room: getSanitizedRoom(currentRoom) }
+            });
+          }
+        }
+      }, 8000);
+
+      disconnectTimeouts.set(disconnectedId, timeoutId);
+    }
   });
 });
 

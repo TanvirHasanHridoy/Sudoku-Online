@@ -153,7 +153,39 @@ export const useAuthStore = create((set, get) => ({
       }
 
       if (profile) {
-        console.log("[Auth] Profile found, syncing data...");
+        console.log("[Auth] Profile found, checking display name constraints...");
+        
+        let currentName = profile.display_name;
+        const isValidUsername = (name) => {
+          if (!name) return false;
+          if (name.length > 16) return false;
+          if (/\s/.test(name)) return false;
+          if (!/^[a-zA-Z0-9_]+$/.test(name)) return false;
+          return true;
+        };
+
+        const isUnique = await get().checkUsernameAvailable(currentName);
+        if (!isValidUsername(currentName) || !isUnique) {
+          console.log("[Auth] Current profile name is invalid or not unique. Regenerating...", currentName);
+          const uniqueName = await generateUniqueUsername(currentName || "Player");
+          console.log("[Auth] Generated unique compliant username:", uniqueName);
+          
+          const { data: updatedProfile, error: updateError } = await supabase
+            .from("profiles")
+            .update({ display_name: uniqueName })
+            .eq("id", user.id)
+            .select()
+            .single();
+            
+          if (!updateError && updatedProfile) {
+            profile = updatedProfile;
+            console.log("[Auth] Profile updated successfully with compliant username:", uniqueName);
+          } else {
+            console.error("[Auth] Error updating profile with compliant username:", updateError);
+          }
+        }
+
+        console.log("[Auth] Profile verified, syncing data...");
         const currentGuestId = localStorage.getItem("sudoku_player_id");
         const currentGuestName = localStorage.getItem("sudoku_player_name");
         const currentGuestAvatar =

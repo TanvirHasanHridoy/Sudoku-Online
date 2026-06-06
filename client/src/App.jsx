@@ -32,7 +32,7 @@ import SabotageOverlay from "./components/SabotageOverlay";
 import { playSound } from "./utils/audio";
 import { useGameStore } from "./store/useGameStore";
 import { useLobbyStore } from "./store/useLobbyStore";
-import { useSocialStore } from "./store/useSocialStore";
+import { useSocialStore, getRankTierFromElo } from "./store/useSocialStore";
 import { useAuthStore } from "./store/useAuthStore";
 
 const THEMES = [
@@ -148,6 +148,8 @@ export default function App() {
     // Spectating states & actions
     spectatingPlayerId,
     spectatedPlayerBoardState,
+    spectatedPlayerABoard,
+    spectatedPlayerBBoard,
     myActiveSpectators,
     startSpectating,
     stopSpectating,
@@ -185,6 +187,9 @@ export default function App() {
     cancelMatchmaking,
     acceptFriendRequest,
     declineFriendRequest,
+    leaderboard,
+    loadingLeaderboard,
+    fetchLeaderboard,
   } = useSocialStore();
 
   // Zustand Store - Auth State
@@ -211,6 +216,8 @@ export default function App() {
   const lastSentStrikesRef = useRef(null);
   const lastSentStateRef = useRef("");
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
+  const [disconnectCountdown, setDisconnectCountdown] = useState(15);
+  const [mobileSpectatorTab, setMobileSpectatorTab] = useState("playerA");
 
   // Real-time username checking & validation states
   const [dbUsernameError, setDbUsernameError] = useState("");
@@ -230,6 +237,29 @@ export default function App() {
 
   const localUsernameError = getUsernameValidationError(inputName);
   const usernameError = localUsernameError || dbUsernameError;
+
+  // React to opponent disconnect state and countdown 15s grace period
+  useEffect(() => {
+    let interval = null;
+    if (activeOpponent && activeOpponent.disconnected) {
+      setDisconnectCountdown(15);
+      interval = setInterval(() => {
+        setDisconnectCountdown((prev) => {
+          if (prev <= 1) {
+            clearInterval(interval);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    } else {
+      setDisconnectCountdown(15);
+    }
+
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [activeOpponent?.disconnected, activeOpponent?.id]);
 
   useEffect(() => {
     const trimmed = inputName.trim();
@@ -922,6 +952,146 @@ export default function App() {
 
   console.log("App.jsx toasts list:", toasts);
 
+  // Render dual-board spectator dashboard (Responsive Layout)
+  const renderSpectatorView = () => {
+    const activePlayersInRoom = room?.players?.filter(p => !p.isSpectator) || [];
+    const playerA = activePlayersInRoom[0];
+    const playerB = activePlayersInRoom[1];
+
+    const renderBoardOnly = (boardState, playerObj) => {
+      const hasLeft = !playerObj || playerObj.disconnected;
+      return (
+        <div className="relative w-full max-w-[420px] p-1 rounded-2xl ring-2 ring-border-custom bg-panel-custom/30 shadow-inner">
+          <SudokuGrid
+            board={boardState?.board || Array(9).fill(null).map(() => Array(9).fill(null))}
+            selectedCell={boardState?.selectedCell || null}
+            onCellClick={() => {}} // Spectators are passive
+            notes={boardState?.notes || {}}
+            originalCells={new Set()}
+            mistakes={[]}
+            shakingCell={null}
+            isSpectatingMode={true}
+          />
+          {hasLeft && (
+            <div className="absolute inset-0 bg-zinc-950/80 backdrop-blur-sm rounded-xl flex flex-col items-center justify-center text-center p-6 z-20 border border-border-custom">
+              <X size={36} className="text-rose-500 mx-auto animate-pulse" />
+              <h3 className="text-sm font-bold text-rose-500 mt-1">Player Disconnected</h3>
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    return (
+      <div className="max-w-6xl mx-auto px-2 sm:px-4 py-6 md:py-10 space-y-6">
+        {/* Top Summary Header */}
+        <div className="glass-panel p-4 rounded-2xl border border-border-custom/50 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-bold text-accent-custom flex items-center gap-1.5">
+              <Tv size={18} className="animate-pulse" /> Live Spectator Dashboard
+            </h2>
+            <p className="text-xs opacity-60">Room: {room?.code} • Mode: Ranked Match • Difficulty: {room?.difficulty}</p>
+          </div>
+          
+          <div className="flex gap-4 text-xs flex-1 max-w-lg justify-end w-full sm:w-auto">
+            {/* Player A Progress Card */}
+            <div className="flex-1 bg-accent-glow/5 border border-border-custom/50 rounded-xl p-2.5">
+              <div className="flex justify-between font-bold mb-1">
+                <span className="truncate max-w-[100px]">{playerA ? playerA.name : "Waiting..."}</span>
+                <span>{playerA ? playerA.progress : 0}%</span>
+              </div>
+              <div className="w-full bg-accent-glow/30 h-1.5 rounded-full overflow-hidden mb-1.5">
+                <div className="bg-accent-custom h-full rounded-full" style={{ width: `${playerA ? playerA.progress : 0}%` }} />
+              </div>
+              <div className="flex justify-between text-[9px] opacity-65 font-bold">
+                <span>Lives: {playerA ? (3 - playerA.strikes) : 0}/3</span>
+                <span>{playerA?.disconnected ? "❌ Offline" : "🟢 Online"}</span>
+              </div>
+            </div>
+
+            {/* Player B Progress Card */}
+            <div className="flex-1 bg-accent-glow/5 border border-border-custom/50 rounded-xl p-2.5">
+              <div className="flex justify-between font-bold mb-1">
+                <span className="truncate max-w-[100px]">{playerB ? playerB.name : "Waiting..."}</span>
+                <span>{playerB ? playerB.progress : 0}%</span>
+              </div>
+              <div className="w-full bg-accent-glow/30 h-1.5 rounded-full overflow-hidden mb-1.5">
+                <div className="bg-accent-custom h-full rounded-full" style={{ width: `${playerB ? playerB.progress : 0}%` }} />
+              </div>
+              <div className="flex justify-between text-[9px] opacity-65 font-bold">
+                <span>Lives: {playerB ? (3 - playerB.strikes) : 0}/3</span>
+                <span>{playerB?.disconnected ? "❌ Offline" : "🟢 Online"}</span>
+              </div>
+            </div>
+          </div>
+
+          <button
+            onClick={() => exitToHome(() => {
+              setActiveView("home");
+              setSeconds(0);
+            })}
+            className="px-4 py-2 bg-rose-500/10 border border-rose-500/30 hover:bg-rose-500 hover:text-white text-rose-500 transition-all rounded-xl text-xs font-bold shrink-0 cursor-pointer"
+          >
+            Exit Spectator
+          </button>
+        </div>
+
+        {/* Mobile View Switcher (< 1024px) */}
+        <div className="block lg:hidden space-y-4">
+          <div className="flex bg-accent-glow/30 rounded-xl p-1 border border-border-custom/40">
+            <button
+              onClick={() => setMobileSpectatorTab("playerA")}
+              className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${mobileSpectatorTab === "playerA" ? "bg-panel-custom text-text-custom shadow-xs" : "opacity-60"}`}
+            >
+              👁️ View {playerA ? playerA.name : "Player A"}
+            </button>
+            <button
+              onClick={() => setMobileSpectatorTab("playerB")}
+              className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${mobileSpectatorTab === "playerB" ? "bg-panel-custom text-text-custom shadow-xs" : "opacity-60"}`}
+            >
+              👁️ View {playerB ? playerB.name : "Player B"}
+            </button>
+          </div>
+          
+          <div className="flex justify-center">
+            {mobileSpectatorTab === "playerA" ? (
+              <div className="flex flex-col items-center gap-2 w-full">
+                <p className="text-xs font-bold uppercase tracking-wider text-accent-custom">{playerA ? playerA.name : "Player A"}'s Board</p>
+                {renderBoardOnly(spectatedPlayerABoard, playerA)}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center gap-2 w-full">
+                <p className="text-xs font-bold uppercase tracking-wider text-accent-custom">{playerB ? playerB.name : "Player B"}'s Board</p>
+                {renderBoardOnly(spectatedPlayerBBoard, playerB)}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Desktop View Side-by-Side (>= 1024px) */}
+        <div className="hidden lg:grid grid-cols-2 gap-8 items-start">
+          {/* Player A Board */}
+          <div className="flex flex-col items-center gap-3">
+            <div className="text-center">
+              <h3 className="text-sm font-extrabold uppercase tracking-widest text-accent-custom">{playerA ? playerA.name : "Player A"}</h3>
+              <p className="text-[10px] opacity-60">Progress: {playerA ? playerA.progress : 0}% • Lives: {playerA ? (3 - playerA.strikes) : 0}/3</p>
+            </div>
+            {renderBoardOnly(spectatedPlayerABoard, playerA)}
+          </div>
+
+          {/* Player B Board */}
+          <div className="flex flex-col items-center gap-3">
+            <div className="text-center">
+              <h3 className="text-sm font-extrabold uppercase tracking-widest text-accent-custom">{playerB ? playerB.name : "Player B"}</h3>
+              <p className="text-[10px] opacity-60">Progress: {playerB ? playerB.progress : 0}% • Lives: {playerB ? (3 - playerB.strikes) : 0}/3</p>
+            </div>
+            {renderBoardOnly(spectatedPlayerBBoard, playerB)}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-bg-custom text-text-custom font-sans transition-colors duration-300 relative pb-10">
       {/* Toast Notifications Stack */}
@@ -944,6 +1114,27 @@ export default function App() {
           </div>
         ))}
       </div>
+
+      {/* Connection Lost Overlay for Disconnected Opponents */}
+      {activeView === "game" && activeOpponent && activeOpponent.disconnected && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex flex-col items-center justify-center p-4 z-40 animate-fade-in border border-border-custom/50">
+          <div className="w-16 h-16 rounded-2xl bg-amber-500/20 text-amber-500 flex items-center justify-center mb-4 border border-amber-500/30 animate-pulse">
+            <AlertTriangle size={36} />
+          </div>
+          <h3 className="text-xl font-extrabold text-amber-500 tracking-wider">
+            CONNECTION LOST
+          </h3>
+          <p className="text-xs opacity-75 text-center mt-2 max-w-[280px]">
+            <strong>{activeOpponent.name}</strong> disconnected. Waiting for reconnection...
+          </p>
+          <div className="mt-6 font-sans font-black text-5xl text-accent-custom tabular-nums animate-bounce-slow">
+            {disconnectCountdown}s
+          </div>
+          <p className="text-[10px] opacity-40 mt-2">
+            Match will forfeit automatically if countdown expires
+          </p>
+        </div>
+      )}
 
       {/* Visual Floating Emotes Overlay */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none z-50">
@@ -1329,6 +1520,16 @@ export default function App() {
                   <Trophy size={16} />
                   Matchmaking
                 </button>
+                <button
+                  onClick={() => {
+                    setActiveTab("leaderboard");
+                    fetchLeaderboard();
+                  }}
+                  className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold transition-all ${activeTab === "leaderboard" ? "bg-panel-custom text-text-custom shadow-xs" : "opacity-60 hover:opacity-100"}`}
+                >
+                  <Trophy size={16} />
+                  Leaderboard
+                </button>
               </div>
 
               {/* Lobby Tab */}
@@ -1691,6 +1892,111 @@ export default function App() {
                   )}
                 </div>
               )}
+
+              {/* Leaderboard Tab */}
+              {activeTab === "leaderboard" && (
+                <div className="space-y-4 py-2 animate-fade-in">
+                  <div className="text-center space-y-1 mb-2">
+                    <h3 className="text-sm font-bold text-accent-custom uppercase tracking-wider">
+                      🏆 Global ELO Rankings
+                    </h3>
+                    <p className="text-[10px] opacity-60">
+                      Top players worldwide climbing the ranks
+                    </p>
+                  </div>
+                  {loadingLeaderboard ? (
+                    <div className="flex flex-col items-center justify-center py-8 gap-2">
+                      <div className="w-8 h-8 rounded-full border-4 border-accent-custom/20 border-t-accent-custom animate-spin" />
+                      <span className="text-[10px] font-semibold opacity-60">
+                        Loading leaderboard...
+                      </span>
+                    </div>
+                  ) : leaderboard.length === 0 ? (
+                    <p className="text-center py-6 text-xs opacity-50 italic">
+                      No players ranked yet.
+                    </p>
+                  ) : (
+                    <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+                      {leaderboard.map((player, index) => {
+                        const isMe = player.id === myPlayerId;
+                        const rankTier = getRankTierFromElo(player.elo);
+
+                        return (
+                          <div
+                            key={player.id}
+                            className={`flex items-center justify-between p-2.5 border rounded-xl transition-all ${
+                              isMe
+                                ? "bg-accent-glow/20 border-accent-custom ring-1 ring-accent-custom/20"
+                                : "bg-accent-glow/5 border-border-custom/50 hover:border-border-custom"
+                            }`}
+                          >
+                            <div className="flex items-center gap-3">
+                              {/* Position Badge */}
+                              <span
+                                className={`w-5 h-5 rounded-md flex items-center justify-center font-extrabold text-[10px] ${
+                                  index === 0
+                                    ? "bg-amber-500 text-slate-950 font-sans"
+                                    : index === 1
+                                      ? "bg-slate-300 text-slate-950 font-sans"
+                                      : index === 2
+                                        ? "bg-amber-700 text-white font-sans"
+                                        : "bg-accent-glow border border-border-custom opacity-70 text-[9px]"
+                                }`}
+                              >
+                                {index + 1}
+                              </span>
+
+                              {/* Avatar display */}
+                              <div className="w-7 h-7 rounded-full bg-accent-custom/10 text-white overflow-hidden border border-border-custom/30 flex items-center justify-center text-[10px] font-bold">
+                                {AVATARS.find(
+                                  (a) => a.id === player.avatar_id,
+                                ) ? (
+                                  <img
+                                    src={
+                                      AVATARS.find(
+                                        (a) => a.id === player.avatar_id,
+                                      ).src
+                                    }
+                                    alt=""
+                                    className="w-full h-full object-cover"
+                                  />
+                                ) : (
+                                  player.display_name
+                                    ?.slice(0, 2)
+                                    ?.toUpperCase() || "P"
+                                )}
+                              </div>
+
+                              <div>
+                                <p className="text-xs font-bold leading-tight flex items-center gap-1.5">
+                                  {player.display_name}
+                                  {isMe && (
+                                    <span className="text-[8px] bg-accent-custom/20 text-accent-custom px-1.5 py-0.25 rounded-full uppercase tracking-wider font-extrabold scale-90">
+                                      You
+                                    </span>
+                                  )}
+                                </p>
+                                <span className="text-[9px] opacity-60 font-medium">
+                                  {rankTier}
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="text-right">
+                              <span className="text-xs font-extrabold text-accent-custom font-sans tabular-nums">
+                                {player.elo}
+                              </span>
+                              <span className="text-[8px] block opacity-50 font-semibold tracking-wide uppercase">
+                                ELO
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </section>
 
@@ -1782,7 +2088,10 @@ export default function App() {
         </main>
       )}
       {activeView !== "home" && (
-        <main className="max-w-6xl mx-auto px-2 sm:px-4 py-6 md:py-10 grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+        isMeSpectator ? (
+          renderSpectatorView()
+        ) : (
+          <main className="max-w-6xl mx-auto px-2 sm:px-4 py-6 md:py-10 grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
           {/* LEFT COLUMN: The Sudoku Puzzle Area (Cols 1 to 7) */}
           <section className="lg:col-span-7 flex flex-col items-center relative">
             {/* PAUSED MASK SCREEN */}
@@ -2550,27 +2859,6 @@ export default function App() {
                             </>
                           )}
                         </div>
-
-                        {/* Collapsible WebRTC Diagnostics Panel */}
-                        <div className="mt-2 border-t border-border-custom/30 pt-2">
-                          <details className="group">
-                            <summary className="text-[10px] text-text-custom/60 group-open:text-accent-custom font-bold cursor-pointer select-none flex items-center justify-between hover:text-text-custom transition-all">
-                              <span>WebRTC Diagnostics Console</span>
-                              <span className="text-[8px] opacity-75 group-open:rotate-180 transition-transform">▼</span>
-                            </summary>
-                            <div className="mt-1.5 p-2 bg-slate-950/80 rounded-lg max-h-32 overflow-y-auto font-mono text-[9px] text-indigo-200/90 border border-border-custom/25 space-y-1 scrollbar-thin">
-                              {voiceDebugLogs.length === 0 ? (
-                                <div className="text-text-custom/40 italic text-center py-1">No logs recorded yet.</div>
-                              ) : (
-                                voiceDebugLogs.map((log, index) => (
-                                  <div key={index} className="leading-normal border-b border-border-custom/5 pb-0.5 last:border-0 last:pb-0 break-all select-all">
-                                    {log}
-                                  </div>
-                                ))
-                              )}
-                            </div>
-                          </details>
-                        </div>
                       </div>
 
                       {/* READY UP ACTION BUTTON */}
@@ -2843,6 +3131,7 @@ export default function App() {
             </div>
           </section>
         </main>
+        )
       )}
 
       {/* WIN / LOSS DIALOG OVERLAYS WITH POST-GAME SOLVE TIMELINE ANALYSIS */}
