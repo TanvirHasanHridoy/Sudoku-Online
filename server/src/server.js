@@ -737,69 +737,77 @@ wss.on('connection', (ws) => {
           break;
         }
 
-        case 'FETCH_ICE_SERVERS': {
+             case 'FETCH_ICE_SERVERS': {
           const appName = process.env.METERED_APP_NAME;
           const apiKey = process.env.METERED_API_KEY || process.env.METERED_SECRET_KEY;
           const domain = process.env.METERED_DOMAIN || (appName ? `${appName}.metered.live` : null);
 
+          // Helper to send ice servers and break out cleanly
+          const sendIceServers = (iceServers, label) => {
+            ws.send(JSON.stringify({
+              type: 'ICE_SERVERS_RESPONSE',
+              payload: { iceServers }
+            }));
+            console.log(`[WS Server] ICE servers sent to client (${label}, count: ${iceServers.length}).`);
+          };
+
           if (domain && apiKey) {
             console.log(`[WS Server] Fetching private ICE servers from Metered API: ${domain}`);
+            let meteredSucceeded = false;
             try {
               // 1. Try GET credentials endpoint (expects frontend API Key)
               let res = await fetch(`https://${domain}/api/v1/turn/credentials?apiKey=${apiKey}`);
               if (res.ok) {
                 const iceServers = await res.json();
-                if (iceServers && Array.isArray(iceServers)) {
-                  ws.send(JSON.stringify({
-                    type: 'ICE_SERVERS_RESPONSE',
-                    payload: { iceServers }
-                  }));
-                  console.log('[WS Server] Successfully sent private ICE servers to client via GET API Key.');
-                  break;
+                if (iceServers && Array.isArray(iceServers) && iceServers.length > 0) {
+                  sendIceServers(iceServers, 'Metered GET');
+                  meteredSucceeded = true;
                 }
               }
 
-              // 2. Try POST credential endpoint (expects API Secret Key / secretKey)
-              console.log('[WS Server] GET endpoint returned non-OK or empty. Retrying with POST credential endpoint (Secret Key)...');
-              res = await fetch(`https://${domain}/api/v1/turn/credential?secretKey=${apiKey}`, {
-                method: 'POST'
-              });
+              if (!meteredSucceeded) {
+                // 2. Try POST credential endpoint (expects API Secret Key / secretKey)
+                console.log('[WS Server] GET endpoint returned non-OK or empty. Retrying with POST credential endpoint (Secret Key)...');
+                res = await fetch(`https://${domain}/api/v1/turn/credential?secretKey=${apiKey}`, {
+                  method: 'POST'
+                });
 
-              if (res.ok) {
-                const creds = await res.json();
-                if (creds && creds.apiKey) {
-                  console.log(`[WS Server] Obtained public API key: ${creds.apiKey}. Fetching official ICE servers list...`);
-                  const listRes = await fetch(`https://${domain}/api/v1/turn/credentials?apiKey=${creds.apiKey}`);
-                  if (listRes.ok) {
-                    const iceServers = await listRes.json();
-                    if (iceServers && Array.isArray(iceServers)) {
-                      ws.send(JSON.stringify({
-                        type: 'ICE_SERVERS_RESPONSE',
-                        payload: { iceServers }
-                      }));
-                      console.log('[WS Server] Successfully fetched and sent official ICE servers via two-step POST -> GET workflow.');
-                      break;
+                if (res.ok) {
+                  const creds = await res.json();
+                  if (creds && creds.apiKey) {
+                    console.log(`[WS Server] Obtained public API key: ${creds.apiKey}. Fetching official ICE servers list...`);
+                    const listRes = await fetch(`https://${domain}/api/v1/turn/credentials?apiKey=${creds.apiKey}`);
+                    if (listRes.ok) {
+                      const iceServers = await listRes.json();
+                      if (iceServers && Array.isArray(iceServers) && iceServers.length > 0) {
+                        sendIceServers(iceServers, 'Metered POST->GET');
+                        meteredSucceeded = true;
+                      }
                     }
                   }
-                }
-              } else {
-                const errBody = await res.json().catch(() => ({}));
-                console.error(`[WS Server] Metered API POST returned status ${res.status}:`, errBody);
-                if (errBody.message && errBody.message.includes('subscribe')) {
-                  ws.send(JSON.stringify({
-                    type: 'ERROR',
-                    payload: { message: `TURN Server: ${errBody.message}. Please subscribe/select a plan on your Metered dashboard.` }
-                  }));
+                } else {
+                  const errBody = await res.json().catch(() => ({}));
+                  console.error(`[WS Server] Metered API POST returned status ${res.status}:`, errBody);
+                  if (errBody.message && errBody.message.includes('subscribe')) {
+                    ws.send(JSON.stringify({
+                      type: 'ERROR',
+                      payload: { message: `TURN Server: ${errBody.message}. Please subscribe/select a plan on your Metered dashboard.` }
+                    }));
+                  }
                 }
               }
             } catch (err) {
               console.error('[WS Server] Failed fetching from Metered API:', err);
             }
+
+            // If Metered succeeded, we are done — do NOT fall through to fallback
+            if (meteredSucceeded) break;
+            console.warn('[WS Server] All Metered API attempts failed. Falling back to OpenRelay servers.');
           } else {
             console.warn('[WS Server] Metered credentials not configured in environment. Using fallback OpenRelay servers.');
           }
 
-          // Fallback to OpenRelay
+          // Fallback to OpenRelay — only reached when Metered is unconfigured or all attempts failed
           const fallbackServers = [
             { urls: 'stun:stun.l.google.com:19302' },
             { urls: 'stun:stun1.l.google.com:19302' },
@@ -836,10 +844,7 @@ wss.on('connection', (ws) => {
             }
           ];
 
-          ws.send(JSON.stringify({
-            type: 'ICE_SERVERS_RESPONSE',
-            payload: { iceServers: fallbackServers }
-          }));
+          sendIceServers(fallbackServers, 'OpenRelay fallback');
           break;
         }
         case 'SIGNAL_DATA': {
