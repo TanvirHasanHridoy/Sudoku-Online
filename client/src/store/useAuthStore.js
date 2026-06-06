@@ -48,11 +48,9 @@ export const useAuthStore = create((set, get) => ({
       return;
     }
 
-    console.log('[Auth] Initializing auth, current URL:', window.location.href);
-
     // 1. Register auth state listener FIRST — before any async work —
-    //    so we never miss events (e.g. SIGNED_IN from a PKCE exchange
-    //    that the Supabase client triggers automatically on createClient).
+    //    so we never miss events (e.g. SIGNED_IN triggered when the
+    //    Supabase client auto-detects tokens in the URL hash fragment).
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
@@ -80,38 +78,9 @@ export const useAuthStore = create((set, get) => ({
       }
     });
 
-    // 2. Handle PKCE callback: if the URL contains ?code=, the user just
-    //    returned from the OAuth provider. Explicitly exchange the code
-    //    for a session.  The Supabase client *should* do this automatically
-    //    via detectSessionInUrl, but in production (PWA service workers,
-    //    caching, timing) it can silently fail. This explicit exchange
-    //    is the safety-net that guarantees the code is consumed.
-    const params = new URLSearchParams(window.location.search);
-    const code = params.get('code');
-
-    if (code) {
-      console.log('[Auth] PKCE code detected in URL, exchanging for session...');
-      try {
-        const { data, error } = await supabase.auth.exchangeCodeForSession(code);
-        if (error) {
-          // "code already used" means the auto-detection already consumed it — that's fine
-          if (error.message?.includes('code')) {
-            console.log('[Auth] Code already exchanged by auto-detection');
-          } else {
-            console.error('[Auth] PKCE exchange error:', error.message);
-          }
-        } else {
-          console.log('[Auth] PKCE exchange successful, user:', data.session?.user?.id);
-        }
-      } catch (err) {
-        console.error('[Auth] PKCE exchange exception:', err);
-      }
-      // Clean the auth code from the URL so it's not retried on refresh
-      window.history.replaceState({}, '', window.location.pathname);
-    }
-
-    // 3. Check current session (picks up persisted sessions or the one
-    //    just exchanged above).
+    // 2. Check current session (picks up persisted sessions and tokens
+    //    from the URL hash that the Supabase client auto-detected via
+    //    detectSessionInUrl in the implicit OAuth flow).
     const {
       data: { session },
     } = await supabase.auth.getSession();

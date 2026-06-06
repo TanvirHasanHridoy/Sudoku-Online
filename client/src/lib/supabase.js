@@ -15,17 +15,13 @@ if (!supabaseUrl || !supabaseAnonKey) {
   );
 }
 
-// Log env status at startup to help diagnose production auth issues
-console.log('[Supabase] Config:', supabaseUrl ? 'URL set' : 'URL MISSING', supabaseAnonKey ? '| Key set' : '| Key MISSING');
-
 export const supabase = (supabaseUrl && supabaseAnonKey)
   ? createClient(supabaseUrl, supabaseAnonKey, {
       auth: {
-        flowType: 'pkce',
+        flowType: 'implicit',
         detectSessionInUrl: true,
         persistSession: true,
         autoRefreshToken: true,
       },
     })
   : null;
-
