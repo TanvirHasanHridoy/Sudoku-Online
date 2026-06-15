@@ -56,7 +56,9 @@ const generateUniqueUsername = async (baseName) => {
 const checkIsGuestUser = (user) => {
   if (!user) return true;
   if (user.is_anonymous) return true;
+  if (user.app_metadata?.provider === "google" || user.identities?.some(id => id.provider === "google")) return false;
   if (user.email && user.email.endsWith("@sudoku-guest-login.com")) return true;
+  if (user.email && !user.email.endsWith("@sudoku-guest-login.com")) return false;
   if (localStorage.getItem("sudoku_is_guest_auth") === "true") return true;
   return false;
 };
@@ -66,6 +68,34 @@ export const useAuthStore = create((set, get) => ({
   profile: null,
   loading: true,
   isGuest: true,
+  conflictProfile: null,
+  pendingGoogleUser: null,
+
+  resolveConflict: async (accept) => {
+    const { pendingGoogleUser } = get();
+    if (!pendingGoogleUser) return;
+
+    if (accept) {
+      // User chose to switch to Google profile, discarding current guest stats.
+      localStorage.setItem(`sudoku_migrated_${pendingGoogleUser.id}`, "true");
+      localStorage.removeItem("sudoku_is_guest_auth");
+      localStorage.removeItem("sudoku_guest_creds");
+      set({ conflictProfile: null, pendingGoogleUser: null });
+      console.log("[Auth] Conflict resolved: switching to Google profile...");
+      await get().fetchAndSyncProfile(pendingGoogleUser);
+    } else {
+      // User chose to stay on guest, signing out of Google.
+      console.log("[Auth] Conflict resolved: keeping guest session, signing out of Google...");
+      try {
+        set({ conflictProfile: null, pendingGoogleUser: null });
+        await supabase.auth.signOut();
+        await get().registerOrSignInGuest();
+      } catch (err) {
+        console.error("Conflict rejection failed:", err);
+        set({ conflictProfile: null, pendingGoogleUser: null });
+      }
+    }
+  },
 
   registerOrSignInGuest: async () => {
     if (!supabase) return null;
@@ -355,9 +385,21 @@ export const useAuthStore = create((set, get) => ({
 
           // Now sync with local storage if not migrated yet
           const isMigrated = localStorage.getItem(`sudoku_migrated_${user.id}`);
-          if (!isMigrated) {
+          const isNewUser = user.created_at && (new Date() - new Date(user.created_at) < 60000);
+
+          if (!isMigrated && !isNewUser && currentGuestId && currentGuestId.startsWith("p_")) {
+            console.log("[Auth] Conflict detected! Google account has an existing profile in the database, pausing sign-in.");
+            set({
+              conflictProfile: profile,
+              pendingGoogleUser: user,
+              loading: false
+            });
+            return;
+          }
+
+          if (!isMigrated && isNewUser) {
             console.log(
-              "[Auth] First migration for this user, pulling in guest data...",
+              "[Auth] First migration for this new user, pulling in guest data...",
             );
             const updates = {};
             if (currentGuestElo) updates.elo = parseInt(currentGuestElo, 10);
@@ -410,6 +452,9 @@ export const useAuthStore = create((set, get) => ({
             }
             localStorage.setItem(`sudoku_migrated_${user.id}`, "true");
           } else {
+            if (!isMigrated) {
+              localStorage.setItem(`sudoku_migrated_${user.id}`, "true");
+            }
             // Even if migrated, check if we should still try to pull in Google name if current name is default
             const googleName =
               user.user_metadata?.full_name || user.user_metadata?.name;
@@ -441,6 +486,11 @@ export const useAuthStore = create((set, get) => ({
               }
             }
           }
+          
+          // Clear guest flags since we are successfully logged in as Google user
+          localStorage.removeItem("sudoku_is_guest_auth");
+          localStorage.removeItem("sudoku_guest_creds");
+          set({ isGuest: false });
         }
 
         // Sync local storage to match the database profile
