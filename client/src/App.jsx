@@ -2034,20 +2034,20 @@ export default function App() {
                           <div
                             key={player.id}
                             className={`flex items-center justify-between p-2.5 border rounded-xl transition-all ${isMe
-                                ? "bg-accent-glow/20 border-accent-custom ring-1 ring-accent-custom/20"
-                                : "bg-accent-glow/5 border-border-custom/50 hover:border-border-custom"
+                              ? "bg-accent-glow/20 border-accent-custom ring-1 ring-accent-custom/20"
+                              : "bg-accent-glow/5 border-border-custom/50 hover:border-border-custom"
                               }`}
                           >
                             <div className="flex items-center gap-3">
                               {/* Position Badge */}
                               <span
                                 className={`w-5 h-5 rounded-md flex items-center justify-center font-extrabold text-[10px] ${index === 0
-                                    ? "bg-amber-500 text-slate-950 font-sans"
-                                    : index === 1
-                                      ? "bg-slate-300 text-slate-950 font-sans"
-                                      : index === 2
-                                        ? "bg-amber-700 text-white font-sans"
-                                        : "bg-accent-glow border border-border-custom opacity-70 text-[9px]"
+                                  ? "bg-amber-500 text-slate-950 font-sans"
+                                  : index === 1
+                                    ? "bg-slate-300 text-slate-950 font-sans"
+                                    : index === 2
+                                      ? "bg-amber-700 text-white font-sans"
+                                      : "bg-accent-glow border border-border-custom opacity-70 text-[9px]"
                                   }`}
                               >
                                 {index + 1}
@@ -2141,12 +2141,12 @@ export default function App() {
                     <div className="flex items-center gap-2">
                       <div
                         className={`w-2 h-2 rounded-full ${f.status === "online"
-                            ? "bg-emerald-500 animate-pulse"
-                            : f.status === "in-lobby"
-                              ? "bg-cyan-500 animate-pulse"
-                              : f.status === "in-game"
-                                ? "bg-amber-500 animate-pulse"
-                                : "bg-slate-300 dark:bg-slate-700"
+                          ? "bg-emerald-500 animate-pulse"
+                          : f.status === "in-lobby"
+                            ? "bg-cyan-500 animate-pulse"
+                            : f.status === "in-game"
+                              ? "bg-amber-500 animate-pulse"
+                              : "bg-slate-300 dark:bg-slate-700"
                           }`}
                       />
                       <div>
@@ -2161,8 +2161,8 @@ export default function App() {
                         onClick={() => inviteFriend(f.id)}
                         disabled={f.status !== "online"}
                         className={`px-2 py-1 border transition-all rounded-md text-[9px] font-bold ${f.status === "online"
-                            ? "bg-accent-glow border-border-custom hover:border-accent-custom hover:text-accent-custom active:scale-95 cursor-pointer"
-                            : "bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700 cursor-not-allowed opacity-50"
+                          ? "bg-accent-glow border-border-custom hover:border-accent-custom hover:text-accent-custom active:scale-95 cursor-pointer"
+                          : "bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700 cursor-not-allowed opacity-50"
                           }`}
                         title={
                           f.status !== "online"
@@ -2252,8 +2252,8 @@ export default function App() {
                     <div
                       key={heartIndex}
                       className={`w-2 h-2 rounded-full transition-colors duration-300 ${heartIndex <= maxStrikes - strikes
-                          ? "bg-rose-500 shadow-xs shadow-rose-500/20"
-                          : "border border-dashed border-border-custom opacity-40"
+                        ? "bg-rose-500 shadow-xs shadow-rose-500/20"
+                        : "border border-dashed border-border-custom opacity-40"
                         }`}
                     />
                   ))}
@@ -2331,8 +2331,8 @@ export default function App() {
                         <div
                           key={i}
                           className={`w-1.5 h-1.5 rounded-full ${i < maxStrikes - activeOpponent.strikes
-                              ? "bg-rose-500"
-                              : "border border-dashed border-border-custom opacity-40"
+                            ? "bg-rose-500"
+                            : "border border-dashed border-border-custom opacity-40"
                             }`}
                         />
                       ))}
@@ -2344,8 +2344,8 @@ export default function App() {
               {spectatingPlayerId && (
                 <div
                   className={`w-full max-w-[460px] glass-panel px-4 py-2 rounded-xl mb-3 border flex items-center justify-between shadow-md transition-all ${hasSpectatedPlayerLeft
-                      ? "border-zinc-500/30 shadow-zinc-500/5 bg-zinc-500/5 opacity-80"
-                      : "border-rose-500/30 animate-pulse shadow-rose-500/10 bg-rose-500/5"
+                    ? "border-zinc-500/30 shadow-zinc-500/5 bg-zinc-500/5 opacity-80"
+                    : "border-rose-500/30 animate-pulse shadow-rose-500/10 bg-rose-500/5"
                     }`}
                 >
                   <div className="flex items-center gap-2">
@@ -2381,12 +2381,12 @@ export default function App() {
               {/* Sudoku Board Grid Wrapper with active spectator outline and spectator eye count badge */}
               <div
                 className={`relative w-full max-w-[460px] p-1 rounded-2xl transition-all duration-500 ${spectatingPlayerId
-                    ? hasSpectatedPlayerLeft
-                      ? "ring-4 ring-zinc-500/20 bg-zinc-500/5"
-                      : "ring-4 ring-rose-500/30 bg-rose-500/5"
-                    : (myActiveSpectators || []).length > 0
-                      ? "ring-4 ring-emerald-500/30 bg-emerald-500/5"
-                      : ""
+                  ? hasSpectatedPlayerLeft
+                    ? "ring-4 ring-zinc-500/20 bg-zinc-500/5"
+                    : "ring-4 ring-rose-500/30 bg-rose-500/5"
+                  : (myActiveSpectators || []).length > 0
+                    ? "ring-4 ring-emerald-500/30 bg-emerald-500/5"
+                    : ""
                   }`}
               >
                 {/* Active Spectator Eye Badge inside corner of the grid */}
@@ -2609,8 +2609,8 @@ export default function App() {
                     <button
                       onClick={() => setActiveTab("lobby")}
                       className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold transition-all ${activeTab === "lobby"
-                          ? "bg-panel-custom text-text-custom shadow-xs"
-                          : "opacity-60 hover:opacity-100"
+                        ? "bg-panel-custom text-text-custom shadow-xs"
+                        : "opacity-60 hover:opacity-100"
                         }`}
                     >
                       <Users size={16} />
@@ -2621,8 +2621,8 @@ export default function App() {
                       <button
                         onClick={() => setActiveTab("matchmaker")}
                         className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold transition-all ${activeTab === "matchmaker"
-                            ? "bg-panel-custom text-text-custom shadow-xs"
-                            : "opacity-60 hover:opacity-100"
+                          ? "bg-panel-custom text-text-custom shadow-xs"
+                          : "opacity-60 hover:opacity-100"
                           }`}
                       >
                         <Trophy size={16} />
@@ -2775,16 +2775,16 @@ export default function App() {
                                   <div
                                     key={p.id}
                                     className={`border border-border-custom/50 rounded-xl p-3 bg-accent-glow/10 ${isMe
-                                        ? "ring-1 ring-accent-custom/30 bg-accent-glow/20"
-                                        : ""
+                                      ? "ring-1 ring-accent-custom/30 bg-accent-glow/20"
+                                      : ""
                                       }`}
                                   >
                                     <div className="flex items-center justify-between mb-2">
                                       <div className="flex items-center gap-2">
                                         <div
                                           className={`w-7 h-7 rounded-full bg-accent-custom text-white font-bold flex items-center justify-center text-xs relative transition-all duration-300 overflow-hidden ${voiceJoined && !voiceMuted
-                                              ? "speaking-pulse-avatar shadow-md shadow-emerald-500/20"
-                                              : ""
+                                            ? "speaking-pulse-avatar shadow-md shadow-emerald-500/20"
+                                            : ""
                                             }`}
                                         >
                                           {AVATARS.find(
@@ -2846,8 +2846,8 @@ export default function App() {
                                                 <div
                                                   key={i}
                                                   className={`w-2 h-2 rounded-full ${i < maxStrikes - p.strikes
-                                                      ? "bg-rose-500"
-                                                      : "border border-dashed border-border-custom opacity-40"
+                                                    ? "bg-rose-500"
+                                                    : "border border-dashed border-border-custom opacity-40"
                                                     }`}
                                                 />
                                               ))}
@@ -2865,8 +2865,8 @@ export default function App() {
                                             )}
                                             <span
                                               className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${p.isReady
-                                                  ? "bg-emerald-500/20 text-emerald-500 border border-emerald-500/30"
-                                                  : "bg-accent-glow border border-border-custom text-text-custom opacity-60"
+                                                ? "bg-emerald-500/20 text-emerald-500 border border-emerald-500/30"
+                                                : "bg-accent-glow border border-border-custom text-text-custom opacity-60"
                                                 }`}
                                             >
                                               {p.isReady ? "READY" : "WAITING"}
@@ -2938,12 +2938,12 @@ export default function App() {
                                 </span>
                               </div>
                               <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border border-border-custom ${voiceConnectionState === 'connected'
-                                  ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
-                                  : voiceConnectionState === 'connecting'
-                                    ? "bg-amber-500/10 border-amber-500/20 text-amber-400 animate-pulse"
-                                    : voiceConnectionState === 'failed'
-                                      ? "bg-rose-500/10 border-rose-500/20 text-rose-400"
-                                      : "bg-accent-glow border-border-custom text-text-custom opacity-70"
+                                ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
+                                : voiceConnectionState === 'connecting'
+                                  ? "bg-amber-500/10 border-amber-500/20 text-amber-400 animate-pulse"
+                                  : voiceConnectionState === 'failed'
+                                    ? "bg-rose-500/10 border-rose-500/20 text-rose-400"
+                                    : "bg-accent-glow border-border-custom text-text-custom opacity-70"
                                 }`}>
                                 {voiceConnectionState === 'connected'
                                   ? "Connected"
@@ -2969,8 +2969,8 @@ export default function App() {
                                   <button
                                     onClick={toggleMicMute}
                                     className={`flex-1 py-2 font-bold text-xs rounded-xl active:scale-95 transition-all flex items-center justify-center gap-1.5 border ${isMicMuted
-                                        ? "bg-rose-500/10 border-rose-500/30 text-rose-500 hover:bg-rose-500 hover:text-white"
-                                        : "bg-emerald-500/10 border-emerald-500/30 text-emerald-500 hover:bg-emerald-500 hover:text-white"
+                                      ? "bg-rose-500/10 border-rose-500/30 text-rose-500 hover:bg-rose-500 hover:text-white"
+                                      : "bg-emerald-500/10 border-emerald-500/30 text-emerald-500 hover:bg-emerald-500 hover:text-white"
                                       }`}
                                   >
                                     {isMicMuted ? (
@@ -3038,8 +3038,8 @@ export default function App() {
                                   <button
                                     onClick={toggleReady}
                                     className={`flex-1 py-3 rounded-xl font-bold text-sm shadow-md transition-all active:scale-[0.98] ${myStatusInRoom?.isReady
-                                        ? "bg-amber-600 hover:bg-amber-500 text-white"
-                                        : "bg-accent-custom hover:bg-accent-hover text-white"
+                                      ? "bg-amber-600 hover:bg-amber-500 text-white"
+                                      : "bg-accent-custom hover:bg-accent-hover text-white"
                                       }`}
                                   >
                                     {myStatusInRoom?.isReady
@@ -3245,10 +3245,10 @@ export default function App() {
                         <div className="flex items-center gap-2">
                           <div
                             className={`w-2 h-2 rounded-full ${f.status === "online"
-                                ? "bg-emerald-500 animate-pulse"
-                                : f.status === "in-game"
-                                  ? "bg-amber-500 animate-pulse"
-                                  : "bg-slate-300 dark:bg-slate-700"
+                              ? "bg-emerald-500 animate-pulse"
+                              : f.status === "in-game"
+                                ? "bg-amber-500 animate-pulse"
+                                : "bg-slate-300 dark:bg-slate-700"
                               }`}
                           />
                           <div>
@@ -3264,8 +3264,8 @@ export default function App() {
                             onClick={() => inviteFriend(f.id)}
                             disabled={f.status !== "online"}
                             className={`px-2 py-1 border transition-all rounded-md text-[9px] font-bold ${f.status === "online"
-                                ? "bg-accent-glow border-border-custom hover:border-accent-custom hover:text-accent-custom active:scale-95 cursor-pointer"
-                                : "bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700 cursor-not-allowed opacity-50"
+                              ? "bg-accent-glow border-border-custom hover:border-accent-custom hover:text-accent-custom active:scale-95 cursor-pointer"
+                              : "bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700 cursor-not-allowed opacity-50"
                               }`}
                             title={
                               f.status !== "online"
@@ -3742,21 +3742,19 @@ export default function App() {
                 <div className="grid grid-cols-2 gap-2 bg-accent-glow/20 rounded-xl p-1 border border-border-custom/30">
                   <button
                     onClick={() => handleKeypadLayoutChange("single-row")}
-                    className={`py-1.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
-                      keypadLayout === "single-row"
-                        ? "bg-accent-custom text-white shadow-sm font-sans"
-                        : "opacity-75 hover:opacity-100 font-sans"
-                    }`}
+                    className={`py-1.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${keypadLayout === "single-row"
+                      ? "bg-accent-custom text-white shadow-sm font-sans"
+                      : "opacity-75 hover:opacity-100 font-sans"
+                      }`}
                   >
                     Single Row
                   </button>
                   <button
                     onClick={() => handleKeypadLayoutChange("two-rows")}
-                    className={`py-1.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
-                      keypadLayout === "two-rows"
-                        ? "bg-accent-custom text-white shadow-sm font-sans"
-                        : "opacity-75 hover:opacity-100 font-sans"
-                    }`}
+                    className={`py-1.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${keypadLayout === "two-rows"
+                      ? "bg-accent-custom text-white shadow-sm font-sans"
+                      : "opacity-75 hover:opacity-100 font-sans"
+                      }`}
                   >
                     Two Rows
                   </button>
