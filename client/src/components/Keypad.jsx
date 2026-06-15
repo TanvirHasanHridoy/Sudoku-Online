@@ -10,7 +10,8 @@ export default function Keypad({
   hintsRemaining = 1,
   completedNumbers = new Set(),
   numberCounts = Array(10).fill(0),
-  isScrambled = false
+  isScrambled = false,
+  keypadLayout = 'single-row'
 }) {
   const [shuffledButtons, setShuffledButtons] = React.useState([1, 2, 3, 4, 5, 6, 7, 8, 9]);
 
@@ -36,14 +37,14 @@ export default function Keypad({
   }, [isScrambled]);
 
   return (
-    <div className="w-full max-w-[460px] flex flex-col gap-4 mt-4 sm:mt-6">
+    <div className="w-full max-w-[460px] flex flex-col gap-2 lg:gap-4 mt-2 lg:mt-4">
       {/* Action Controls */}
       <div className="grid grid-cols-5 gap-2">
         <button
           onClick={() => onActionClick('undo')}
           disabled={!canUndo}
           className={`
-            flex flex-col items-center justify-center py-2.5 rounded-xl border transition-all duration-200
+            flex flex-col items-center justify-center py-1.5 lg:py-2.5 rounded-lg lg:rounded-xl border transition-all duration-200
             ${canUndo 
               ? 'glass-card text-text-custom hover:border-accent-custom hover:text-accent-custom active:scale-95' 
               : 'border-border-custom opacity-40 cursor-not-allowed'}
@@ -58,7 +59,7 @@ export default function Keypad({
           onClick={() => onActionClick('redo')}
           disabled={!canRedo}
           className={`
-            flex flex-col items-center justify-center py-2.5 rounded-xl border transition-all duration-200
+            flex flex-col items-center justify-center py-1.5 lg:py-2.5 rounded-lg lg:rounded-xl border transition-all duration-200
             ${canRedo 
               ? 'glass-card text-text-custom hover:border-accent-custom hover:text-accent-custom active:scale-95' 
               : 'border-border-custom opacity-40 cursor-not-allowed'}
@@ -72,7 +73,7 @@ export default function Keypad({
         <button
           onClick={() => onActionClick('notes')}
           className={`
-            flex flex-col items-center justify-center py-2.5 rounded-xl border transition-all duration-250 active:scale-95
+            flex flex-col items-center justify-center py-1.5 lg:py-2.5 rounded-lg lg:rounded-xl border transition-all duration-250 active:scale-95
             ${notesMode 
               ? 'bg-accent-custom border-accent-custom text-white shadow-md shadow-accent-custom/20' 
               : 'glass-card text-text-custom hover:border-accent-custom hover:text-accent-custom'}
@@ -85,7 +86,7 @@ export default function Keypad({
 
         <button
           onClick={() => onActionClick('erase')}
-          className="glass-card flex flex-col items-center justify-center py-2.5 rounded-xl border text-text-custom active:scale-95 hover:text-red-500 hover:border-red-400"
+          className="glass-card flex flex-col items-center justify-center py-1.5 lg:py-2.5 rounded-lg lg:rounded-xl border text-text-custom active:scale-95 hover:text-red-500 hover:border-red-400"
           title="Erase cell value"
         >
           <Trash2 size={20} />
@@ -95,7 +96,7 @@ export default function Keypad({
         <button
           onClick={() => onActionClick('hint')}
           className={`
-            glass-card flex flex-col items-center justify-center py-2.5 rounded-xl border text-text-custom active:scale-95 relative
+            glass-card flex flex-col items-center justify-center py-1.5 lg:py-2.5 rounded-lg lg:rounded-xl border text-text-custom active:scale-95 relative
             ${hintsRemaining === 0 ? 'opacity-40 cursor-not-allowed' : 'hover:border-accent-custom hover:text-accent-custom'}
           `}
           title="Get Hint"
@@ -112,7 +113,7 @@ export default function Keypad({
       </div>
 
       {/* Numeric Pad */}
-      <div className="grid grid-cols-9 gap-1.5">
+      <div className={keypadLayout === 'two-rows' ? 'flex flex-wrap justify-center gap-1.5' : 'grid grid-cols-9 gap-1.5'}>
         {shuffledButtons.map((num) => {
           const count = numberCounts[num] || 0;
           const isCompleted = completedNumbers.has(num) || count >= 9;
@@ -122,7 +123,8 @@ export default function Keypad({
               onClick={() => !isCompleted && onNumberClick(num)}
               disabled={isCompleted}
               className={`
-                aspect-square rounded-xl flex flex-col items-center justify-center relative
+                ${keypadLayout === 'two-rows' ? 'w-[calc(20%-5px)] h-10 lg:h-11' : 'aspect-square'}
+                rounded-lg lg:rounded-xl flex flex-col items-center justify-center relative
                 transition-all duration-300 py-1
                 ${isCompleted
                   ? 'bg-accent-glow/20 border-dashed border-border-custom/50 text-text-custom/10 cursor-not-allowed opacity-20 pointer-events-none shadow-none'

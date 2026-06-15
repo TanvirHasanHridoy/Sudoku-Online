@@ -143,7 +143,7 @@ export const useGameStore = create((set, get) => ({
   enterNumber: (num, timeString = '00:00') => {
     const { selectedCell, originalCells, board, solution, notesMode, notes, mistakes, strikes, maxStrikes, gameStatus } = get();
     
-    if (!selectedCell || gameStatus !== 'playing') return;
+    if (!selectedCell || (gameStatus !== 'playing' && gameStatus !== 'practice')) return;
     const [row, col] = selectedCell;
     const cellKey = `${row},${col}`;
 
@@ -248,7 +248,7 @@ export const useGameStore = create((set, get) => ({
         }
 
         if (solved) {
-          newStatus = 'won';
+          newStatus = gameStatus === 'practice' ? 'practice-completed' : 'won';
         }
 
         set((state) => ({
@@ -263,10 +263,12 @@ export const useGameStore = create((set, get) => ({
       } else {
         // Strike / mistake made
         const newMistakes = { ...mistakes, [cellKey]: true };
-        newStrikes += 1;
         
-        if (newStrikes >= maxStrikes) {
-          newStatus = 'lost';
+        if (gameStatus !== 'practice') {
+          newStrikes += 1;
+          if (newStrikes >= maxStrikes) {
+            newStatus = 'lost';
+          }
         }
 
         set((state) => ({
@@ -302,7 +304,7 @@ export const useGameStore = create((set, get) => ({
 
   eraseCell: () => {
     const { selectedCell, originalCells, board, notes, mistakes, gameStatus } = get();
-    if (!selectedCell || gameStatus !== 'playing') return;
+    if (!selectedCell || (gameStatus !== 'playing' && gameStatus !== 'practice')) return;
     const [row, col] = selectedCell;
     const cellKey = `${row},${col}`;
 
@@ -332,7 +334,7 @@ export const useGameStore = create((set, get) => ({
 
   getHint: (timeString = '00:00') => {
     const { selectedCell, originalCells, board, solution, hintsRemaining, mistakes, gameStatus } = get();
-    if (!selectedCell || gameStatus !== 'playing' || hintsRemaining <= 0) return;
+    if (!selectedCell || (gameStatus !== 'playing' && gameStatus !== 'practice') || hintsRemaining <= 0) return;
     const [row, col] = selectedCell;
     const cellKey = `${row},${col}`;
 
@@ -390,7 +392,9 @@ export const useGameStore = create((set, get) => ({
       if (!solved) break;
     }
 
-    const newStatus = solved ? 'won' : 'playing';
+    const newStatus = solved 
+      ? (gameStatus === 'practice' ? 'practice-completed' : 'won')
+      : gameStatus;
 
     set((state) => ({
       board: newBoard,
@@ -429,7 +433,7 @@ export const useGameStore = create((set, get) => ({
 
   undo: () => {
     const { history, board, notes, strikes, mistakes, timeline, gameStatus } = get();
-    if (history.length === 0 || gameStatus !== 'playing') return;
+    if (history.length === 0 || (gameStatus !== 'playing' && gameStatus !== 'practice')) return;
 
     const previousState = history[history.length - 1];
     const remainingHistory = history.slice(0, -1);
@@ -458,7 +462,7 @@ export const useGameStore = create((set, get) => ({
 
   redo: () => {
     const { redoStack, board, notes, strikes, mistakes, timeline, gameStatus } = get();
-    if (redoStack.length === 0 || gameStatus !== 'playing') return;
+    if (redoStack.length === 0 || (gameStatus !== 'playing' && gameStatus !== 'practice')) return;
 
     const nextState = redoStack[redoStack.length - 1];
     const remainingRedo = redoStack.slice(0, -1);
