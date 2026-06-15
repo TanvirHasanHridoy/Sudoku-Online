@@ -27,6 +27,7 @@ export const useLobbyStore = create((set, get) => ({
   selectedAvatar: defaultAvatar,
   room: null, // { code, difficulty, isGameStarted, isPaused, players }
   activeLobbyInvitation: null, // { roomCode, inviterName }
+  forfeitWinnerPending: null, // { leaverName, eloAdjustment }
   
   // Voting / Modals States
   pauseRequester: null,
@@ -118,7 +119,7 @@ export const useLobbyStore = create((set, get) => ({
     return true; // Succeeded
   },
 
-  setSelectedAvatar: (avatar) => {
+  setSelectedAvatar: async (avatar) => {
     localStorage.setItem('sudoku_avatar', avatar);
     set({ selectedAvatar: avatar });
 
@@ -129,6 +130,25 @@ export const useLobbyStore = create((set, get) => ({
         type: 'UPDATE_AVATAR',
         payload: { avatar }
       }));
+    }
+
+    // Sync to Supabase if logged in (dynamic import to avoid circular dependencies)
+    try {
+      const { supabase } = await import('../lib/supabase');
+      const { useAuthStore } = await import('./useAuthStore');
+      const { user, profile } = useAuthStore.getState();
+      if (user && supabase) {
+        await supabase
+          .from('profiles')
+          .update({ avatar_id: avatar })
+          .eq('id', user.id);
+
+        if (profile) {
+          useAuthStore.setState({ profile: { ...profile, avatar_id: avatar } });
+        }
+      }
+    } catch (err) {
+      console.warn('Failed syncing avatar to Supabase', err);
     }
   },
 
@@ -181,6 +201,11 @@ export const useLobbyStore = create((set, get) => ({
         console.log(`[Client Received] Type: ${type}`, payload);
 
         switch (type) {
+          case 'REGISTER_CONFIRMED': {
+            set({ myPlayerName: payload.name });
+            localStorage.setItem('sudoku_player_name', payload.name);
+            break;
+          }
           case 'FRIEND_REQUEST_RECEIVED': {
             import('./useSocialStore').then(({ useSocialStore }) => {
               useSocialStore.getState().receiveFriendRequest(payload.sender);
@@ -307,7 +332,19 @@ export const useLobbyStore = create((set, get) => ({
           }
 
           case 'ROOM_UPDATED': {
-            set({ room: payload.room });
+            set((state) => {
+              const updatedRoom = payload.room;
+              const activeSpectatorNames = (updatedRoom?.players || [])
+                .filter(p => p.isSpectator)
+                .map(p => p.name);
+              const reconciled = state.myActiveSpectators.filter(name =>
+                activeSpectatorNames.includes(name)
+              );
+              return {
+                room: updatedRoom,
+                myActiveSpectators: reconciled
+              };
+            });
             break;
           }
 
@@ -337,7 +374,13 @@ export const useLobbyStore = create((set, get) => ({
               if (!state.room) return {};
               const updatedPlayers = state.room.players.map(p => 
                 p.id === payload.playerId 
-                  ? { ...p, progress: payload.progress, strikes: payload.strikes, mana: payload.mana || 0 } 
+                  ? { 
+                      ...p, 
+                      progress: payload.progress, 
+                      strikes: payload.strikes, 
+                      mana: payload.mana || 0,
+                      hasFinishedGame: !!payload.hasFinishedGame
+                    } 
                   : p
               );
               return { room: { ...state.room, players: updatedPlayers } };
@@ -434,11 +477,19 @@ export const useLobbyStore = create((set, get) => ({
             // Remove the player from local room state so live-sync cards update immediately
             set((state) => {
               if (!state.room) return {};
+              const updatedPlayers = state.room.players.filter(p => p.id !== leaverId);
+              const activeSpectatorNames = updatedPlayers
+                .filter(p => p.isSpectator)
+                .map(p => p.name);
+              const reconciled = state.myActiveSpectators.filter(name =>
+                activeSpectatorNames.includes(name)
+              );
               return {
                 room: {
                   ...state.room,
-                  players: state.room.players.filter(p => p.id !== leaverId)
-                }
+                  players: updatedPlayers
+                },
+                myActiveSpectators: reconciled
               };
             });
             break;
@@ -458,33 +509,49 @@ export const useLobbyStore = create((set, get) => ({
           }
 
           case 'PLAYER_RECONNECTED': {
-            const { playerId, name, room } = payload;
+            const { playerId, name, room: updatedRoom } = payload;
             get().addToast(`⚡ ${name} reconnected!`, 'success');
-            set({ room });
+            set((state) => {
+              const activeSpectatorNames = (updatedRoom?.players || [])
+                .filter(p => p.isSpectator)
+                .map(p => p.name);
+              const reconciled = state.myActiveSpectators.filter(name =>
+                activeSpectatorNames.includes(name)
+              );
+              return {
+                room: updatedRoom,
+                myActiveSpectators: reconciled
+              };
+            });
             break;
           }
 
           case 'GAME_OVER_LEAVER': {
             const { winnerId, winnerName, leaverId, leaverName, eloAdjustment } = payload;
             
-            // If we are the winner, adjust ELO up
-            if (winnerId === get().myPlayerId) {
-              import('./useSocialStore').then(({ useSocialStore }) => {
-                useSocialStore.getState().adjustElo(eloAdjustment);
-              });
-              get().addToast(`🏆 Match won by forfeit! ${leaverName} left the game. (+${eloAdjustment} ELO)`, 'success');
-              useGameStore.setState({ gameStatus: 'won' });
-            } else if (leaverId === get().myPlayerId) {
-              // If we are the leaver (explicitly left, or timeout)
-              import('./useSocialStore').then(({ useSocialStore }) => {
-                useSocialStore.getState().adjustElo(-eloAdjustment);
-              });
-              get().addToast(`💀 Match forfeited! You left the game. (-${eloAdjustment} ELO)`, 'error');
-              useGameStore.setState({ gameStatus: 'lost' });
+            // If we already left the room locally, ignore this broadcast
+            if (!get().room) {
+              break;
             }
             
-            // Exit room tracking
-            localStorage.removeItem('sudoku_active_room_code');
+            // If we are the winner, do NOT end the game. Store pending ELO win instead so they can complete the board.
+            if (winnerId === get().myPlayerId) {
+              set({ forfeitWinnerPending: { leaverName, eloAdjustment } });
+              get().addToast(`🏆 Opponent ${leaverName} left! Complete the board successfully to claim +${eloAdjustment} ELO.`, 'success');
+            } else if (leaverId === get().myPlayerId) {
+              // If we are the leaver (explicitly left, or timeout)
+              if (eloAdjustment > 0) {
+                import('./useSocialStore').then(({ useSocialStore }) => {
+                  useSocialStore.getState().adjustElo(-eloAdjustment);
+                });
+                get().addToast(`💀 Match forfeited! You left the game. (-${eloAdjustment} ELO)`, 'error');
+              }
+              const currentStatus = useGameStore.getState().gameStatus;
+              if (currentStatus !== 'practice' && currentStatus !== 'practice-completed') {
+                useGameStore.setState({ gameStatus: 'lost' });
+              }
+              localStorage.removeItem('sudoku_active_room_code');
+            }
             break;
           }
 
@@ -713,13 +780,7 @@ export const useLobbyStore = create((set, get) => ({
       get().leaveVoice(); // Safely clean up local tracks & connections
       set({ 
         ws: null, 
-        isConnected: false, 
-        room: null,
-        spectatingPlayerId: null,
-        spectatedPlayerBoardState: null,
-        spectatedPlayerABoard: null,
-        spectatedPlayerBBoard: null,
-        myActiveSpectators: []
+        isConnected: false
       });
       get().addToast('Disconnected from competitive lobby server. Retrying...', 'error');
       
@@ -911,6 +972,7 @@ export const useLobbyStore = create((set, get) => ({
       showPauseVoteModal: false,
       pauseRequester: null,
       showPlayAgainVoteModal: false,
+      forfeitWinnerPending: null,
       spectatingPlayerId: null,
       spectatedPlayerBoardState: null,
       spectatedPlayerABoard: null,

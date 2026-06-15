@@ -24,6 +24,7 @@ import {
   MicOff,
   LogIn,
   LogOut,
+  Settings,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import SudokuGrid from "./components/SudokuGrid";
@@ -83,6 +84,24 @@ export default function App() {
   const [showThemeMenu, setShowThemeMenu] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
 
+  // Settings Panel preferences states
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [keypadLayout, setKeypadLayout] = useState(() => localStorage.getItem("sudoku_keypad_layout") || "single-row");
+  const [showManaOptionSetting, setShowManaOptionSetting] = useState(() => {
+    const saved = localStorage.getItem("sudoku_show_mana_option");
+    return saved !== null ? JSON.parse(saved) : true;
+  });
+
+  const handleKeypadLayoutChange = (layout) => {
+    setKeypadLayout(layout);
+    localStorage.setItem("sudoku_keypad_layout", layout);
+  };
+
+  const handleShowManaSettingChange = (val) => {
+    setShowManaOptionSetting(val);
+    localStorage.setItem("sudoku_show_mana_option", JSON.stringify(val));
+  };
+
   // Zustand Store - Game State
   const {
     difficulty,
@@ -123,6 +142,7 @@ export default function App() {
     showPauseVoteModal,
     activeLobbyInvitation,
     toasts,
+    forfeitWinnerPending,
     setEmoteCallback,
     connectWebSocket,
     createRoom,
@@ -201,6 +221,8 @@ export default function App() {
     signOut,
     initAuth,
     updateUsername,
+    conflictProfile,
+    resolveConflict,
   } = useAuthStore();
 
   // Local state inputs
@@ -439,15 +461,24 @@ export default function App() {
   const eloSyncedRef = useRef(null);
   useEffect(() => {
     if (gameStatus === "won" && eloSyncedRef.current !== "won") {
-      adjustElo(24);
+      if (forfeitWinnerPending) {
+        adjustElo(forfeitWinnerPending.eloAdjustment || 15);
+        useLobbyStore.setState({ forfeitWinnerPending: null });
+      } else {
+        adjustElo(24);
+      }
       eloSyncedRef.current = "won";
     } else if (gameStatus === "lost" && eloSyncedRef.current !== "lost") {
-      adjustElo(-12);
+      if (forfeitWinnerPending) {
+        useLobbyStore.setState({ forfeitWinnerPending: null });
+      } else {
+        adjustElo(-12);
+      }
       eloSyncedRef.current = "lost";
     } else if (gameStatus === "playing") {
       eloSyncedRef.current = "playing";
     }
-  }, [gameStatus, adjustElo]);
+  }, [gameStatus, adjustElo, forfeitWinnerPending]);
 
   // Sync ELO progress update to socket whenever my board progress changes
   const calculateProgress = () => {
@@ -466,7 +497,7 @@ export default function App() {
   const myProgress = calculateProgress();
 
   useEffect(() => {
-    if (isConnected && room && gameStatus === "playing") {
+    if (isConnected && room && gameStatus !== "idle") {
       if (
         lastSentProgressRef.current !== myProgress ||
         lastSentStrikesRef.current !== strikes
@@ -638,10 +669,12 @@ export default function App() {
   const prevRoomRef = useRef(null);
   useEffect(() => {
     if (prevRoomRef.current && !room) {
-      setActiveView("home");
+      if (gameStatus !== "practice" && gameStatus !== "practice-completed") {
+        setActiveView("home");
+      }
     }
     prevRoomRef.current = room;
-  }, [room]);
+  }, [room, gameStatus]);
 
   // Auto-start game in matchmaking rooms when both players are present
   useEffect(() => {
@@ -851,7 +884,7 @@ export default function App() {
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (
-        gameStatus !== "playing" ||
+        (gameStatus !== "playing" && gameStatus !== "practice") ||
         isGamePaused ||
         spectatingPlayerId ||
         isMeSpectator
@@ -938,6 +971,8 @@ export default function App() {
   const spectators = room?.players?.filter((p) => p.isSpectator) || [];
   const allPlayersReady = activePlayers.length === 1 || activePlayers.every((p) => p.isReady);
   const myStatusInRoom = room?.players?.find((p) => p.id === myPlayerId);
+  const isMultiplayer = room && room.players && room.players.filter((p) => !p.isSpectator).length > 1;
+  const bothFinished = isMultiplayer && room.players.filter((p) => !p.isSpectator).every((p) => p.hasFinishedGame);
 
   // Generate join URL for QR code
   const getJoinUrl = () => {
@@ -952,6 +987,40 @@ export default function App() {
     setFriendNameInput("");
   };
 
+  const startLocalPractice = () => {
+    leaveVoice();
+    if (ws && isConnected && ws.readyState === 1 && room) {
+      ws.send(
+        JSON.stringify({
+          type: "LEAVE_GAME",
+          payload: {},
+        }),
+      );
+    }
+    localStorage.removeItem("sudoku_active_room_code");
+    useGameStore.setState({ gameStatus: "practice" });
+    useLobbyStore.setState({
+      room: null,
+      showPauseVoteModal: false,
+      pauseRequester: null,
+      showPlayAgainVoteModal: false,
+      spectatingPlayerId: null,
+      spectatedPlayerBoardState: null,
+      spectatedPlayerABoard: null,
+      spectatedPlayerBBoard: null,
+      myActiveSpectators: [],
+      myMana: 0,
+      myStreak: 0,
+      myShieldActive: false,
+      isScrambled: false,
+      activeInkSplashes: [],
+      voicePromptActive: null,
+    });
+    // Stay on the game board — do NOT switch to home view
+    setActiveView("game");
+    addToast("Practice mode active — unlimited lives!", "info");
+  };
+
   console.log("App.jsx toasts list:", toasts);
 
   // Render dual-board spectator dashboard (Responsive Layout)
@@ -959,6 +1028,7 @@ export default function App() {
     const activePlayersInRoom = room?.players?.filter(p => !p.isSpectator) || [];
     const playerA = activePlayersInRoom[0];
     const playerB = activePlayersInRoom[1];
+    const isSinglePlayer = activePlayersInRoom.length === 1;
 
     const renderBoardOnly = (boardState, playerObj) => {
       const hasLeft = !playerObj || playerObj.disconnected;
@@ -967,7 +1037,7 @@ export default function App() {
           <SudokuGrid
             board={boardState?.board || Array(9).fill(null).map(() => Array(9).fill(null))}
             selectedCell={boardState?.selectedCell || null}
-            onCellClick={() => {}} // Spectators are passive
+            onCellClick={() => { }} // Spectators are passive
             notes={boardState?.notes || {}}
             originalCells={new Set()}
             mistakes={[]}
@@ -994,7 +1064,7 @@ export default function App() {
             </h2>
             <p className="text-xs opacity-60">Room: {room?.code} • Mode: Ranked Match • Difficulty: {room?.difficulty}</p>
           </div>
-          
+
           <div className="flex gap-4 text-xs flex-1 max-w-lg justify-end w-full sm:w-auto">
             {/* Player A Progress Card */}
             <div className="flex-1 bg-accent-glow/5 border border-border-custom/50 rounded-xl p-2.5">
@@ -1012,19 +1082,21 @@ export default function App() {
             </div>
 
             {/* Player B Progress Card */}
-            <div className="flex-1 bg-accent-glow/5 border border-border-custom/50 rounded-xl p-2.5">
-              <div className="flex justify-between font-bold mb-1">
-                <span className="truncate max-w-[100px]">{playerB ? playerB.name : "Waiting..."}</span>
-                <span>{playerB ? playerB.progress : 0}%</span>
+            {!isSinglePlayer && (
+              <div className="flex-1 bg-accent-glow/5 border border-border-custom/50 rounded-xl p-2.5">
+                <div className="flex justify-between font-bold mb-1">
+                  <span className="truncate max-w-[100px]">{playerB ? playerB.name : "Waiting..."}</span>
+                  <span>{playerB ? playerB.progress : 0}%</span>
+                </div>
+                <div className="w-full bg-accent-glow/30 h-1.5 rounded-full overflow-hidden mb-1.5">
+                  <div className="bg-accent-custom h-full rounded-full" style={{ width: `${playerB ? playerB.progress : 0}%` }} />
+                </div>
+                <div className="flex justify-between text-[9px] opacity-65 font-bold">
+                  <span>Lives: {playerB ? (3 - playerB.strikes) : 0}/3</span>
+                  <span>{playerB?.disconnected ? "❌ Offline" : "🟢 Online"}</span>
+                </div>
               </div>
-              <div className="w-full bg-accent-glow/30 h-1.5 rounded-full overflow-hidden mb-1.5">
-                <div className="bg-accent-custom h-full rounded-full" style={{ width: `${playerB ? playerB.progress : 0}%` }} />
-              </div>
-              <div className="flex justify-between text-[9px] opacity-65 font-bold">
-                <span>Lives: {playerB ? (3 - playerB.strikes) : 0}/3</span>
-                <span>{playerB?.disconnected ? "❌ Offline" : "🟢 Online"}</span>
-              </div>
-            </div>
+            )}
           </div>
 
           <button
@@ -1040,23 +1112,25 @@ export default function App() {
 
         {/* Mobile View Switcher (< 1024px) */}
         <div className="block lg:hidden space-y-4">
-          <div className="flex bg-accent-glow/30 rounded-xl p-1 border border-border-custom/40">
-            <button
-              onClick={() => setMobileSpectatorTab("playerA")}
-              className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${mobileSpectatorTab === "playerA" ? "bg-panel-custom text-text-custom shadow-xs" : "opacity-60"}`}
-            >
-              👁️ View {playerA ? playerA.name : "Player A"}
-            </button>
-            <button
-              onClick={() => setMobileSpectatorTab("playerB")}
-              className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${mobileSpectatorTab === "playerB" ? "bg-panel-custom text-text-custom shadow-xs" : "opacity-60"}`}
-            >
-              👁️ View {playerB ? playerB.name : "Player B"}
-            </button>
-          </div>
-          
+          {!isSinglePlayer && (
+            <div className="flex bg-accent-glow/30 rounded-xl p-1 border border-border-custom/40">
+              <button
+                onClick={() => setMobileSpectatorTab("playerA")}
+                className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${mobileSpectatorTab === "playerA" ? "bg-panel-custom text-text-custom shadow-xs" : "opacity-60"}`}
+              >
+                👁️ View {playerA ? playerA.name : "Player A"}
+              </button>
+              <button
+                onClick={() => setMobileSpectatorTab("playerB")}
+                className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${mobileSpectatorTab === "playerB" ? "bg-panel-custom text-text-custom shadow-xs" : "opacity-60"}`}
+              >
+                👁️ View {playerB ? playerB.name : "Player B"}
+              </button>
+            </div>
+          )}
+
           <div className="flex justify-center">
-            {mobileSpectatorTab === "playerA" ? (
+            {isSinglePlayer || mobileSpectatorTab === "playerA" ? (
               <div className="flex flex-col items-center gap-2 w-full">
                 <p className="text-xs font-bold uppercase tracking-wider text-accent-custom">{playerA ? playerA.name : "Player A"}'s Board</p>
                 {renderBoardOnly(spectatedPlayerABoard, playerA)}
@@ -1071,25 +1145,35 @@ export default function App() {
         </div>
 
         {/* Desktop View Side-by-Side (>= 1024px) */}
-        <div className="hidden lg:grid grid-cols-2 gap-8 items-start">
-          {/* Player A Board */}
-          <div className="flex flex-col items-center gap-3">
+        {isSinglePlayer ? (
+          <div className="flex flex-col items-center gap-3 max-w-[420px] mx-auto">
             <div className="text-center">
               <h3 className="text-sm font-extrabold uppercase tracking-widest text-accent-custom">{playerA ? playerA.name : "Player A"}</h3>
               <p className="text-[10px] opacity-60">Progress: {playerA ? playerA.progress : 0}% • Lives: {playerA ? (3 - playerA.strikes) : 0}/3</p>
             </div>
             {renderBoardOnly(spectatedPlayerABoard, playerA)}
           </div>
-
-          {/* Player B Board */}
-          <div className="flex flex-col items-center gap-3">
-            <div className="text-center">
-              <h3 className="text-sm font-extrabold uppercase tracking-widest text-accent-custom">{playerB ? playerB.name : "Player B"}</h3>
-              <p className="text-[10px] opacity-60">Progress: {playerB ? playerB.progress : 0}% • Lives: {playerB ? (3 - playerB.strikes) : 0}/3</p>
+        ) : (
+          <div className="hidden lg:grid grid-cols-2 gap-8 items-start">
+            {/* Player A Board */}
+            <div className="flex flex-col items-center gap-3">
+              <div className="text-center">
+                <h3 className="text-sm font-extrabold uppercase tracking-widest text-accent-custom">{playerA ? playerA.name : "Player A"}</h3>
+                <p className="text-[10px] opacity-60">Progress: {playerA ? playerA.progress : 0}% • Lives: {playerA ? (3 - playerA.strikes) : 0}/3</p>
+              </div>
+              {renderBoardOnly(spectatedPlayerABoard, playerA)}
             </div>
-            {renderBoardOnly(spectatedPlayerBBoard, playerB)}
+
+            {/* Player B Board */}
+            <div className="flex flex-col items-center gap-3">
+              <div className="text-center">
+                <h3 className="text-sm font-extrabold uppercase tracking-widest text-accent-custom">{playerB ? playerB.name : "Player B"}</h3>
+                <p className="text-[10px] opacity-60">Progress: {playerB ? playerB.progress : 0}% • Lives: {playerB ? (3 - playerB.strikes) : 0}/3</p>
+              </div>
+              {renderBoardOnly(spectatedPlayerBBoard, playerB)}
+            </div>
           </div>
-        </div>
+        )}
       </div>
     );
   };
@@ -1117,24 +1201,11 @@ export default function App() {
         ))}
       </div>
 
-      {/* Connection Lost Overlay for Disconnected Opponents */}
+      {/* Non-Blocking Connection Lost Banner for Disconnected Opponents */}
       {activeView === "game" && activeOpponent && activeOpponent.disconnected && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex flex-col items-center justify-center p-4 z-40 animate-fade-in border border-border-custom/50">
-          <div className="w-16 h-16 rounded-2xl bg-amber-500/20 text-amber-500 flex items-center justify-center mb-4 border border-amber-500/30 animate-pulse">
-            <AlertTriangle size={36} />
-          </div>
-          <h3 className="text-xl font-extrabold text-amber-500 tracking-wider">
-            CONNECTION LOST
-          </h3>
-          <p className="text-xs opacity-75 text-center mt-2 max-w-[280px]">
-            <strong>{activeOpponent.name}</strong> disconnected. Waiting for reconnection...
-          </p>
-          <div className="mt-6 font-sans font-black text-5xl text-accent-custom tabular-nums animate-bounce-slow">
-            {disconnectCountdown}s
-          </div>
-          <p className="text-[10px] opacity-40 mt-2">
-            Match will forfeit automatically if countdown expires
-          </p>
+        <div className="fixed top-24 left-1/2 transform -translate-x-1/2 bg-amber-500/90 text-slate-950 px-4 py-2 rounded-2xl flex items-center gap-2 z-50 shadow-lg border border-amber-400 font-sans text-xs font-bold animate-pulse">
+          <AlertTriangle size={14} className="shrink-0" />
+          <span><strong>{activeOpponent.name}</strong> disconnected. Reconnecting in {disconnectCountdown}s...</span>
         </div>
       )}
 
@@ -1260,6 +1331,15 @@ export default function App() {
             {soundEnabled ? <Volume2 size={18} /> : <VolumeX size={18} />}
           </button>
 
+          {/* Settings button */}
+          <button
+            onClick={() => setShowSettingsModal(true)}
+            className="p-2 rounded-xl border border-border-custom hover:bg-accent-glow hover:border-accent-custom hover:text-accent-custom active:scale-95 transition-all cursor-pointer"
+            title="Settings"
+          >
+            <Settings size={18} />
+          </button>
+
           {/* Online User Avatar */}
           <div className="flex items-center gap-2 pl-2 border-l border-border-custom">
             <div className="w-8 h-8 rounded-full bg-accent-custom flex items-center justify-center font-bold text-white shadow-sm overflow-hidden transition-all duration-300">
@@ -1296,7 +1376,7 @@ export default function App() {
                 <span className="text-[9px] font-semibold opacity-65">
                   {isConnected ? `Online (${elo} ELO)` : "Offline"}
                 </span>
-                {(!isGuest || profile) && (
+                {!isGuest && (
                   <div
                     className="w-2.5 h-2.5 rounded-full bg-indigo-500 flex items-center justify-center text-white"
                     title="Linked Account"
@@ -1373,7 +1453,7 @@ export default function App() {
                   <label className="text-[10px] uppercase font-bold opacity-50 tracking-wider block">
                     Display Name
                   </label>
-                  {!isGuest || profile ? (
+                  {!isGuest ? (
                     <span className="text-[8px] bg-emerald-500/20 text-emerald-500 px-1.5 py-0.5 rounded-full font-bold flex items-center gap-0.5">
                       <Check size={8} /> Verified
                     </span>
@@ -1538,9 +1618,87 @@ export default function App() {
               {activeTab === "lobby" && (
                 <div className="space-y-4">
                   {!room ? (
-                    <div className="space-y-3">
-                      <div className="space-y-1">
-                        <label className="text-[10px] uppercase font-bold opacity-60 tracking-wider">
+                    <div className="space-y-4">
+                      {/* Difficulty Selector */}
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] uppercase font-bold opacity-60 tracking-wider block">
+                          Select Difficulty
+                        </label>
+                        <select
+                          value={selectedDifficulty}
+                          onChange={(e) =>
+                            setSelectedDifficulty(e.target.value)
+                          }
+                          className="w-full px-3 py-2 bg-accent-glow border border-border-custom rounded-xl font-bold text-xs focus:outline-none cursor-pointer text-text-custom"
+                        >
+                          <option value="beginner">Beginner</option>
+                          <option value="easy">Easy</option>
+                          <option value="medium">Medium</option>
+                          <option value="hard">Hard</option>
+                          <option value="expert">Expert</option>
+                        </select>
+                      </div>
+
+                      {/* Play Solo Button */}
+                      <div className="pt-1">
+                        <button
+                          onClick={() => startNewGame(selectedDifficulty)}
+                          className="w-full py-3 bg-accent-custom hover:bg-accent-hover text-white font-bold text-xs rounded-xl active:scale-[0.98] transition-all flex items-center justify-center gap-1.5 shadow-md shadow-accent-custom/10 cursor-pointer"
+                        >
+                          <PlayCircle size={14} fill="white" />
+                          Play Solo Game
+                        </button>
+                      </div>
+
+                      <div className="relative flex py-1 items-center">
+                        <div className="flex-grow border-t border-border-custom/25"></div>
+                        <span className="flex-shrink mx-4 text-[9px] uppercase tracking-wider opacity-45 font-bold">Or Host Room</span>
+                        <div className="flex-grow border-t border-border-custom/25"></div>
+                      </div>
+
+                      {/* Create Room section */}
+                      <div className="space-y-3">
+                        <button
+                          onClick={() =>
+                            createRoom(selectedDifficulty, showManaOptionSetting ? enableAbilities : false)
+                          }
+                          className="w-full py-3 bg-accent-glow hover:bg-accent-glow/70 border border-border-custom text-text-custom font-bold text-xs rounded-xl active:scale-[0.98] transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                          disabled={!isConnected}
+                        >
+                          <Users size={14} className="text-accent-custom" />
+                          Create Multiplayer Room
+                        </button>
+
+                        {showManaOptionSetting && (
+                          <div className="flex items-center gap-2 select-none justify-center">
+                            <input
+                              type="checkbox"
+                              id="enableAbilitiesCheck"
+                              checked={enableAbilities}
+                              onChange={(e) => setEnableAbilities(e.target.checked)}
+                              className="w-4 h-4 rounded border-border-custom text-accent-custom bg-accent-glow/20 focus:ring-accent-custom focus:ring-offset-0 cursor-pointer"
+                            />
+                            <label
+                              htmlFor="enableAbilitiesCheck"
+                              className="text-[10px] uppercase font-bold opacity-80 tracking-wider cursor-pointer"
+                            >
+                              Enable Special Abilities (Mana) for Room
+                            </label>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="relative flex py-2 items-center">
+                        <div className="flex-grow border-t border-border-custom/50" />
+                        <span className="flex-shrink mx-4 text-[10px] uppercase font-bold opacity-45 tracking-widest">
+                          or
+                        </span>
+                        <div className="flex-grow border-t border-border-custom/50" />
+                      </div>
+
+                      {/* Join Private Room */}
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] uppercase font-bold opacity-60 tracking-wider block">
                           Join Private Room
                         </label>
                         <div className="flex gap-2">
@@ -1556,64 +1714,15 @@ export default function App() {
                           />
                           <button
                             onClick={() => joinRoom(inputCode)}
-                            className="px-4 bg-accent-custom hover:bg-accent-hover text-white font-bold rounded-xl text-xs transition-all active:scale-95"
+                            className="px-4 bg-accent-custom hover:bg-accent-hover text-white font-bold rounded-xl text-xs transition-all active:scale-95 cursor-pointer"
                             disabled={inputCode.length !== 6 || !isConnected}
                           >
                             Join
                           </button>
                         </div>
                       </div>
-                      <div className="relative flex py-2 items-center">
-                        <div className="flex-grow border-t border-border-custom/50" />
-                        <span className="flex-shrink mx-4 text-[10px] uppercase font-bold opacity-45 tracking-widest">
-                          or
-                        </span>
-                        <div className="flex-grow border-t border-border-custom/50" />
-                      </div>
-                      <div className="flex items-center gap-2 mt-2">
-                        <label className="text-[10px] uppercase font-bold opacity-60 tracking-wider">
-                          Difficulty
-                        </label>
-                        <select
-                          value={selectedDifficulty}
-                          onChange={(e) =>
-                            setSelectedDifficulty(e.target.value)
-                          }
-                          className="px-2 py-1 bg-accent-glow border border-border-custom rounded"
-                        >
-                          <option value="beginner">Beginner</option>
-                          <option value="easy">Easy</option>
-                          <option value="medium">Medium</option>
-                          <option value="hard">Hard</option>
-                          <option value="expert">Expert</option>
-                        </select>
-                      </div>
-                      <div className="flex items-center gap-2 mt-2 select-none">
-                        <input
-                          type="checkbox"
-                          id="enableAbilitiesCheck"
-                          checked={enableAbilities}
-                          onChange={(e) => setEnableAbilities(e.target.checked)}
-                          className="w-4 h-4 rounded border-border-custom text-accent-custom bg-accent-glow/20 focus:ring-accent-custom focus:ring-offset-0 cursor-pointer"
-                        />
-                        <label
-                          htmlFor="enableAbilitiesCheck"
-                          className="text-[10px] uppercase font-bold opacity-80 tracking-wider cursor-pointer"
-                        >
-                          Enable Special Abilities (Mana)
-                        </label>
-                      </div>
-                      <button
-                        onClick={() =>
-                          createRoom(selectedDifficulty, enableAbilities)
-                        }
-                        className="w-full py-3 bg-accent-glow hover:bg-accent-glow/70 border border-border-custom text-text-custom font-bold text-xs rounded-xl active:scale-95 transition-all flex items-center justify-center gap-1.5 mt-1"
-                        disabled={!isConnected}
-                      >
-                        <PlayCircle size={15} className="text-accent-custom" />
-                        Create New Lobby
-                      </button>
                     </div>
+
                   ) : (
                     <div className="space-y-4">
                       <div className="flex items-start justify-between border-b border-border-custom pb-3">
@@ -1919,31 +2028,29 @@ export default function App() {
                     </p>
                   ) : (
                     <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
-                      {leaderboard.map((player, index) => {
+                      {leaderboard.slice(0, 10).map((player, index) => {
                         const isMe = player.id === myPlayerId;
                         const rankTier = getRankTierFromElo(player.elo);
 
                         return (
                           <div
                             key={player.id}
-                            className={`flex items-center justify-between p-2.5 border rounded-xl transition-all ${
-                              isMe
-                                ? "bg-accent-glow/20 border-accent-custom ring-1 ring-accent-custom/20"
-                                : "bg-accent-glow/5 border-border-custom/50 hover:border-border-custom"
-                            }`}
+                            className={`flex items-center justify-between p-2.5 border rounded-xl transition-all ${isMe
+                              ? "bg-accent-glow/20 border-accent-custom ring-1 ring-accent-custom/20"
+                              : "bg-accent-glow/5 border-border-custom/50 hover:border-border-custom"
+                              }`}
                           >
                             <div className="flex items-center gap-3">
                               {/* Position Badge */}
                               <span
-                                className={`w-5 h-5 rounded-md flex items-center justify-center font-extrabold text-[10px] ${
-                                  index === 0
-                                    ? "bg-amber-500 text-slate-950 font-sans"
-                                    : index === 1
-                                      ? "bg-slate-300 text-slate-950 font-sans"
-                                      : index === 2
-                                        ? "bg-amber-700 text-white font-sans"
-                                        : "bg-accent-glow border border-border-custom opacity-70 text-[9px]"
-                                }`}
+                                className={`w-5 h-5 rounded-md flex items-center justify-center font-extrabold text-[10px] ${index === 0
+                                  ? "bg-amber-500 text-slate-950 font-sans"
+                                  : index === 1
+                                    ? "bg-slate-300 text-slate-950 font-sans"
+                                    : index === 2
+                                      ? "bg-amber-700 text-white font-sans"
+                                      : "bg-accent-glow border border-border-custom opacity-70 text-[9px]"
+                                  }`}
                               >
                                 {index + 1}
                               </span>
@@ -2035,15 +2142,14 @@ export default function App() {
                   >
                     <div className="flex items-center gap-2">
                       <div
-                        className={`w-2 h-2 rounded-full ${
-                          f.status === "online"
-                            ? "bg-emerald-500 animate-pulse"
-                            : f.status === "in-lobby"
-                              ? "bg-cyan-500 animate-pulse"
-                              : f.status === "in-game"
-                                ? "bg-amber-500 animate-pulse"
-                                : "bg-slate-300 dark:bg-slate-700"
-                        }`}
+                        className={`w-2 h-2 rounded-full ${f.status === "online"
+                          ? "bg-emerald-500 animate-pulse"
+                          : f.status === "in-lobby"
+                            ? "bg-cyan-500 animate-pulse"
+                            : f.status === "in-game"
+                              ? "bg-amber-500 animate-pulse"
+                              : "bg-slate-300 dark:bg-slate-700"
+                          }`}
                       />
                       <div>
                         <p className="font-bold leading-tight">{f.name}</p>
@@ -2056,11 +2162,10 @@ export default function App() {
                       <button
                         onClick={() => inviteFriend(f.id)}
                         disabled={f.status !== "online"}
-                        className={`px-2 py-1 border transition-all rounded-md text-[9px] font-bold ${
-                          f.status === "online"
-                            ? "bg-accent-glow border-border-custom hover:border-accent-custom hover:text-accent-custom active:scale-95 cursor-pointer"
-                            : "bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700 cursor-not-allowed opacity-50"
-                        }`}
+                        className={`px-2 py-1 border transition-all rounded-md text-[9px] font-bold ${f.status === "online"
+                          ? "bg-accent-glow border-border-custom hover:border-accent-custom hover:text-accent-custom active:scale-95 cursor-pointer"
+                          : "bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700 cursor-not-allowed opacity-50"
+                          }`}
                         title={
                           f.status !== "online"
                             ? `Friend must be online (currently: ${f.status})`
@@ -2093,1079 +2198,1097 @@ export default function App() {
         isMeSpectator ? (
           renderSpectatorView()
         ) : (
-          <main className="max-w-6xl mx-auto px-2 sm:px-4 py-6 md:py-10 grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-          {/* LEFT COLUMN: The Sudoku Puzzle Area (Cols 1 to 7) */}
-          <section className="lg:col-span-7 flex flex-col items-center relative">
-            {/* PAUSED MASK SCREEN */}
-            {isGamePaused && (
-              <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md rounded-2xl flex flex-col items-center justify-center p-4 z-30 animate-fade-in border border-border-custom/50">
-                <div className="w-16 h-16 rounded-2xl bg-accent-custom/20 text-accent-custom flex items-center justify-center mb-4">
-                  <Pause size={36} className="animate-pulse" />
+          <main className="max-w-6xl mx-auto px-2 sm:px-4 py-2 lg:py-10 grid grid-cols-1 lg:grid-cols-12 gap-3 lg:gap-8 items-start">
+            {/* LEFT COLUMN: The Sudoku Puzzle Area */}
+            <section className={`${room ? "lg:col-span-7" : "lg:col-span-12"} flex flex-col items-center relative`}>
+              {/* PAUSED MASK SCREEN */}
+              {isGamePaused && (
+                <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md rounded-2xl flex flex-col items-center justify-center p-4 z-30 animate-fade-in border border-border-custom/50">
+                  <div className="w-16 h-16 rounded-2xl bg-accent-custom/20 text-accent-custom flex items-center justify-center mb-4">
+                    <Pause size={36} className="animate-pulse" />
+                  </div>
+                  <h3 className="text-xl font-extrabold text-accent-custom">
+                    GAME PAUSED
+                  </h3>
+                  <p className="text-xs opacity-75 text-center mt-1 max-w-[280px]">
+                    All players agreed to pause. Click resume to initiate unpause
+                    request.
+                  </p>
+
+                  <button
+                    onClick={requestPause}
+                    className="mt-6 px-6 py-2.5 bg-accent-custom hover:bg-accent-hover text-white font-bold rounded-xl active:scale-95 transition-all text-xs flex items-center gap-1.5 shadow-md"
+                  >
+                    <PlayIcon size={14} fill="white" />
+                    Resume Game
+                  </button>
                 </div>
-                <h3 className="text-xl font-extrabold text-accent-custom">
-                  GAME PAUSED
-                </h3>
-                <p className="text-xs opacity-75 text-center mt-1 max-w-[280px]">
-                  All players agreed to pause. Click resume to initiate unpause
-                  request.
-                </p>
+              )}
 
-                <button
-                  onClick={requestPause}
-                  className="mt-6 px-6 py-2.5 bg-accent-custom hover:bg-accent-hover text-white font-bold rounded-xl active:scale-95 transition-all text-xs flex items-center gap-1.5 shadow-md"
-                >
-                  <PlayIcon size={14} fill="white" />
-                  Resume Game
-                </button>
-              </div>
-            )}
-
-            {/* Game controls header */}
-            <div className="w-full max-w-[460px] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-0 mb-4 px-2">
-              {/* Row 1: Info (Diff, Timer, and Lives) */}
-              <div className="flex items-center justify-between sm:justify-start gap-2.5 w-full sm:w-auto">
-                <div className="flex items-center gap-2">
-                  {/* Difficulty selector (locked once multiplayer room is active) */}
+              {/* Game controls header */}
+              <div className="w-full max-w-[460px] flex items-center justify-between gap-2 mb-2 lg:mb-4 px-2">
+                {/* Left Group: Info (Diff, Timer) */}
+                <div className="flex items-center gap-1.5">
                   <select
                     value={room ? room.difficulty : difficulty}
                     disabled={!!room}
                     onChange={(e) => startNewGame(e.target.value)}
-                    className="text-xs font-bold px-2.5 py-1.5 bg-accent-glow border border-border-custom rounded-xl focus:outline-none cursor-pointer text-text-custom disabled:opacity-75 disabled:cursor-not-allowed transition-all"
+                    className="text-[11px] lg:text-xs font-bold px-2 py-1 bg-accent-glow border border-border-custom rounded-lg focus:outline-none cursor-pointer text-text-custom disabled:opacity-75 disabled:cursor-not-allowed transition-all"
                   >
                     <option value="beginner">Beginner</option>
-                    <option value="easy">Easy Diff</option>
-                    <option value="medium">Medium Diff</option>
-                    <option value="hard">Hard Diff</option>
-                    <option value="expert">Expert Diff</option>
+                    <option value="easy">Easy</option>
+                    <option value="medium">Medium</option>
+                    <option value="hard">Hard</option>
+                    <option value="expert">Expert</option>
                   </select>
 
-                  {/* Timer indicator — fixed width so it never pushes other buttons */}
-                  <span className="text-xs font-bold px-2.5 py-1.5 bg-accent-glow border border-border-custom rounded-xl flex items-center gap-1 min-w-[70px] justify-center tabular-nums">
-                    <Timer size={13} className="text-accent-custom shrink-0" />
+                  <span className="text-[11px] lg:text-xs font-bold px-2 py-1 bg-accent-glow border border-border-custom rounded-lg flex items-center gap-1 min-w-[55px] justify-center tabular-nums">
+                    <Timer size={11} className="text-accent-custom shrink-0" />
                     {formatTime(seconds)}
                   </span>
                 </div>
 
-                {/* Lives system */}
-                <div
-                  className="flex items-center gap-1"
-                  title="Lives Remaining"
-                >
+                {/* Center Group: Lives */}
+                <div className="flex items-center gap-1" title="Lives Remaining">
                   {[1, 2, 3].map((heartIndex) => (
                     <div
                       key={heartIndex}
-                      className={`w-2.5 h-2.5 rounded-full transition-colors duration-300 ${
-                        heartIndex <= maxStrikes - strikes
-                          ? "bg-rose-500 shadow-xs shadow-rose-500/20"
-                          : "border border-dashed border-border-custom opacity-40"
-                      }`}
+                      className={`w-2 h-2 rounded-full transition-colors duration-300 ${heartIndex <= maxStrikes - strikes
+                        ? "bg-rose-500 shadow-xs shadow-rose-500/20"
+                        : "border border-dashed border-border-custom opacity-40"
+                        }`}
                     />
                   ))}
-                  <span className="text-xs font-bold font-sans ml-1 opacity-70">
-                    Lives
-                  </span>
+                </div>
+
+                {/* Right Group: Action Buttons (Pause & Exit) */}
+                <div className="flex items-center gap-1.5">
+                  {room && room.isGameStarted && (
+                    <button
+                      onClick={requestPause}
+                      className="p-1 rounded-lg bg-accent-glow border border-border-custom hover:border-accent-custom text-text-custom transition-all active:scale-95"
+                      title="Request Global Pause"
+                    >
+                      <Pause size={11} />
+                    </button>
+                  )}
+
+                  <button
+                    onClick={() => {
+                      exitToHome(() => {
+                        setActiveView("home");
+                        setSeconds(0);
+                      });
+                    }}
+                    className="px-2 py-1 rounded-lg bg-rose-500/10 border border-rose-500/30 hover:bg-rose-500 hover:text-white text-rose-500 transition-all active:scale-95 text-[10px] font-bold flex items-center gap-1"
+                    title="Exit to Home"
+                  >
+                    <X size={11} />
+                    Exit
+                  </button>
                 </div>
               </div>
 
-              {/* Row 2: Action Buttons (Pause & Exit) */}
-              <div className="flex items-center justify-end gap-2 w-full sm:w-auto border-t border-border-custom/30 sm:border-0 pt-2 sm:pt-0">
-                {/* Pause button for multiplayer */}
-                {room && room.isGameStarted && (
-                  <button
-                    onClick={requestPause}
-                    className="p-1.5 rounded-xl bg-accent-glow border border-border-custom hover:border-accent-custom text-text-custom transition-all active:scale-95"
-                    title="Request Global Pause"
-                  >
-                    <Pause size={13} />
-                  </button>
-                )}
+              {/* Mobile Opponent HUD (only shown on mobile/tablet when in a multiplayer match) */}
+              {room && room.isGameStarted && activeOpponent && (
+                <div className="w-full max-w-[460px] lg:hidden mb-2 px-2 py-1.5 bg-accent-glow/10 border border-border-custom/40 rounded-xl flex items-center justify-between gap-3 text-xs select-none animate-scale-in">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <div className="w-5 h-5 rounded-full bg-accent-custom text-white font-bold flex items-center justify-center text-[10px] overflow-hidden shrink-0">
+                      {AVATARS.find(a => a.id === activeOpponent.avatar) ? (
+                        <img
+                          src={AVATARS.find(a => a.id === activeOpponent.avatar).src}
+                          alt="Avatar"
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        activeOpponent.name?.slice(0, 2)?.toUpperCase()
+                      )}
+                    </div>
+                    <span className="font-bold truncate text-[11px] leading-none text-text-custom">
+                      {activeOpponent.name}
+                    </span>
+                    <span className="text-[9px] opacity-60 shrink-0">
+                      {activeOpponent.elo} ELO
+                    </span>
+                  </div>
 
-                {/* Exit to Home button — always visible in game view */}
-                <button
-                  onClick={() => {
-                    exitToHome(() => {
-                      setActiveView("home");
-                      setSeconds(0);
-                    });
-                  }}
-                  className="px-3 py-1.5 rounded-xl bg-rose-500/10 border border-rose-500/30 hover:bg-rose-500 hover:text-white text-rose-500 transition-all active:scale-95 text-[10px] font-bold flex items-center gap-1"
-                  title="Exit to Home"
-                >
-                  <X size={13} />
-                  Exit Game
-                </button>
-              </div>
-            </div>
+                  {/* Opponent Progress Bar */}
+                  <div className="flex-1 flex items-center gap-2 min-w-0 px-1">
+                    <div className="flex-1 bg-accent-glow/50 h-2 rounded-full overflow-hidden relative">
+                      <div
+                        className="bg-accent-custom h-full rounded-full transition-all duration-300"
+                        style={{ width: `${activeOpponent.progress}%` }}
+                      />
+                    </div>
+                    <span className="font-bold text-[10px] text-accent-custom shrink-0 tabular-nums">
+                      {activeOpponent.progress}%
+                    </span>
+                  </div>
 
-            {/* Spectator Top Bar Indicator */}
-            {spectatingPlayerId && (
-              <div
-                className={`w-full max-w-[460px] glass-panel px-4 py-2 rounded-xl mb-3 border flex items-center justify-between shadow-md transition-all ${
-                  hasSpectatedPlayerLeft
+                  {/* Opponent Strikes */}
+                  <div className="flex items-center gap-0.5 shrink-0">
+                    {Array(3)
+                      .fill(null)
+                      .map((_, i) => (
+                        <div
+                          key={i}
+                          className={`w-1.5 h-1.5 rounded-full ${i < maxStrikes - activeOpponent.strikes
+                            ? "bg-rose-500"
+                            : "border border-dashed border-border-custom opacity-40"
+                            }`}
+                        />
+                      ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Spectator Top Bar Indicator */}
+              {spectatingPlayerId && (
+                <div
+                  className={`w-full max-w-[460px] glass-panel px-4 py-2 rounded-xl mb-3 border flex items-center justify-between shadow-md transition-all ${hasSpectatedPlayerLeft
                     ? "border-zinc-500/30 shadow-zinc-500/5 bg-zinc-500/5 opacity-80"
                     : "border-rose-500/30 animate-pulse shadow-rose-500/10 bg-rose-500/5"
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  {hasSpectatedPlayerLeft ? (
-                    <div className="w-2 h-2 rounded-full bg-zinc-500"></div>
-                  ) : (
-                    <div className="w-2 h-2 rounded-full bg-rose-500 animate-ping"></div>
-                  )}
-                  <span
-                    className={`text-xs font-bold uppercase tracking-wider ${
-                      hasSpectatedPlayerLeft ? "text-zinc-500" : "text-rose-500"
                     }`}
-                  >
-                    {hasSpectatedPlayerLeft
-                      ? "⏹️ Spectating Ended"
-                      : "🔴 Live Spectating"}
-                  </span>
-                </div>
-                <span className="text-xs font-bold">
-                  {hasSpectatedPlayerLeft
-                    ? "Disconnected"
-                    : room?.players?.find((p) => p.id === spectatingPlayerId)
-                        ?.name || "Opponent"}
-                </span>
-                <button
-                  onClick={stopSpectating}
-                  className="text-[10px] uppercase font-bold bg-rose-500 hover:bg-rose-600 text-white px-2.5 py-1 rounded-lg transition-colors active:scale-95"
                 >
-                  Stop
-                </button>
-              </div>
-            )}
+                  <div className="flex items-center gap-2">
+                    {hasSpectatedPlayerLeft ? (
+                      <div className="w-2 h-2 rounded-full bg-zinc-500"></div>
+                    ) : (
+                      <div className="w-2 h-2 rounded-full bg-rose-500 animate-ping"></div>
+                    )}
+                    <span
+                      className={`text-xs font-bold uppercase tracking-wider ${hasSpectatedPlayerLeft ? "text-zinc-500" : "text-rose-500"
+                        }`}
+                    >
+                      {hasSpectatedPlayerLeft
+                        ? "⏹️ Spectating Ended"
+                        : "🔴 Live Spectating"}
+                    </span>
+                  </div>
+                  <span className="text-xs font-bold">
+                    {hasSpectatedPlayerLeft
+                      ? "Disconnected"
+                      : room?.players?.find((p) => p.id === spectatingPlayerId)
+                        ?.name || "Opponent"}
+                  </span>
+                  <button
+                    onClick={stopSpectating}
+                    className="text-[10px] uppercase font-bold bg-rose-500 hover:bg-rose-600 text-white px-2.5 py-1 rounded-lg transition-colors active:scale-95"
+                  >
+                    Stop
+                  </button>
+                </div>
+              )}
 
-            {/* Sudoku Board Grid Wrapper with active spectator outline and spectator eye count badge */}
-            <div
-              className={`relative w-full max-w-[460px] p-1 rounded-2xl transition-all duration-500 ${
-                spectatingPlayerId
+              {/* Sudoku Board Grid Wrapper with active spectator outline and spectator eye count badge */}
+              <div
+                className={`relative w-full max-w-[460px] p-1 rounded-2xl transition-all duration-500 ${spectatingPlayerId
                   ? hasSpectatedPlayerLeft
                     ? "ring-4 ring-zinc-500/20 bg-zinc-500/5"
                     : "ring-4 ring-rose-500/30 bg-rose-500/5"
                   : (myActiveSpectators || []).length > 0
                     ? "ring-4 ring-emerald-500/30 bg-emerald-500/5"
                     : ""
-              }`}
-            >
-              {/* Active Spectator Eye Badge inside corner of the grid */}
-              {(myActiveSpectators || []).length > 0 && !spectatingPlayerId && (
-                <div className="absolute -top-3 right-4 z-10 glass-panel px-3 py-1.5 rounded-full border border-emerald-500/30 shadow-md flex items-center gap-1.5 text-[10px] font-bold text-emerald-500 animate-scale-in">
-                  <span className="relative flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                  </span>
-                  <span>
-                    👁️ {(myActiveSpectators || []).length} Spectator(s) (
-                    {(myActiveSpectators || []).join(", ")})
-                  </span>
-                </div>
-              )}
+                  }`}
+              >
+                {/* Active Spectator Eye Badge inside corner of the grid */}
+                {(myActiveSpectators || []).length > 0 && !spectatingPlayerId && (
+                  <div className="absolute -top-3 right-4 z-10 glass-panel px-3 py-1.5 rounded-full border border-emerald-500/30 shadow-md flex items-center gap-1.5 text-[10px] font-bold text-emerald-500 animate-scale-in">
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                    </span>
+                    <span>
+                      👁️ {(myActiveSpectators || []).length} Spectator(s) (
+                      {(myActiveSpectators || []).join(", ")})
+                    </span>
+                  </div>
+                )}
 
-              <SudokuGrid
-                board={
-                  spectatingPlayerId || isMeSpectator
-                    ? spectatedPlayerBoardState?.board ||
+                <SudokuGrid
+                  board={
+                    spectatingPlayerId || isMeSpectator
+                      ? spectatedPlayerBoardState?.board ||
                       Array(9)
                         .fill(null)
                         .map(() => Array(9).fill(null))
-                    : board
-                }
-                selectedCell={
-                  spectatingPlayerId || isMeSpectator
-                    ? spectatedPlayerBoardState?.selectedCell || null
-                    : selectedCell
-                }
-                onCellClick={
-                  spectatingPlayerId || isMeSpectator ? () => {} : selectCell
-                }
-                notes={
-                  spectatingPlayerId || isMeSpectator
-                    ? spectatedPlayerBoardState?.notes ||
+                      : board
+                  }
+                  selectedCell={
+                    spectatingPlayerId || isMeSpectator
+                      ? spectatedPlayerBoardState?.selectedCell || null
+                      : selectedCell
+                  }
+                  onCellClick={
+                    spectatingPlayerId || isMeSpectator ? () => { } : selectCell
+                  }
+                  notes={
+                    spectatingPlayerId || isMeSpectator
+                      ? spectatedPlayerBoardState?.notes ||
                       Array(9)
                         .fill(null)
                         .map(() => Array(9).fill(new Set()))
-                    : notes
-                }
-                originalCells={originalCells}
-                mistakes={spectatingPlayerId || isMeSpectator ? [] : mistakes}
-                shakingCell={
-                  spectatingPlayerId || isMeSpectator ? null : shakingCell
-                }
-                isSpectatingMode={!!(spectatingPlayerId || isMeSpectator)}
-              />
-              {hasSpectatedPlayerLeft && (
-                <div className="absolute inset-0 bg-zinc-950/80 backdrop-blur-sm rounded-xl flex flex-col items-center justify-center text-center p-6 z-20 animate-fade-in border border-border-custom">
-                  <div className="text-rose-500 mb-2">
-                    <X size={48} className="mx-auto animate-pulse" />
+                      : notes
+                  }
+                  originalCells={originalCells}
+                  mistakes={spectatingPlayerId || isMeSpectator ? [] : mistakes}
+                  shakingCell={
+                    spectatingPlayerId || isMeSpectator ? null : shakingCell
+                  }
+                  isSpectatingMode={!!(spectatingPlayerId || isMeSpectator)}
+                />
+                {hasSpectatedPlayerLeft && (
+                  <div className="absolute inset-0 bg-zinc-950/80 backdrop-blur-sm rounded-xl flex flex-col items-center justify-center text-center p-6 z-20 animate-fade-in border border-border-custom">
+                    <div className="text-rose-500 mb-2">
+                      <X size={48} className="mx-auto animate-pulse" />
+                    </div>
+                    <h3 className="text-lg font-bold text-rose-500">
+                      Player Has Left
+                    </h3>
+                    <p className="text-xs opacity-75 mt-1 max-w-[280px]">
+                      The player you were spectating has left the game lobby.
+                    </p>
                   </div>
-                  <h3 className="text-lg font-bold text-rose-500">
-                    Player Has Left
-                  </h3>
-                  <p className="text-xs opacity-75 mt-1 max-w-[280px]">
-                    The player you were spectating has left the game lobby.
-                  </p>
-                </div>
-              )}
+                )}
+                {room &&
+                  room.isGameStarted &&
+                  room.enableAbilities &&
+                  !isMeSpectator &&
+                  !spectatingPlayerId && (
+                    <SabotageOverlay
+                      splashes={activeInkSplashes}
+                      onWipe={wipeInkSplatter}
+                    />
+                  )}
+              </div>
+
+              {/* Phase 12 Sabotage & Power-up Control Panel - Ultra-compact Single-Row Unified Combat Bar */}
               {room &&
                 room.isGameStarted &&
                 room.enableAbilities &&
                 !isMeSpectator &&
                 !spectatingPlayerId && (
-                  <SabotageOverlay
-                    splashes={activeInkSplashes}
-                    onWipe={wipeInkSplatter}
-                  />
-                )}
-            </div>
-
-            {/* Phase 12 Sabotage & Power-up Control Panel - Ultra-compact Single-Row Unified Combat Bar */}
-            {room &&
-              room.isGameStarted &&
-              room.enableAbilities &&
-              !isMeSpectator &&
-              !spectatingPlayerId && (
-                <div className="w-full max-w-[460px] glass-panel py-1.5 px-3 rounded-2xl border border-border-custom/50 flex items-center justify-between gap-3 mt-2 animate-scale-in">
-                  {/* Left Side: Shrunk 32px Circular SVG Mana Reactor Progress Dial */}
-                  <div className="flex items-center gap-1.5 shrink-0 select-none">
-                    <div className="relative w-8 h-8 flex items-center justify-center">
-                      <svg className="w-full h-full transform -rotate-90">
-                        <circle
-                          cx="16"
-                          cy="16"
-                          r="13.5"
-                          className="stroke-border-custom opacity-25"
-                          strokeWidth="2.5"
-                          fill="transparent"
-                        />
-                        <circle
-                          cx="16"
-                          cy="16"
-                          r="13.5"
-                          className="stroke-accent-custom transition-all duration-300 ease-out"
-                          strokeWidth="2.5"
-                          fill="transparent"
-                          strokeDasharray={2 * Math.PI * 13.5}
-                          strokeDashoffset={
-                            2 * Math.PI * 13.5 * (1 - myMana / 100)
-                          }
-                          strokeLinecap="round"
-                        />
-                      </svg>
-                      {/* Centered Raw Count / Gold Lightning Badge */}
-                      <div className="absolute inset-0 flex items-center justify-center">
-                        {myMana >= 100 ? (
-                          <span
-                            className="text-xs animate-bounce-slow"
-                            title="Max Mana Charge!"
-                          >
-                            ⚡
-                          </span>
-                        ) : (
-                          <span className="text-[9.5px] font-black font-sans tabular-nums text-text-custom/90 leading-none">
-                            {myMana}
-                          </span>
-                        )}
+                  <div className="w-full max-w-[460px] glass-panel py-1.5 px-3 rounded-2xl border border-border-custom/50 flex items-center justify-between gap-3 mt-2 animate-scale-in">
+                    {/* Left Side: Shrunk 32px Circular SVG Mana Reactor Progress Dial */}
+                    <div className="flex items-center gap-1.5 shrink-0 select-none">
+                      <div className="relative w-8 h-8 flex items-center justify-center">
+                        <svg className="w-full h-full transform -rotate-90">
+                          <circle
+                            cx="16"
+                            cy="16"
+                            r="13.5"
+                            className="stroke-border-custom opacity-25"
+                            strokeWidth="2.5"
+                            fill="transparent"
+                          />
+                          <circle
+                            cx="16"
+                            cy="16"
+                            r="13.5"
+                            className="stroke-accent-custom transition-all duration-300 ease-out"
+                            strokeWidth="2.5"
+                            fill="transparent"
+                            strokeDasharray={2 * Math.PI * 13.5}
+                            strokeDashoffset={
+                              2 * Math.PI * 13.5 * (1 - myMana / 100)
+                            }
+                            strokeLinecap="round"
+                          />
+                        </svg>
+                        {/* Centered Raw Count / Gold Lightning Badge */}
+                        <div className="absolute inset-0 flex items-center justify-center">
+                          {myMana >= 100 ? (
+                            <span
+                              className="text-xs animate-bounce-slow"
+                              title="Max Mana Charge!"
+                            >
+                              ⚡
+                            </span>
+                          ) : (
+                            <span className="text-[9.5px] font-black font-sans tabular-nums text-text-custom/90 leading-none">
+                              {myMana}
+                            </span>
+                          )}
+                        </div>
                       </div>
+                      {/* Slim Inline Indicator */}
+                      <span className="text-[8.5px] font-black tracking-wider text-accent-custom/80 uppercase font-sans">
+                        Mana
+                      </span>
                     </div>
-                    {/* Slim Inline Indicator */}
-                    <span className="text-[8.5px] font-black tracking-wider text-accent-custom/80 uppercase font-sans">
-                      Mana
-                    </span>
-                  </div>
 
-                  {/* Right Side: Micro-Circular Keys (32px) with Floating Cost Badges */}
-                  <div className="flex items-center gap-2.5 justify-end flex-1">
-                    {/* Cleanse Shield */}
-                    <button
-                      onClick={() => myMana >= 35 && triggerAbility("cleanse")}
-                      disabled={myMana < 35}
-                      className={`
+                    {/* Right Side: Micro-Circular Keys (32px) with Floating Cost Badges */}
+                    <div className="flex items-center gap-2.5 justify-end flex-1">
+                      {/* Cleanse Shield */}
+                      <button
+                        onClick={() => myMana >= 35 && triggerAbility("cleanse")}
+                        disabled={myMana < 35}
+                        className={`
                       relative w-8 h-8 rounded-full border flex items-center justify-center transition-all duration-300 select-none active:scale-90 hover:scale-105
-                      ${
-                        myMana >= 35
-                          ? "bg-teal-500/10 border-teal-500 text-teal-400 hover:bg-teal-500 hover:text-white shadow-[0_0_8px_rgba(20,184,166,0.3)] hover:shadow-[0_0_12px_rgba(20,184,166,0.5)] cursor-pointer animate-pulse-subtle"
-                          : "border-border-custom opacity-30 cursor-not-allowed text-text-custom/60"
-                      }
+                      ${myMana >= 35
+                            ? "bg-teal-500/10 border-teal-500 text-teal-400 hover:bg-teal-500 hover:text-white shadow-[0_0_8px_rgba(20,184,166,0.3)] hover:shadow-[0_0_12px_rgba(20,184,166,0.5)] cursor-pointer animate-pulse-subtle"
+                            : "border-border-custom opacity-30 cursor-not-allowed text-text-custom/60"
+                          }
                       ${myShieldActive ? "ring-2 ring-teal-500 animate-pulse bg-teal-500 text-white" : ""}
                     `}
-                      title="Cleanse all sabotages & shield yourself from the next attack for 5s (Cost: 35)"
-                    >
-                      <span className="text-xs leading-none">🛡️</span>
-                      <span className="absolute -top-0.5 -right-0.5 bg-teal-500 text-white text-[6.5px] font-black w-3.5 h-3.5 rounded-full flex items-center justify-center shadow-xs border border-bg-custom leading-none">
-                        35
-                      </span>
-                    </button>
-
-                    {/* Ink Splash */}
-                    <button
-                      onClick={() => myMana >= 65 && triggerAbility("ink")}
-                      disabled={myMana < 65}
-                      className={`
-                      relative w-8 h-8 rounded-full border flex items-center justify-center transition-all duration-300 select-none active:scale-90 hover:scale-105
-                      ${
-                        myMana >= 65
-                          ? "bg-pink-500/10 border-pink-500 text-pink-400 hover:bg-pink-500 hover:text-white shadow-[0_0_8px_rgba(236,72,153,0.3)] hover:shadow-[0_0_12px_rgba(236,72,153,0.5)] cursor-pointer animate-pulse-subtle"
-                          : "border-border-custom opacity-30 cursor-not-allowed text-text-custom/60"
-                      }
-                    `}
-                      title="Splashes obscure neon ink droplets on the opponent's grid (Cost: 65)"
-                    >
-                      <span className="text-xs leading-none">💧</span>
-                      <span className="absolute -top-0.5 -right-0.5 bg-pink-500 text-white text-[6.5px] font-black w-3.5 h-3.5 rounded-full flex items-center justify-center shadow-xs border border-bg-custom leading-none">
-                        65
-                      </span>
-                    </button>
-
-                    {/* Keypad Scramble */}
-                    <button
-                      onClick={() => myMana >= 90 && triggerAbility("scramble")}
-                      disabled={myMana < 90}
-                      className={`
-                      relative w-8 h-8 rounded-full border flex items-center justify-center transition-all duration-300 select-none active:scale-90 hover:scale-105
-                      ${
-                        myMana >= 90
-                          ? "bg-purple-500/10 border-purple-500 text-purple-400 hover:bg-purple-500 hover:text-white shadow-[0_0_8px_rgba(168,85,247,0.3)] hover:shadow-[0_0_12px_rgba(168,85,247,0.5)] cursor-pointer animate-pulse-subtle"
-                          : "border-border-custom opacity-30 cursor-not-allowed text-text-custom/60"
-                      }
-                    `}
-                      title="Physically shuffles opponent's keypad buttons randomly (Cost: 90)"
-                    >
-                      <span className="text-xs leading-none">🌀</span>
-                      <span className="absolute -top-0.5 -right-0.5 bg-purple-500 text-white text-[6.5px] font-black w-3.5 h-3.5 rounded-full flex items-center justify-center shadow-xs border border-bg-custom leading-none">
-                        90
-                      </span>
-                    </button>
-                  </div>
-                </div>
-              )}
-
-            {/* Keypad selector */}
-            <Keypad
-              onNumberClick={
-                spectatingPlayerId || isMeSpectator
-                  ? () => {}
-                  : (num) => enterNumber(num, formatTime(seconds))
-              }
-              onActionClick={
-                spectatingPlayerId || isMeSpectator ? () => {} : handleAction
-              }
-              notesMode={notesMode}
-              canUndo={history.length > 0}
-              canRedo={redoStack.length > 0}
-              hintsRemaining={hintsRemaining}
-              completedNumbers={completedNumbers}
-              numberCounts={getNumberCounts()}
-              isScrambled={isScrambled}
-              disabled={!!(spectatingPlayerId || isMeSpectator)}
-            />
-          </section>
-
-          {/* RIGHT COLUMN: Multiplayer Lobby, Live Feed & Opponent Progress (Cols 8 to 12) */}
-          <section className="lg:col-span-5 flex flex-col gap-6">
-            {/* Matchmaking / Private Lobby Tabs */}
-            <div className="glass-card rounded-2xl p-5">
-              <div className="flex bg-accent-glow/30 rounded-xl p-1 mb-4 border border-border-custom/40">
-                <button
-                  onClick={() => setActiveTab("lobby")}
-                  className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold transition-all ${
-                    activeTab === "lobby"
-                      ? "bg-panel-custom text-text-custom shadow-xs"
-                      : "opacity-60 hover:opacity-100"
-                  }`}
-                >
-                  <Users size={16} />
-                  Private Room
-                </button>
-                {/* Matchmaking tab is hidden when a game is in progress */}
-                {!room?.isGameStarted && (
-                  <button
-                    onClick={() => setActiveTab("matchmaker")}
-                    className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold transition-all ${
-                      activeTab === "matchmaker"
-                        ? "bg-panel-custom text-text-custom shadow-xs"
-                        : "opacity-60 hover:opacity-100"
-                    }`}
-                  >
-                    <Trophy size={16} />
-                    Matchmaking
-                  </button>
-                )}
-              </div>
-
-              {/* TAB CONTENT: Lobby Connection */}
-              {activeTab === "lobby" && (
-                <div className="space-y-4">
-                  {!room ? (
-                    // Room Joining / Creation controls
-                    <div className="space-y-3">
-                      <div className="space-y-1">
-                        <label className="text-[10px] uppercase font-bold opacity-60 tracking-wider">
-                          Join Private Room
-                        </label>
-                        <div className="flex gap-2">
-                          <input
-                            type="text"
-                            placeholder="Enter 6-digit Code"
-                            maxLength={6}
-                            value={inputCode}
-                            onChange={(e) =>
-                              setInputCode(e.target.value.replace(/\D/g, ""))
-                            }
-                            className="flex-1 px-3 py-2 bg-accent-glow border border-border-custom rounded-xl font-bold tracking-widest text-center text-sm focus:outline-none focus:border-accent-custom"
-                          />
-                          <button
-                            onClick={() => joinRoom(inputCode)}
-                            className="px-4 bg-accent-custom hover:bg-accent-hover text-white font-bold rounded-xl text-xs transition-all active:scale-95"
-                            disabled={inputCode.length !== 6 || !isConnected}
-                          >
-                            Join
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="relative flex py-2 items-center">
-                        <div className="flex-grow border-t border-border-custom/50"></div>
-                        <span className="flex-shrink mx-4 text-[10px] uppercase font-bold opacity-45 tracking-widest">
-                          or
-                        </span>
-                        <div className="flex-grow border-t border-border-custom/50"></div>
-                      </div>
-
-                      <div className="space-y-1">
-                        <label className="text-[10px] uppercase font-bold opacity-60 tracking-wider">
-                          Difficulty for New Room
-                        </label>
-                        <select
-                          value={selectedDifficulty}
-                          onChange={(e) =>
-                            setSelectedDifficulty(e.target.value)
-                          }
-                          className="w-full px-3 py-2 bg-accent-glow border border-border-custom rounded-xl font-bold text-xs focus:outline-none cursor-pointer"
-                        >
-                          <option value="easy">Easy</option>
-                          <option value="medium">Medium</option>
-                          <option value="hard">Hard</option>
-                          <option value="expert">Expert</option>
-                        </select>
-                      </div>
-
-                      <div className="flex items-center gap-2 select-none py-1">
-                        <input
-                          type="checkbox"
-                          id="enableAbilitiesCheckMobile"
-                          checked={enableAbilities}
-                          onChange={(e) => setEnableAbilities(e.target.checked)}
-                          className="w-4 h-4 rounded border-border-custom text-accent-custom bg-accent-glow/20 focus:ring-accent-custom focus:ring-offset-0 cursor-pointer"
-                        />
-                        <label
-                          htmlFor="enableAbilitiesCheckMobile"
-                          className="text-[10px] uppercase font-bold opacity-80 tracking-wider cursor-pointer"
-                        >
-                          Enable Special Abilities (Mana)
-                        </label>
-                      </div>
-
-                      <button
-                        onClick={() =>
-                          createRoom(selectedDifficulty, enableAbilities)
-                        }
-                        className="w-full py-3 bg-accent-glow hover:bg-accent-glow/70 border border-border-custom text-text-custom font-bold text-xs rounded-xl active:scale-95 transition-all flex items-center justify-center gap-1.5"
-                        disabled={!isConnected}
+                        title="Cleanse all sabotages & shield yourself from the next attack for 5s (Cost: 35)"
                       >
-                        <PlayCircle size={15} className="text-accent-custom" />
-                        Create New Lobby
+                        <span className="text-xs leading-none">🛡️</span>
+                        <span className="absolute -top-0.5 -right-0.5 bg-teal-500 text-white text-[6.5px] font-black w-3.5 h-3.5 rounded-full flex items-center justify-center shadow-xs border border-bg-custom leading-none">
+                          35
+                        </span>
+                      </button>
+
+                      {/* Ink Splash */}
+                      <button
+                        onClick={() => myMana >= 65 && triggerAbility("ink")}
+                        disabled={myMana < 65}
+                        className={`
+                      relative w-8 h-8 rounded-full border flex items-center justify-center transition-all duration-300 select-none active:scale-90 hover:scale-105
+                      ${myMana >= 65
+                            ? "bg-pink-500/10 border-pink-500 text-pink-400 hover:bg-pink-500 hover:text-white shadow-[0_0_8px_rgba(236,72,153,0.3)] hover:shadow-[0_0_12px_rgba(236,72,153,0.5)] cursor-pointer animate-pulse-subtle"
+                            : "border-border-custom opacity-30 cursor-not-allowed text-text-custom/60"
+                          }
+                    `}
+                        title="Splashes obscure neon ink droplets on the opponent's grid (Cost: 65)"
+                      >
+                        <span className="text-xs leading-none">💧</span>
+                        <span className="absolute -top-0.5 -right-0.5 bg-pink-500 text-white text-[6.5px] font-black w-3.5 h-3.5 rounded-full flex items-center justify-center shadow-xs border border-bg-custom leading-none">
+                          65
+                        </span>
+                      </button>
+
+                      {/* Keypad Scramble */}
+                      <button
+                        onClick={() => myMana >= 90 && triggerAbility("scramble")}
+                        disabled={myMana < 90}
+                        className={`
+                      relative w-8 h-8 rounded-full border flex items-center justify-center transition-all duration-300 select-none active:scale-90 hover:scale-105
+                      ${myMana >= 90
+                            ? "bg-purple-500/10 border-purple-500 text-purple-400 hover:bg-purple-500 hover:text-white shadow-[0_0_8px_rgba(168,85,247,0.3)] hover:shadow-[0_0_12px_rgba(168,85,247,0.5)] cursor-pointer animate-pulse-subtle"
+                            : "border-border-custom opacity-30 cursor-not-allowed text-text-custom/60"
+                          }
+                    `}
+                        title="Physically shuffles opponent's keypad buttons randomly (Cost: 90)"
+                      >
+                        <span className="text-xs leading-none">🌀</span>
+                        <span className="absolute -top-0.5 -right-0.5 bg-purple-500 text-white text-[6.5px] font-black w-3.5 h-3.5 rounded-full flex items-center justify-center shadow-xs border border-bg-custom leading-none">
+                          90
+                        </span>
                       </button>
                     </div>
-                  ) : (
-                    // Active Room Lobby
+                  </div>
+                )}
+
+              {/* Keypad selector */}
+              <Keypad
+                onNumberClick={
+                  spectatingPlayerId || isMeSpectator
+                    ? () => { }
+                    : (num) => enterNumber(num, formatTime(seconds))
+                }
+                onActionClick={
+                  spectatingPlayerId || isMeSpectator ? () => { } : handleAction
+                }
+                notesMode={notesMode}
+                canUndo={history.length > 0}
+                canRedo={redoStack.length > 0}
+                hintsRemaining={hintsRemaining}
+                completedNumbers={completedNumbers}
+                numberCounts={getNumberCounts()}
+                isScrambled={isScrambled}
+                disabled={!!(spectatingPlayerId || isMeSpectator)}
+                keypadLayout={keypadLayout}
+              />
+            </section>
+
+            {/* RIGHT COLUMN: Multiplayer Lobby, Live Feed & Opponent Progress (Cols 8 to 12) */}
+            {room && (
+              <section className="lg:col-span-5 flex flex-col gap-6">
+                {/* Matchmaking / Private Lobby Tabs */}
+                <div className="glass-card rounded-2xl p-5">
+                  <div className="flex bg-accent-glow/30 rounded-xl p-1 mb-4 border border-border-custom/40">
+                    <button
+                      onClick={() => setActiveTab("lobby")}
+                      className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold transition-all ${activeTab === "lobby"
+                        ? "bg-panel-custom text-text-custom shadow-xs"
+                        : "opacity-60 hover:opacity-100"
+                        }`}
+                    >
+                      <Users size={16} />
+                      Private Room
+                    </button>
+                    {/* Matchmaking tab is hidden when a game is in progress */}
+                    {!room?.isGameStarted && (
+                      <button
+                        onClick={() => setActiveTab("matchmaker")}
+                        className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold transition-all ${activeTab === "matchmaker"
+                          ? "bg-panel-custom text-text-custom shadow-xs"
+                          : "opacity-60 hover:opacity-100"
+                          }`}
+                      >
+                        <Trophy size={16} />
+                        Matchmaking
+                      </button>
+                    )}
+                  </div>
+
+                  {/* TAB CONTENT: Lobby Connection */}
+                  {activeTab === "lobby" && (
                     <div className="space-y-4">
-                      <div className="flex items-start justify-between border-b border-border-custom pb-3">
-                        <div>
-                          <span className="text-[10px] uppercase font-bold opacity-50 tracking-wider">
-                            Room Code
-                          </span>
-                          <div className="flex items-center gap-1.5">
-                            <p className="text-xl font-extrabold tracking-widest text-accent-custom transition-all duration-300">
-                              {room.code}
-                            </p>
-                            <button
-                              onClick={copyRoomCode}
-                              className="text-text-custom opacity-50 hover:opacity-100 transition-all p-1"
-                              title="Copy Code"
-                            >
-                              {isCopied ? (
-                                <Check size={14} className="text-emerald-500" />
-                              ) : (
-                                <Clipboard size={14} />
-                              )}
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* Share QR Code Vector */}
-                        <div
-                          className="bg-white p-1.5 rounded-lg border border-border-custom shadow-xs"
-                          title="Share via QR Code"
-                        >
-                          <QRCodeSVG value={getJoinUrl()} size={50} />
-                        </div>
-                      </div>
-
-                      {/* Lobby Connections list */}
-                      <div>
-                        <h3 className="text-xs uppercase font-bold opacity-50 tracking-wider mb-2 flex items-center justify-between">
-                          <span>Lobby Connections</span>
-                          <span className="text-[10px] text-emerald-500 flex items-center gap-1">
-                            <Wifi size={10} /> Live Synced
-                          </span>
-                        </h3>
-
+                      {!room ? (
+                        // Room Joining / Creation controls
                         <div className="space-y-3">
-                          {activePlayers.map((p) => {
-                            const isMe = p.id === myPlayerId;
-                            const voiceJoined = isMe
-                              ? isVoiceJoined
-                              : p.isVoiceJoined;
-                            const voiceMuted = isMe
-                              ? isMicMuted
-                              : p.isVoiceMuted;
-
-                            return (
-                              <div
-                                key={p.id}
-                                className={`border border-border-custom/50 rounded-xl p-3 bg-accent-glow/10 ${
-                                  isMe
-                                    ? "ring-1 ring-accent-custom/30 bg-accent-glow/20"
-                                    : ""
-                                }`}
+                          <div className="space-y-1">
+                            <label className="text-[10px] uppercase font-bold opacity-60 tracking-wider">
+                              Join Private Room
+                            </label>
+                            <div className="flex gap-2">
+                              <input
+                                type="text"
+                                placeholder="Enter 6-digit Code"
+                                maxLength={6}
+                                value={inputCode}
+                                onChange={(e) =>
+                                  setInputCode(e.target.value.replace(/\D/g, ""))
+                                }
+                                className="flex-1 px-3 py-2 bg-accent-glow border border-border-custom rounded-xl font-bold tracking-widest text-center text-sm focus:outline-none focus:border-accent-custom"
+                              />
+                              <button
+                                onClick={() => joinRoom(inputCode)}
+                                className="px-4 bg-accent-custom hover:bg-accent-hover text-white font-bold rounded-xl text-xs transition-all active:scale-95"
+                                disabled={inputCode.length !== 6 || !isConnected}
                               >
-                                <div className="flex items-center justify-between mb-2">
-                                  <div className="flex items-center gap-2">
-                                    <div
-                                      className={`w-7 h-7 rounded-full bg-accent-custom text-white font-bold flex items-center justify-center text-xs relative transition-all duration-300 overflow-hidden ${
-                                        voiceJoined && !voiceMuted
-                                          ? "speaking-pulse-avatar shadow-md shadow-emerald-500/20"
-                                          : ""
-                                      }`}
-                                    >
-                                      {AVATARS.find(
-                                        (a) =>
-                                          a.id ===
-                                          (isMe ? selectedAvatar : p.avatar),
-                                      ) ? (
-                                        <img
-                                          src={
-                                            AVATARS.find(
-                                              (a) =>
-                                                a.id ===
-                                                (isMe
-                                                  ? selectedAvatar
-                                                  : p.avatar),
-                                            ).src
-                                          }
-                                          alt="Player Avatar"
-                                          className="w-full h-full object-cover"
-                                        />
-                                      ) : isMe ? (
-                                        "ME"
-                                      ) : (
-                                        p.name?.slice(0, 2)?.toUpperCase() || "P"
-                                      )}
-                                    </div>
-                                    <div>
-                                      <div className="flex items-center gap-1.5">
-                                        <p className="text-xs font-bold leading-tight">
-                                          {p.name} {isMe && "(You)"}
-                                        </p>
-                                        {voiceJoined &&
-                                          (voiceMuted ? (
-                                            <MicOff
-                                              size={11}
-                                              className="text-rose-500"
-                                              title="Microphone Muted"
-                                            />
-                                          ) : (
-                                            <Mic
-                                              size={11}
-                                              className="text-emerald-500 animate-pulse-subtle"
-                                              title="Microphone Active"
-                                            />
-                                          ))}
-                                      </div>
-                                      <span className="text-[9px] opacity-60">
-                                        {p.elo || 1450} ELO
-                                      </span>
-                                    </div>
-                                  </div>
-
-                                  <div className="flex items-center gap-2">
-                                    {room.isGameStarted ? (
-                                      <div className="flex gap-0.5">
-                                        {Array(3)
-                                          .fill(null)
-                                          .map((_, i) => (
-                                            <div
-                                              key={i}
-                                              className={`w-2 h-2 rounded-full ${
-                                                i < maxStrikes - p.strikes
-                                                  ? "bg-rose-500"
-                                                  : "border border-dashed border-border-custom opacity-40"
-                                              }`}
-                                            />
-                                          ))}
-                                      </div>
-                                    ) : (
-                                      <>
-                                        {isHost && !isMe && (
-                                          <button
-                                            onClick={() => kickPlayer(p.id)}
-                                            className="px-2 py-0.5 bg-rose-500/10 hover:bg-rose-500 hover:text-white border border-rose-500/30 text-rose-500 text-[9px] font-bold rounded-lg transition-all active:scale-95 mr-1"
-                                            title="Kick Player"
-                                          >
-                                            Kick
-                                          </button>
-                                        )}
-                                        <span
-                                          className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${
-                                            p.isReady
-                                              ? "bg-emerald-500/20 text-emerald-500 border border-emerald-500/30"
-                                              : "bg-accent-glow border border-border-custom text-text-custom opacity-60"
-                                          }`}
-                                        >
-                                          {p.isReady ? "READY" : "WAITING"}
-                                        </span>
-                                      </>
-                                    )}
-                                  </div>
-                                </div>
-
-                                {/* Live completion progress */}
-                                {room.isGameStarted && (
-                                  <>
-                                    <div className="flex items-center justify-between text-[10px] mb-1 font-semibold opacity-85">
-                                      <span>Board Progress</span>
-                                      <span>
-                                        {isMe ? myProgress : p.progress}%
-                                      </span>
-                                    </div>
-                                    <div className="w-full bg-accent-glow/50 h-1.5 rounded-full overflow-hidden">
-                                      <div
-                                        className="bg-accent-custom h-full rounded-full transition-all duration-300"
-                                        style={{
-                                          width: `${isMe ? myProgress : p.progress}%`,
-                                        }}
-                                      />
-                                    </div>
-                                  </>
-                                )}
-                              </div>
-                            );
-                          })}
-
-                          {/* Spectators display */}
-                          {spectators.length > 0 && (
-                            <div className="pt-2 border-t border-border-custom/50 space-y-1">
-                              <span className="text-[10px] uppercase font-bold opacity-45 tracking-wider flex items-center gap-1">
-                                <Tv size={11} /> Spectators ({spectators.length}
-                                )
-                              </span>
-                              <div className="flex flex-wrap gap-1.5">
-                                {spectators.map((s) => (
-                                  <span
-                                    key={s.id}
-                                    className="text-[9px] font-semibold bg-accent-glow/50 border border-border-custom px-2 py-0.5 rounded-md"
-                                  >
-                                    {s.name}
-                                  </span>
-                                ))}
-                              </div>
+                                Join
+                              </button>
                             </div>
-                          )}
-                        </div>
-                      </div>
+                          </div>
 
-                      {/* Voice Channel Panel */}
-                      <div className="border border-border-custom/50 rounded-xl p-3 bg-accent-glow/5 space-y-2 mt-2 mb-4">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-1.5">
-                            <Mic
-                              size={14}
-                              className={
-                                isVoiceJoined
-                                  ? "text-emerald-500 animate-pulse"
-                                  : "opacity-60"
-                              }
-                            />
-                            <span className="text-xs font-bold uppercase tracking-wider">
-                              Voice Channel
+                          <div className="relative flex py-2 items-center">
+                            <div className="flex-grow border-t border-border-custom/50"></div>
+                            <span className="flex-shrink mx-4 text-[10px] uppercase font-bold opacity-45 tracking-widest">
+                              or
                             </span>
+                            <div className="flex-grow border-t border-border-custom/50"></div>
                           </div>
-                          <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border border-border-custom ${
-                            voiceConnectionState === 'connected'
-                              ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
-                              : voiceConnectionState === 'connecting'
-                              ? "bg-amber-500/10 border-amber-500/20 text-amber-400 animate-pulse"
-                              : voiceConnectionState === 'failed'
-                              ? "bg-rose-500/10 border-rose-500/20 text-rose-400"
-                              : "bg-accent-glow border-border-custom text-text-custom opacity-70"
-                          }`}>
-                            {voiceConnectionState === 'connected'
-                              ? "Connected"
-                              : voiceConnectionState === 'connecting'
-                              ? "Connecting..."
-                              : voiceConnectionState === 'failed'
-                              ? "Connection Failed"
-                              : "Disconnected"}
-                          </span>
-                        </div>
 
-                        <div className="flex items-center gap-2 pt-1">
-                          {!isVoiceJoined ? (
-                            <button
-                              onClick={joinVoice}
-                              className="flex-1 py-2 bg-accent-glow hover:bg-accent-custom hover:text-white border border-border-custom hover:border-accent-custom text-text-custom font-bold text-xs rounded-xl active:scale-95 transition-all flex items-center justify-center gap-1.5"
+                          <div className="space-y-1">
+                            <label className="text-[10px] uppercase font-bold opacity-60 tracking-wider">
+                              Difficulty for New Room
+                            </label>
+                            <select
+                              value={selectedDifficulty}
+                              onChange={(e) =>
+                                setSelectedDifficulty(e.target.value)
+                              }
+                              className="w-full px-3 py-2 bg-accent-glow border border-border-custom rounded-xl font-bold text-xs focus:outline-none cursor-pointer"
                             >
-                              <Mic size={12} />
-                              Join Voice Chat
-                            </button>
-                          ) : (
-                            <>
-                              <button
-                                onClick={toggleMicMute}
-                                className={`flex-1 py-2 font-bold text-xs rounded-xl active:scale-95 transition-all flex items-center justify-center gap-1.5 border ${
-                                  isMicMuted
-                                    ? "bg-rose-500/10 border-rose-500/30 text-rose-500 hover:bg-rose-500 hover:text-white"
-                                    : "bg-emerald-500/10 border-emerald-500/30 text-emerald-500 hover:bg-emerald-500 hover:text-white"
-                                }`}
-                              >
-                                {isMicMuted ? (
-                                  <>
-                                    <MicOff size={12} />
-                                    Unmute Mic
-                                  </>
-                                ) : (
-                                  <>
-                                    <Mic size={12} />
-                                    Mute Mic
-                                  </>
-                                )}
-                              </button>
-                              <button
-                                onClick={leaveVoice}
-                                className="px-4 py-2 border border-border-custom hover:border-red-400 hover:text-red-500 font-bold text-xs rounded-xl active:scale-95 transition-all"
-                              >
-                                Leave
-                              </button>
-                            </>
-                          )}
-                        </div>
-
-                        {/* Collapsible WebRTC Diagnostics Panel */}
-                        <div className="mt-2 border-t border-border-custom/30 pt-2">
-                          <details className="group" open>
-                            <summary className="text-[10px] text-text-custom/60 group-open:text-accent-custom font-bold cursor-pointer select-none flex items-center justify-between hover:text-text-custom transition-all">
-                              <span>WebRTC Diagnostics Console</span>
-                              <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
-                                <button
-                                  onClick={(e) => {
-                                    e.preventDefault();
-                                    navigator.clipboard.writeText(voiceDebugLogs.join('\n'));
-                                    addToast('Diagnostics logs copied to clipboard!', 'success');
-                                  }}
-                                  className="text-[8px] font-bold px-1.5 py-0.5 bg-accent-glow hover:bg-accent-custom hover:text-white border border-border-custom rounded-md active:scale-95 transition-all cursor-pointer"
-                                >
-                                  Copy Logs
-                                </button>
-                                <span className="text-[8px] opacity-75 group-open:rotate-180 transition-transform">▼</span>
-                              </div>
-                            </summary>
-                            <div className="mt-1.5 p-2 bg-slate-950/80 rounded-lg max-h-32 overflow-y-auto font-mono text-[9px] text-indigo-200/90 border border-border-custom/25 space-y-1 scrollbar-thin">
-                              {voiceDebugLogs.length === 0 ? (
-                                <div className="text-text-custom/40 italic text-center py-1">No logs recorded yet.</div>
-                              ) : (
-                                voiceDebugLogs.map((log, index) => (
-                                  <div key={index} className="leading-normal border-b border-border-custom/5 pb-0.5 last:border-0 last:pb-0 break-all select-all">
-                                    {log}
-                                  </div>
-                                ))
-                              )}
-                            </div>
-                          </details>
-                        </div>
-                      </div>
-
-                      {/* READY UP ACTION BUTTON */}
-                      {!room.isGameStarted ? (
-                        <div className="flex flex-col gap-2 pt-2">
-                          <div className="flex gap-2">
-                            {activePlayers.length > 1 && (
-                              <button
-                                onClick={toggleReady}
-                                className={`flex-1 py-3 rounded-xl font-bold text-sm shadow-md transition-all active:scale-[0.98] ${
-                                  myStatusInRoom?.isReady
-                                    ? "bg-amber-600 hover:bg-amber-500 text-white"
-                                    : "bg-accent-custom hover:bg-accent-hover text-white"
-                                }`}
-                              >
-                                {myStatusInRoom?.isReady
-                                  ? "Unready Lobby"
-                                  : "Ready to Start"}
-                              </button>
-                            )}
-
-                            {isHost && (
-                              <button
-                                onClick={startGame}
-                                disabled={!allPlayersReady}
-                                className={`${activePlayers.length === 1 ? "w-full" : "px-6"} py-3 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold rounded-xl text-sm transition-all active:scale-[0.98]`}
-                                title="Start Match"
-                              >
-                                Start Game
-                              </button>
-                            )}
+                              <option value="easy">Easy</option>
+                              <option value="medium">Medium</option>
+                              <option value="hard">Hard</option>
+                              <option value="expert">Expert</option>
+                            </select>
                           </div>
+
+                          {showManaOptionSetting && (
+                            <div className="flex items-center gap-2 select-none py-1 justify-center">
+                              <input
+                                type="checkbox"
+                                id="enableAbilitiesCheckMobile"
+                                checked={enableAbilities}
+                                onChange={(e) => setEnableAbilities(e.target.checked)}
+                                className="w-4 h-4 rounded border-border-custom text-accent-custom bg-accent-glow/20 focus:ring-accent-custom focus:ring-offset-0 cursor-pointer"
+                              />
+                              <label
+                                htmlFor="enableAbilitiesCheckMobile"
+                                className="text-[10px] uppercase font-bold opacity-80 tracking-wider cursor-pointer"
+                              >
+                                Enable Special Abilities (Mana) for Room
+                              </label>
+                            </div>
+                          )}
+
                           <button
-                            onClick={() => exitToHome(() => setActiveView("home"))}
-                            className="w-full py-2.5 bg-slate-800 hover:bg-slate-700/80 border border-slate-700/50 text-slate-300 font-bold rounded-xl text-xs transition-all active:scale-[0.98] mt-1"
+                            onClick={() =>
+                              createRoom(selectedDifficulty, showManaOptionSetting ? enableAbilities : false)
+                            }
+                            className="w-full py-3 bg-accent-glow hover:bg-accent-glow/70 border border-border-custom text-text-custom font-bold text-xs rounded-xl active:scale-95 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                            disabled={!isConnected}
                           >
-                            {isHost ? "Dismiss Room" : "Leave Room"}
+                            <PlayCircle size={15} className="text-accent-custom" />
+                            Create New Lobby
                           </button>
                         </div>
                       ) : (
-                        isHost &&
-                        activePlayers.length === 1 && (
+                        // Active Room Lobby
+                        <div className="space-y-4">
+                          <div className="flex items-start justify-between border-b border-border-custom pb-3">
+                            <div>
+                              <span className="text-[10px] uppercase font-bold opacity-50 tracking-wider">
+                                Room Code
+                              </span>
+                              <div className="flex items-center gap-1.5">
+                                <p className="text-xl font-extrabold tracking-widest text-accent-custom transition-all duration-300">
+                                  {room.code}
+                                </p>
+                                <button
+                                  onClick={copyRoomCode}
+                                  className="text-text-custom opacity-50 hover:opacity-100 transition-all p-1"
+                                  title="Copy Code"
+                                >
+                                  {isCopied ? (
+                                    <Check size={14} className="text-emerald-500" />
+                                  ) : (
+                                    <Clipboard size={14} />
+                                  )}
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Share QR Code Vector */}
+                            <div
+                              className="bg-white p-1.5 rounded-lg border border-border-custom shadow-xs"
+                              title="Share via QR Code"
+                            >
+                              <QRCodeSVG value={getJoinUrl()} size={50} />
+                            </div>
+                          </div>
+
+                          {/* Lobby Connections list */}
+                          <div>
+                            <h3 className="text-xs uppercase font-bold opacity-50 tracking-wider mb-2 flex items-center justify-between">
+                              <span>Lobby Connections</span>
+                              <span className="text-[10px] text-emerald-500 flex items-center gap-1">
+                                <Wifi size={10} /> Live Synced
+                              </span>
+                            </h3>
+
+                            <div className="space-y-3">
+                              {activePlayers.map((p) => {
+                                const isMe = p.id === myPlayerId;
+                                const voiceJoined = isMe
+                                  ? isVoiceJoined
+                                  : p.isVoiceJoined;
+                                const voiceMuted = isMe
+                                  ? isMicMuted
+                                  : p.isVoiceMuted;
+
+                                return (
+                                  <div
+                                    key={p.id}
+                                    className={`border border-border-custom/50 rounded-xl p-3 bg-accent-glow/10 ${isMe
+                                      ? "ring-1 ring-accent-custom/30 bg-accent-glow/20"
+                                      : ""
+                                      }`}
+                                  >
+                                    <div className="flex items-center justify-between mb-2">
+                                      <div className="flex items-center gap-2">
+                                        <div
+                                          className={`w-7 h-7 rounded-full bg-accent-custom text-white font-bold flex items-center justify-center text-xs relative transition-all duration-300 overflow-hidden ${voiceJoined && !voiceMuted
+                                            ? "speaking-pulse-avatar shadow-md shadow-emerald-500/20"
+                                            : ""
+                                            }`}
+                                        >
+                                          {AVATARS.find(
+                                            (a) =>
+                                              a.id ===
+                                              (isMe ? selectedAvatar : p.avatar),
+                                          ) ? (
+                                            <img
+                                              src={
+                                                AVATARS.find(
+                                                  (a) =>
+                                                    a.id ===
+                                                    (isMe
+                                                      ? selectedAvatar
+                                                      : p.avatar),
+                                                ).src
+                                              }
+                                              alt="Player Avatar"
+                                              className="w-full h-full object-cover"
+                                            />
+                                          ) : isMe ? (
+                                            "ME"
+                                          ) : (
+                                            p.name?.slice(0, 2)?.toUpperCase() || "P"
+                                          )}
+                                        </div>
+                                        <div>
+                                          <div className="flex items-center gap-1.5">
+                                            <p className="text-xs font-bold leading-tight">
+                                              {p.name} {isMe && "(You)"}
+                                            </p>
+                                            {voiceJoined &&
+                                              (voiceMuted ? (
+                                                <MicOff
+                                                  size={11}
+                                                  className="text-rose-500"
+                                                  title="Microphone Muted"
+                                                />
+                                              ) : (
+                                                <Mic
+                                                  size={11}
+                                                  className="text-emerald-500 animate-pulse-subtle"
+                                                  title="Microphone Active"
+                                                />
+                                              ))}
+                                          </div>
+                                          <span className="text-[9px] opacity-60">
+                                            {p.elo || 1450} ELO
+                                          </span>
+                                        </div>
+                                      </div>
+
+                                      <div className="flex items-center gap-2">
+                                        {room.isGameStarted ? (
+                                          <div className="flex gap-0.5">
+                                            {Array(3)
+                                              .fill(null)
+                                              .map((_, i) => (
+                                                <div
+                                                  key={i}
+                                                  className={`w-2 h-2 rounded-full ${i < maxStrikes - p.strikes
+                                                    ? "bg-rose-500"
+                                                    : "border border-dashed border-border-custom opacity-40"
+                                                    }`}
+                                                />
+                                              ))}
+                                          </div>
+                                        ) : (
+                                          <>
+                                            {isHost && !isMe && (
+                                              <button
+                                                onClick={() => kickPlayer(p.id)}
+                                                className="px-2 py-0.5 bg-rose-500/10 hover:bg-rose-500 hover:text-white border border-rose-500/30 text-rose-500 text-[9px] font-bold rounded-lg transition-all active:scale-95 mr-1"
+                                                title="Kick Player"
+                                              >
+                                                Kick
+                                              </button>
+                                            )}
+                                            <span
+                                              className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${p.isReady
+                                                ? "bg-emerald-500/20 text-emerald-500 border border-emerald-500/30"
+                                                : "bg-accent-glow border border-border-custom text-text-custom opacity-60"
+                                                }`}
+                                            >
+                                              {p.isReady ? "READY" : "WAITING"}
+                                            </span>
+                                          </>
+                                        )}
+                                      </div>
+                                    </div>
+
+                                    {/* Live completion progress */}
+                                    {room.isGameStarted && (
+                                      <>
+                                        <div className="flex items-center justify-between text-[10px] mb-1 font-semibold opacity-85">
+                                          <span>Board Progress</span>
+                                          <span>
+                                            {isMe ? myProgress : p.progress}%
+                                          </span>
+                                        </div>
+                                        <div className="w-full bg-accent-glow/50 h-1.5 rounded-full overflow-hidden">
+                                          <div
+                                            className="bg-accent-custom h-full rounded-full transition-all duration-300"
+                                            style={{
+                                              width: `${isMe ? myProgress : p.progress}%`,
+                                            }}
+                                          />
+                                        </div>
+                                      </>
+                                    )}
+                                  </div>
+                                );
+                              })}
+
+                              {/* Spectators display */}
+                              {spectators.length > 0 && (
+                                <div className="pt-2 border-t border-border-custom/50 space-y-1">
+                                  <span className="text-[10px] uppercase font-bold opacity-45 tracking-wider flex items-center gap-1">
+                                    <Tv size={11} /> Spectators ({spectators.length}
+                                    )
+                                  </span>
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {spectators.map((s) => (
+                                      <span
+                                        key={s.id}
+                                        className="text-[9px] font-semibold bg-accent-glow/50 border border-border-custom px-2 py-0.5 rounded-md"
+                                      >
+                                        {s.name}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Voice Channel Panel */}
+                          <div className="border border-border-custom/50 rounded-xl p-3 bg-accent-glow/5 space-y-2 mt-2 mb-4">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-1.5">
+                                <Mic
+                                  size={14}
+                                  className={
+                                    isVoiceJoined
+                                      ? "text-emerald-500 animate-pulse"
+                                      : "opacity-60"
+                                  }
+                                />
+                                <span className="text-xs font-bold uppercase tracking-wider">
+                                  Voice Channel
+                                </span>
+                              </div>
+                              <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border border-border-custom ${voiceConnectionState === 'connected'
+                                ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
+                                : voiceConnectionState === 'connecting'
+                                  ? "bg-amber-500/10 border-amber-500/20 text-amber-400 animate-pulse"
+                                  : voiceConnectionState === 'failed'
+                                    ? "bg-rose-500/10 border-rose-500/20 text-rose-400"
+                                    : "bg-accent-glow border-border-custom text-text-custom opacity-70"
+                                }`}>
+                                {voiceConnectionState === 'connected'
+                                  ? "Connected"
+                                  : voiceConnectionState === 'connecting'
+                                    ? "Connecting..."
+                                    : voiceConnectionState === 'failed'
+                                      ? "Connection Failed"
+                                      : "Disconnected"}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-2 pt-1">
+                              {!isVoiceJoined ? (
+                                <button
+                                  onClick={joinVoice}
+                                  className="flex-1 py-2 bg-accent-glow hover:bg-accent-custom hover:text-white border border-border-custom hover:border-accent-custom text-text-custom font-bold text-xs rounded-xl active:scale-95 transition-all flex items-center justify-center gap-1.5"
+                                >
+                                  <Mic size={12} />
+                                  Join Voice Chat
+                                </button>
+                              ) : (
+                                <>
+                                  <button
+                                    onClick={toggleMicMute}
+                                    className={`flex-1 py-2 font-bold text-xs rounded-xl active:scale-95 transition-all flex items-center justify-center gap-1.5 border ${isMicMuted
+                                      ? "bg-rose-500/10 border-rose-500/30 text-rose-500 hover:bg-rose-500 hover:text-white"
+                                      : "bg-emerald-500/10 border-emerald-500/30 text-emerald-500 hover:bg-emerald-500 hover:text-white"
+                                      }`}
+                                  >
+                                    {isMicMuted ? (
+                                      <>
+                                        <MicOff size={12} />
+                                        Unmute Mic
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Mic size={12} />
+                                        Mute Mic
+                                      </>
+                                    )}
+                                  </button>
+                                  <button
+                                    onClick={leaveVoice}
+                                    className="px-4 py-2 border border-border-custom hover:border-red-400 hover:text-red-500 font-bold text-xs rounded-xl active:scale-95 transition-all"
+                                  >
+                                    Leave
+                                  </button>
+                                </>
+                              )}
+                            </div>
+
+                            {/* Collapsible WebRTC Diagnostics Panel - commented out as requested
+                            <div className="mt-2 border-t border-border-custom/30 pt-2">
+                              <details className="group" open>
+                                <summary className="text-[10px] text-text-custom/60 group-open:text-accent-custom font-bold cursor-pointer select-none flex items-center justify-between hover:text-text-custom transition-all">
+                                  <span>WebRTC Diagnostics Console</span>
+                                  <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                                    <button
+                                      onClick={(e) => {
+                                        e.preventDefault();
+                                        navigator.clipboard.writeText(voiceDebugLogs.join('\n'));
+                                        addToast('Diagnostics logs copied to clipboard!', 'success');
+                                      }}
+                                      className="text-[8px] font-bold px-1.5 py-0.5 bg-accent-glow hover:bg-accent-custom hover:text-white border border-border-custom rounded-md active:scale-95 transition-all cursor-pointer"
+                                    >
+                                      Copy Logs
+                                    </button>
+                                    <span className="text-[8px] opacity-75 group-open:rotate-180 transition-transform">▼</span>
+                                  </div>
+                                </summary>
+                                <div className="mt-1.5 p-2 bg-slate-950/80 rounded-lg max-h-32 overflow-y-auto font-mono text-[9px] text-indigo-200/90 border border-border-custom/25 space-y-1 scrollbar-thin">
+                                  {voiceDebugLogs.length === 0 ? (
+                                    <div className="text-text-custom/40 italic text-center py-1">No logs recorded yet.</div>
+                                  ) : (
+                                    voiceDebugLogs.map((log, index) => (
+                                      <div key={index} className="leading-normal border-b border-border-custom/5 pb-0.5 last:border-0 last:pb-0 break-all select-all">
+                                        {log}
+                                      </div>
+                                    ))
+                                  )}
+                                </div>
+                              </details>
+                            </div>
+                            */}
+                          </div>
+
+                          {/* READY UP ACTION BUTTON */}
+                          {!room.isGameStarted && (
+                            <div className="flex flex-col gap-2 pt-2">
+                              <div className="flex gap-2">
+                                {activePlayers.length > 1 && (
+                                  <button
+                                    onClick={toggleReady}
+                                    className={`flex-1 py-3 rounded-xl font-bold text-sm shadow-md transition-all active:scale-[0.98] ${myStatusInRoom?.isReady
+                                      ? "bg-amber-600 hover:bg-amber-500 text-white"
+                                      : "bg-accent-custom hover:bg-accent-hover text-white"
+                                      }`}
+                                  >
+                                    {myStatusInRoom?.isReady
+                                      ? "Unready Lobby"
+                                      : "Ready to Start"}
+                                  </button>
+                                )}
+
+                                {isHost && (
+                                  <button
+                                    onClick={startGame}
+                                    disabled={!allPlayersReady}
+                                    className={`${activePlayers.length === 1 ? "w-full" : "px-6"} py-3 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold rounded-xl text-sm transition-all active:scale-[0.98]`}
+                                    title="Start Match"
+                                  >
+                                    Start Game
+                                  </button>
+                                )}
+                              </div>
+                              <button
+                                onClick={() => exitToHome(() => setActiveView("home"))}
+                                className="w-full py-2.5 bg-slate-800 hover:bg-slate-700/80 border border-slate-700/50 text-slate-300 font-bold rounded-xl text-xs transition-all active:scale-[0.98] mt-1"
+                              >
+                                {isHost ? "Dismiss Room" : "Leave Room"}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* TAB CONTENT: Matchmaker Queue */}
+                  {activeTab === "matchmaker" && (
+                    <div className="space-y-4 py-2 animate-fade-in">
+                      {matchmakingStatus === "searching" ? (
+                        // Search queue actively running
+                        <div className="text-center space-y-4 py-4">
+                          <div className="relative w-16 h-16 mx-auto flex items-center justify-center">
+                            <div className="absolute inset-0 rounded-full border-4 border-accent-custom/20 border-t-accent-custom animate-spin" />
+                            <Search
+                              size={22}
+                              className="text-accent-custom animate-pulse"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <h3 className="text-sm font-bold text-accent-custom">
+                              Searching for Match...
+                            </h3>
+                            <p className="text-xs opacity-60">
+                              Elapsed time: {searchTimer}s
+                            </p>
+                            <p className="text-[10px] text-accent-custom uppercase font-semibold tracking-wider">
+                              Matching ELO range ±{searchTimer * 25}
+                            </p>
+                          </div>
+
                           <button
-                            onClick={startGame}
-                            className="w-full py-3 rounded-xl bg-accent-glow hover:bg-accent-glow/70 border border-border-custom text-text-custom font-bold text-xs active:scale-[0.98] transition-all flex items-center justify-center gap-2 mt-2"
+                            onClick={cancelMatchmaking}
+                            className="px-5 py-2 border border-border-custom hover:border-red-400 hover:text-red-500 text-xs font-bold rounded-xl active:scale-95 transition-all"
                           >
-                            <RefreshCw size={14} />
-                            Force Reset Board
+                            Cancel Queue
                           </button>
-                        )
+                        </div>
+                      ) : matchmakingStatus === "matched" ? (
+                        // Player matched display
+                        <div className="text-center space-y-4 py-4 animate-scale-in">
+                          <div className="w-16 h-16 rounded-full bg-emerald-500/20 text-emerald-500 mx-auto flex items-center justify-center">
+                            <Trophy size={28} />
+                          </div>
+                          <div className="space-y-1">
+                            <h3 className="text-sm font-bold text-emerald-500">
+                              Opponent Found!
+                            </h3>
+                            <p className="text-xs font-extrabold">
+                              {matchOpponent?.name}
+                            </p>
+                            <p className="text-[10px] opacity-60">
+                              {matchOpponent?.elo} ELO ({rank})
+                            </p>
+                          </div>
+                          <div className="text-[10px] text-accent-custom uppercase font-bold animate-pulse">
+                            Generating shared board seed...
+                          </div>
+                        </div>
+                      ) : (
+                        // Normal queue status
+                        <div className="space-y-4">
+                          <div className="text-center space-y-2">
+                            <div className="w-12 h-12 rounded-full bg-accent-glow text-accent-custom mx-auto flex items-center justify-center">
+                              <Trophy size={24} />
+                            </div>
+                            <h3 className="text-sm font-bold">
+                              Queue ELO Competitive
+                            </h3>
+                            <p className="text-xs opacity-70 max-w-[280px] mx-auto">
+                              Search for players worldwide matching your skill (
+                              {elo} ELO ±50) for intense competitive Sudoku.
+                            </p>
+                          </div>
+
+                          <div className="border border-border-custom p-3 rounded-xl bg-accent-glow/10 flex items-center justify-between">
+                            <span className="text-xs font-semibold opacity-70">
+                              Matchmaking Rating:
+                            </span>
+                            <span className="text-xs font-bold text-accent-custom">
+                              Ranked ({rank})
+                            </span>
+                          </div>
+
+                          <button
+                            onClick={() => startMatchmaking(difficulty)}
+                            className="w-full py-3 rounded-xl bg-accent-custom hover:bg-accent-hover text-white font-bold text-sm shadow-md active:scale-[0.98] transition-all flex items-center justify-center gap-1.5"
+                            disabled={!isConnected}
+                          >
+                            <PlayIcon size={14} fill="white" />
+                            Join Match Queue
+                          </button>
+                        </div>
                       )}
                     </div>
                   )}
                 </div>
-              )}
 
-              {/* TAB CONTENT: Matchmaker Queue */}
-              {activeTab === "matchmaker" && (
-                <div className="space-y-4 py-2 animate-fade-in">
-                  {matchmakingStatus === "searching" ? (
-                    // Search queue actively running
-                    <div className="text-center space-y-4 py-4">
-                      <div className="relative w-16 h-16 mx-auto flex items-center justify-center">
-                        <div className="absolute inset-0 rounded-full border-4 border-accent-custom/20 border-t-accent-custom animate-spin" />
-                        <Search
-                          size={22}
-                          className="text-accent-custom animate-pulse"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <h3 className="text-sm font-bold text-accent-custom">
-                          Searching for Match...
-                        </h3>
-                        <p className="text-xs opacity-60">
-                          Elapsed time: {searchTimer}s
-                        </p>
-                        <p className="text-[10px] text-accent-custom uppercase font-semibold tracking-wider">
-                          Matching ELO range ±{searchTimer * 25}
-                        </p>
-                      </div>
+                {/* Social Friends Sidebar Panel */}
+                <div className="glass-card rounded-2xl p-5">
+                  <h3 className="text-xs uppercase font-bold opacity-50 tracking-wider mb-3 flex items-center gap-1.5">
+                    <UserPlus size={13} />
+                    Friends List & Status
+                  </h3>
 
-                      <button
-                        onClick={cancelMatchmaking}
-                        className="px-5 py-2 border border-border-custom hover:border-red-400 hover:text-red-500 text-xs font-bold rounded-xl active:scale-95 transition-all"
-                      >
-                        Cancel Queue
-                      </button>
-                    </div>
-                  ) : matchmakingStatus === "matched" ? (
-                    // Player matched display
-                    <div className="text-center space-y-4 py-4 animate-scale-in">
-                      <div className="w-16 h-16 rounded-full bg-emerald-500/20 text-emerald-500 mx-auto flex items-center justify-center">
-                        <Trophy size={28} />
-                      </div>
-                      <div className="space-y-1">
-                        <h3 className="text-sm font-bold text-emerald-500">
-                          Opponent Found!
-                        </h3>
-                        <p className="text-xs font-extrabold">
-                          {matchOpponent?.name}
-                        </p>
-                        <p className="text-[10px] opacity-60">
-                          {matchOpponent?.elo} ELO ({rank})
-                        </p>
-                      </div>
-                      <div className="text-[10px] text-accent-custom uppercase font-bold animate-pulse">
-                        Generating shared board seed...
-                      </div>
-                    </div>
-                  ) : (
-                    // Normal queue status
-                    <div className="space-y-4">
-                      <div className="text-center space-y-2">
-                        <div className="w-12 h-12 rounded-full bg-accent-glow text-accent-custom mx-auto flex items-center justify-center">
-                          <Trophy size={24} />
-                        </div>
-                        <h3 className="text-sm font-bold">
-                          Queue ELO Competitive
-                        </h3>
-                        <p className="text-xs opacity-70 max-w-[280px] mx-auto">
-                          Search for players worldwide matching your skill (
-                          {elo} ELO ±50) for intense competitive Sudoku.
-                        </p>
-                      </div>
+                  {/* Friend requests search input */}
+                  <form
+                    onSubmit={handleAddFriendSubmit}
+                    className="flex gap-1.5 mb-4 w-full min-w-0"
+                  >
+                    <input
+                      type="text"
+                      placeholder="Friend Username"
+                      value={friendNameInput}
+                      onChange={(e) => setFriendNameInput(e.target.value)}
+                      className="flex-1 min-w-0 px-2.5 py-1.5 bg-accent-glow border border-border-custom rounded-lg text-xs focus:outline-none focus:border-accent-custom"
+                    />
+                    <button
+                      type="submit"
+                      className="shrink-0 px-3 bg-accent-custom hover:bg-accent-hover text-white font-bold rounded-lg text-[10px] active:scale-95 transition-all"
+                    >
+                      Add
+                    </button>
+                  </form>
 
-                      <div className="border border-border-custom p-3 rounded-xl bg-accent-glow/10 flex items-center justify-between">
-                        <span className="text-xs font-semibold opacity-70">
-                          Matchmaking Rating:
-                        </span>
-                        <span className="text-xs font-bold text-accent-custom">
-                          Ranked ({rank})
-                        </span>
+                  {/* Pending Friend Requests */}
+                  {friendRequests.length > 0 && (
+                    <div className="mb-4 bg-accent-glow/10 border border-border-custom/50 rounded-xl p-3 space-y-2">
+                      <h4 className="text-[9px] uppercase font-bold opacity-50 tracking-wider flex items-center gap-1">
+                        <UserPlus size={10} /> Pending Requests (
+                        {friendRequests.length})
+                      </h4>
+                      <div className="space-y-2">
+                        {friendRequests.map((req) => (
+                          <div
+                            key={req.id}
+                            className="flex items-center gap-2 text-xs"
+                          >
+                            <div className="w-6 h-6 rounded-full bg-accent-glow border border-border-custom flex items-center justify-center font-bold text-[9px]">
+                              {req.name?.charAt(0)?.toUpperCase() || "F"}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="font-bold truncate leading-tight text-[11px]">
+                                {req.name}
+                              </p>
+                              <p className="text-[8px] opacity-50">{req.elo} ELO</p>
+                            </div>
+                            <div className="flex gap-0.5">
+                              <button
+                                onClick={() => acceptFriendRequest(req.id)}
+                                className="w-5 h-5 rounded-md bg-emerald-500/20 text-emerald-500 hover:bg-emerald-500 hover:text-white transition-all flex items-center justify-center cursor-pointer"
+                                title="Accept"
+                              >
+                                <Check size={10} />
+                              </button>
+                              <button
+                                onClick={() => declineFriendRequest(req.id)}
+                                className="w-5 h-5 rounded-md bg-rose-500/20 text-rose-500 hover:bg-rose-500 hover:text-white transition-all flex items-center justify-center cursor-pointer"
+                                title="Decline"
+                              >
+                                <X size={10} />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
                       </div>
-
-                      <button
-                        onClick={() => startMatchmaking(difficulty)}
-                        className="w-full py-3 rounded-xl bg-accent-custom hover:bg-accent-hover text-white font-bold text-sm shadow-md active:scale-[0.98] transition-all flex items-center justify-center gap-1.5"
-                        disabled={!isConnected}
-                      >
-                        <PlayIcon size={14} fill="white" />
-                        Join Match Queue
-                      </button>
                     </div>
                   )}
-                </div>
-              )}
-            </div>
 
-            {/* Social Friends Sidebar Panel */}
-            <div className="glass-card rounded-2xl p-5">
-              <h3 className="text-xs uppercase font-bold opacity-50 tracking-wider mb-3 flex items-center gap-1.5">
-                <UserPlus size={13} />
-                Friends List & Status
-              </h3>
-
-              {/* Friend requests search input */}
-              <form
-                onSubmit={handleAddFriendSubmit}
-                className="flex gap-1.5 mb-4 w-full min-w-0"
-              >
-                <input
-                  type="text"
-                  placeholder="Friend Username"
-                  value={friendNameInput}
-                  onChange={(e) => setFriendNameInput(e.target.value)}
-                  className="flex-1 min-w-0 px-2.5 py-1.5 bg-accent-glow border border-border-custom rounded-lg text-xs focus:outline-none focus:border-accent-custom"
-                />
-                <button
-                  type="submit"
-                  className="shrink-0 px-3 bg-accent-custom hover:bg-accent-hover text-white font-bold rounded-lg text-[10px] active:scale-95 transition-all"
-                >
-                  Add
-                </button>
-              </form>
-
-              {/* Pending Friend Requests */}
-              {friendRequests.length > 0 && (
-                <div className="mb-4 bg-accent-glow/10 border border-border-custom/50 rounded-xl p-3 space-y-2">
-                  <h4 className="text-[9px] uppercase font-bold opacity-50 tracking-wider flex items-center gap-1">
-                    <UserPlus size={10} /> Pending Requests (
-                    {friendRequests.length})
-                  </h4>
-                  <div className="space-y-2">
-                    {friendRequests.map((req) => (
+                  {/* Friends lists mapping */}
+                  <div className="space-y-2.5 max-h-[160px] overflow-y-auto pr-1">
+                    {friends.map((f) => (
                       <div
-                        key={req.id}
-                        className="flex items-center gap-2 text-xs"
+                        key={f.id}
+                        className="flex items-center justify-between text-xs border-b border-border-custom/30 pb-2 last:border-0 last:pb-0"
                       >
-                        <div className="w-6 h-6 rounded-full bg-accent-glow border border-border-custom flex items-center justify-center font-bold text-[9px]">
-                          {req.name?.charAt(0)?.toUpperCase() || "F"}
+                        <div className="flex items-center gap-2">
+                          <div
+                            className={`w-2 h-2 rounded-full ${f.status === "online"
+                              ? "bg-emerald-500 animate-pulse"
+                              : f.status === "in-game"
+                                ? "bg-amber-500 animate-pulse"
+                                : "bg-slate-300 dark:bg-slate-700"
+                              }`}
+                          />
+                          <div>
+                            <p className="font-bold leading-tight">{f.name}</p>
+                            <span className="text-[9px] opacity-60">
+                              {f.elo} ELO
+                            </span>
+                          </div>
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="font-bold truncate leading-tight text-[11px]">
-                            {req.name}
-                          </p>
-                          <p className="text-[8px] opacity-50">{req.elo} ELO</p>
-                        </div>
-                        <div className="flex gap-0.5">
+
+                        {room ? (
                           <button
-                            onClick={() => acceptFriendRequest(req.id)}
-                            className="w-5 h-5 rounded-md bg-emerald-500/20 text-emerald-500 hover:bg-emerald-500 hover:text-white transition-all flex items-center justify-center cursor-pointer"
-                            title="Accept"
+                            onClick={() => inviteFriend(f.id)}
+                            disabled={f.status !== "online"}
+                            className={`px-2 py-1 border transition-all rounded-md text-[9px] font-bold ${f.status === "online"
+                              ? "bg-accent-glow border-border-custom hover:border-accent-custom hover:text-accent-custom active:scale-95 cursor-pointer"
+                              : "bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700 cursor-not-allowed opacity-50"
+                              }`}
+                            title={
+                              f.status !== "online"
+                                ? `Friend must be online (currently: ${f.status})`
+                                : "Invite to Room"
+                            }
                           >
-                            <Check size={10} />
+                            Invite
                           </button>
-                          <button
-                            onClick={() => declineFriendRequest(req.id)}
-                            className="w-5 h-5 rounded-md bg-rose-500/20 text-rose-500 hover:bg-rose-500 hover:text-white transition-all flex items-center justify-center cursor-pointer"
-                            title="Decline"
-                          >
-                            <X size={10} />
-                          </button>
-                        </div>
+                        ) : (
+                          <span className="text-[9px] uppercase font-bold opacity-45 px-1">
+                            {f.status}
+                          </span>
+                        )}
                       </div>
                     ))}
                   </div>
                 </div>
-              )}
-
-              {/* Friends lists mapping */}
-              <div className="space-y-2.5 max-h-[160px] overflow-y-auto pr-1">
-                {friends.map((f) => (
-                  <div
-                    key={f.id}
-                    className="flex items-center justify-between text-xs border-b border-border-custom/30 pb-2 last:border-0 last:pb-0"
-                  >
-                    <div className="flex items-center gap-2">
-                      <div
-                        className={`w-2 h-2 rounded-full ${
-                          f.status === "online"
-                            ? "bg-emerald-500 animate-pulse"
-                            : f.status === "in-game"
-                              ? "bg-amber-500 animate-pulse"
-                              : "bg-slate-300 dark:bg-slate-700"
-                        }`}
-                      />
-                      <div>
-                        <p className="font-bold leading-tight">{f.name}</p>
-                        <span className="text-[9px] opacity-60">
-                          {f.elo} ELO
-                        </span>
-                      </div>
-                    </div>
-
-                    {room ? (
-                      <button
-                        onClick={() => inviteFriend(f.id)}
-                        disabled={f.status !== "online"}
-                        className={`px-2 py-1 border transition-all rounded-md text-[9px] font-bold ${
-                          f.status === "online"
-                            ? "bg-accent-glow border-border-custom hover:border-accent-custom hover:text-accent-custom active:scale-95 cursor-pointer"
-                            : "bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700 cursor-not-allowed opacity-50"
-                        }`}
-                        title={
-                          f.status !== "online"
-                            ? `Friend must be online (currently: ${f.status})`
-                            : "Invite to Room"
-                        }
-                      >
-                        Invite
-                      </button>
-                    ) : (
-                      <span className="text-[9px] uppercase font-bold opacity-45 px-1">
-                        {f.status}
-                      </span>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          </section>
-        </main>
+              </section>
+            )}
+          </main>
         )
       )}
 
@@ -3254,7 +3377,7 @@ export default function App() {
               )}
             </div>
 
-            {room && activeOpponent && (
+            {room && activeOpponent && activeOpponent.progress < 100 && activeOpponent.strikes < 3 && (
               <button
                 onClick={() => {
                   startSpectating(activeOpponent.id);
@@ -3269,7 +3392,7 @@ export default function App() {
               </button>
             )}
 
-            {room && (
+            {isMultiplayer && bothFinished && (
               <button
                 onClick={() => {
                   votePlayAgain(true);
@@ -3284,11 +3407,31 @@ export default function App() {
               </button>
             )}
 
+            {(!room || room.players.filter(p => !p.isSpectator).length <= 1) && (
+              <button
+                onClick={() => {
+                  if (room) {
+                    exitToHome(() => startNewGame(difficulty));
+                  } else {
+                    startNewGame(difficulty);
+                  }
+                }}
+                className="w-full py-3 bg-accent-glow hover:bg-accent-glow/70 border border-border-custom text-text-custom font-bold rounded-xl active:scale-[0.98] transition-all flex items-center justify-center gap-1.5"
+              >
+                <RefreshCw size={15} /> Play Again
+              </button>
+            )}
+
             <button
-              onClick={() => startNewGame(difficulty)}
-              className="w-full py-3 bg-accent-glow hover:bg-accent-glow/70 border border-border-custom text-text-custom font-bold rounded-xl active:scale-[0.98] transition-all flex items-center justify-center gap-1.5"
+              onClick={() => {
+                exitToHome(() => {
+                  setActiveView("home");
+                  setSeconds(0);
+                });
+              }}
+              className="w-full py-3 bg-rose-500/10 border border-rose-500/30 hover:bg-rose-500 hover:text-white text-rose-500 font-bold rounded-xl active:scale-[0.98] transition-all flex items-center justify-center gap-1.5"
             >
-              <RefreshCw size={15} /> Solo Play Again
+              Exit Room
             </button>
           </div>
         </div>
@@ -3378,7 +3521,7 @@ export default function App() {
               )}
             </div>
 
-            {room && activeOpponent && (
+            {isMultiplayer && activeOpponent && activeOpponent.progress < 100 && activeOpponent.strikes < 3 && (
               <button
                 onClick={() => {
                   startSpectating(activeOpponent.id);
@@ -3393,7 +3536,14 @@ export default function App() {
               </button>
             )}
 
-            {room && (
+            <button
+              onClick={startLocalPractice}
+              className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl active:scale-[0.98] transition-all flex items-center justify-center gap-1.5 shadow-md shadow-indigo-500/20"
+            >
+              ✏️ Keep Solving (Practice Mode)
+            </button>
+
+            {isMultiplayer && bothFinished && (
               <button
                 onClick={() => {
                   votePlayAgain(true);
@@ -3408,11 +3558,85 @@ export default function App() {
               </button>
             )}
 
+            {(!room || room.players.filter(p => !p.isSpectator).length <= 1) && (
+              <button
+                onClick={() => {
+                  if (room) {
+                    exitToHome(() => startNewGame(difficulty));
+                  } else {
+                    startNewGame(difficulty);
+                  }
+                }}
+                className="w-full py-3 bg-accent-glow hover:bg-accent-glow/70 border border-border-custom text-text-custom font-bold rounded-xl active:scale-[0.98] transition-all flex items-center justify-center gap-1.5"
+              >
+                <RefreshCw size={15} /> Play Again
+              </button>
+            )}
+
+            <button
+              onClick={() => {
+                exitToHome(() => {
+                  setActiveView("home");
+                  setSeconds(0);
+                });
+              }}
+              className="w-full py-3 bg-rose-500/10 border border-rose-500/30 hover:bg-rose-500 hover:text-white text-rose-500 font-bold rounded-xl active:scale-[0.98] transition-all flex items-center justify-center gap-1.5"
+            >
+              Exit Room
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* PRACTICE COMPLETE DIALOG OVERLAY */}
+      {gameStatus === "practice-completed" && (
+        <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4 z-50 overflow-y-auto animate-fade-in py-10">
+          <div className="glass-card rounded-3xl p-6 md:p-8 max-w-md w-full text-center space-y-5 border-2 border-emerald-500/30 animate-scale-in my-auto">
+            <div className="w-16 h-16 rounded-2xl bg-emerald-500/20 text-emerald-500 mx-auto flex items-center justify-center shadow-lg">
+              <Trophy size={36} className="animate-bounce" />
+            </div>
+
+            <div className="space-y-1">
+              <h2 className="text-2xl font-extrabold tracking-tight text-emerald-500">
+                Practice Complete!
+              </h2>
+              <p className="text-sm opacity-70">
+                Great job! You successfully finished solving the board.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 bg-accent-glow/10 border border-border-custom/50 rounded-2xl p-4 text-xs font-semibold">
+              <div className="text-left">
+                <span className="opacity-60 block">Solve Time:</span>
+                <span className="text-base font-bold text-accent-custom">
+                  {formatTime(seconds)}
+                </span>
+              </div>
+              <div className="text-left border-l border-border-custom pl-3">
+                <span className="opacity-60 block">Difficulty:</span>
+                <span className="text-base font-bold text-accent-custom capitalize">
+                  {difficulty}
+                </span>
+              </div>
+            </div>
+
             <button
               onClick={() => startNewGame(difficulty)}
-              className="w-full py-3 bg-accent-glow hover:bg-accent-glow/70 border border-border-custom text-text-custom font-bold rounded-xl active:scale-[0.98] transition-all flex items-center justify-center gap-1.5"
+              className="w-full py-3 bg-accent-custom hover:bg-accent-hover text-white font-bold rounded-xl active:scale-[0.98] transition-all flex items-center justify-center gap-1.5 shadow-md shadow-accent-custom/20"
             >
-              <RefreshCw size={15} /> Solo Try Again
+              <RefreshCw size={15} /> Play Again
+            </button>
+
+            <button
+              onClick={() => {
+                exitToHome(() => {
+                  setActiveView("home");
+                  setSeconds(0);
+                });
+              }}
+              className="w-full py-3 bg-rose-500/10 border border-rose-500/30 hover:bg-rose-500 hover:text-white text-rose-500 font-bold rounded-xl active:scale-[0.98] transition-all flex items-center justify-center gap-1.5"
+            >
+              Exit to Home
             </button>
           </div>
         </div>
@@ -3490,6 +3714,102 @@ export default function App() {
         style={{ position: 'absolute', opacity: 0, width: '1px', height: '1px', pointerEvents: 'none' }}
       />
 
+      {/* USER PREFERENCES SETTINGS MODAL */}
+      {showSettingsModal && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="glass-card rounded-2xl p-6 max-w-sm w-full space-y-5 animate-scale-in relative border border-border-custom/40 text-text-custom">
+            {/* Close Button */}
+            <button
+              onClick={() => setShowSettingsModal(false)}
+              className="absolute top-4 right-4 text-text-custom/60 hover:text-text-custom hover:bg-accent-glow p-1.5 rounded-lg active:scale-95 transition-all cursor-pointer animate-scale-in"
+            >
+              <X size={16} />
+            </button>
+
+            <div className="text-center space-y-1 mb-2">
+              <h3 className="text-sm font-bold text-accent-custom uppercase tracking-wider">
+                ⚙️ Player Settings
+              </h3>
+              <p className="text-[10px] opacity-60">
+                Customize your gameplay preferences
+              </p>
+            </div>
+
+            <div className="space-y-4">
+              {/* Keypad Layout Setting */}
+              <div className="space-y-2 text-left">
+                <label className="text-[10px] uppercase font-bold opacity-80 tracking-wider">
+                  Keypad Layout
+                </label>
+                <div className="grid grid-cols-2 gap-2 bg-accent-glow/20 rounded-xl p-1 border border-border-custom/30">
+                  <button
+                    onClick={() => handleKeypadLayoutChange("single-row")}
+                    className={`py-1.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${keypadLayout === "single-row"
+                      ? "bg-accent-custom text-white shadow-sm font-sans"
+                      : "opacity-75 hover:opacity-100 font-sans"
+                      }`}
+                  >
+                    Single Row
+                  </button>
+                  <button
+                    onClick={() => handleKeypadLayoutChange("two-rows")}
+                    className={`py-1.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${keypadLayout === "two-rows"
+                      ? "bg-accent-custom text-white shadow-sm font-sans"
+                      : "opacity-75 hover:opacity-100 font-sans"
+                      }`}
+                  >
+                    Two Rows
+                  </button>
+                </div>
+              </div>
+
+              {/* Mana Features Visibility Setting */}
+              <div className="flex items-center justify-between py-2 border-t border-b border-border-custom/20 text-left">
+                <div className="flex flex-col text-left">
+                  <span className="text-[10px] uppercase font-bold opacity-80 tracking-wider">
+                    Enable Mana Options
+                  </span>
+                  <span className="text-[8px] opacity-60">
+                    Show abilities configuration when creating private rooms
+                  </span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={showManaOptionSetting}
+                  onChange={(e) => handleShowManaSettingChange(e.target.checked)}
+                  className="w-4 h-4 rounded border-border-custom text-accent-custom bg-accent-glow/20 focus:ring-accent-custom focus:ring-offset-0 cursor-pointer animate-scale-in"
+                />
+              </div>
+
+              {/* Audio preference */}
+              <div className="flex items-center justify-between py-2 border-b border-border-custom/20 text-left">
+                <div className="flex flex-col text-left">
+                  <span className="text-[10px] uppercase font-bold opacity-80 tracking-wider">
+                    Sound Effects
+                  </span>
+                  <span className="text-[8px] opacity-60">
+                    Enable chiptune game sounds during match
+                  </span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={soundEnabled}
+                  onChange={(e) => setSoundEnabled(e.target.checked)}
+                  className="w-4 h-4 rounded border-border-custom text-accent-custom bg-accent-glow/20 focus:ring-accent-custom focus:ring-offset-0 cursor-pointer animate-scale-in"
+                />
+              </div>
+            </div>
+
+            <button
+              onClick={() => setShowSettingsModal(false)}
+              className="w-full py-2.5 bg-accent-custom hover:bg-accent-hover text-white font-bold rounded-xl text-xs active:scale-95 transition-all cursor-pointer font-sans"
+            >
+              Save & Close
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* NON-BLOCKING VOICE PROMPT POPUP */}
       {voicePromptActive && (
         <div className="fixed bottom-24 left-4 right-4 sm:left-auto sm:right-4 sm:w-80 bg-slate-900 border border-indigo-500/30 text-white p-4 rounded-xl shadow-2xl flex flex-col gap-2 z-50 animate-scale-in">
@@ -3499,7 +3819,7 @@ export default function App() {
           </div>
           <p className="text-[11px] opacity-75">Connect with your opponent for real-time talk and strategy.</p>
           <div className="flex gap-2 justify-end mt-1">
-            <button 
+            <button
               onClick={() => {
                 useLobbyStore.setState({ voicePromptActive: null });
               }}
@@ -3507,7 +3827,7 @@ export default function App() {
             >
               Dismiss
             </button>
-            <button 
+            <button
               onClick={() => {
                 joinVoice();
                 useLobbyStore.setState({ voicePromptActive: null });
@@ -3516,6 +3836,61 @@ export default function App() {
             >
               Join Voice
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ACCOUNT CONFLICT RESOLUTION MODAL OVERLAY */}
+      {conflictProfile && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="glass-card rounded-2xl p-6 max-w-sm w-full space-y-5 animate-scale-in border border-border-custom/40 text-text-custom relative">
+            <div className="text-center space-y-2">
+              <AlertTriangle className="mx-auto text-amber-500 w-12 h-12 animate-pulse mb-2" />
+              <h3 className="text-sm font-bold text-accent-custom uppercase tracking-wider">
+                Account Conflict
+              </h3>
+              <p className="text-[11px] opacity-75 leading-relaxed">
+                This Google account is already linked to an existing profile in our database.
+              </p>
+            </div>
+
+            <div className="bg-panel-custom/50 border border-border-custom/30 rounded-xl p-4 space-y-3 text-left">
+              <span className="text-[9px] uppercase font-bold tracking-wider opacity-60 block">
+                Cloud Profile Details
+              </span>
+              <div className="flex items-center justify-between border-b border-border-custom/20 pb-2">
+                <span className="text-xs opacity-75 font-semibold">Username</span>
+                <span className="text-xs font-bold text-accent-custom">
+                  {conflictProfile.display_name}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs opacity-75 font-semibold">ELO Rating</span>
+                <span className="text-xs font-bold flex items-center gap-1.5 text-text-custom">
+                  <Trophy size={14} className="text-amber-500" />
+                  {conflictProfile.elo}
+                </span>
+              </div>
+            </div>
+
+            <div className="text-[11px] opacity-60 leading-relaxed text-center">
+              Switching will discard your current guest progress. Choosing cancel will sign you out of Google and keep your guest session.
+            </div>
+
+            <div className="space-y-2 pt-2">
+              <button
+                onClick={() => resolveConflict(true)}
+                className="w-full py-2.5 bg-accent-custom hover:bg-accent-hover text-white font-bold rounded-xl text-xs active:scale-95 transition-all cursor-pointer font-sans"
+              >
+                Switch to Google Profile
+              </button>
+              <button
+                onClick={() => resolveConflict(false)}
+                className="w-full py-2.5 bg-transparent hover:bg-panel-custom border border-border-custom text-text-custom/80 hover:text-text-custom font-bold rounded-xl text-xs active:scale-95 transition-all cursor-pointer font-sans"
+              >
+                Keep Guest Session / Cancel
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -236,7 +236,7 @@ export const useSocialStore = create((set, get) => ({
         if (lobbyStore.ws && lobbyStore.isConnected && lobbyStore.ws.readyState === 1) {
           lobbyStore.ws.send(JSON.stringify({
             type: 'SEND_FRIEND_REQUEST',
-            payload: { senderId: user.id, targetName: trimmedName }
+            payload: { senderId: lobbyStore.myPlayerId, targetName: trimmedName }
           }));
         }
 
@@ -248,6 +248,33 @@ export const useSocialStore = create((set, get) => ({
         lobbyStore.addToast('Error sending friend request.', 'error');
       }
     } else {
+      // Guests don't persist friendships in DB, but we verify database username existence
+      if (supabase) {
+        try {
+          const { data: targetProfile, error: profileError } = await supabase
+            .from('profiles')
+            .select('id')
+            .ilike('display_name', trimmedName)
+            .single();
+
+          if (profileError || !targetProfile) {
+            // Check if mock user for simulation
+            const VALID_MOCK_USERNAMES = [
+              'ApexSolver_99', 'Kirito101', 'SudokuGod', 'NordicMaster', 
+              'ZenPuzzler', 'SpeedRunner_7', 'SudokuKing', 'GrandmasterX', 
+              'PuzzlerPro', 'NumberCruncher'
+            ];
+            const isMockName = VALID_MOCK_USERNAMES.some(u => u.toLowerCase() === trimmedName.toLowerCase());
+            if (!isMockName) {
+              lobbyStore.addToast('User not found.', 'error');
+              return;
+            }
+          }
+        } catch (err) {
+          console.warn('Guest profile check error:', err);
+        }
+      }
+
       if (lobbyStore.ws && lobbyStore.isConnected && lobbyStore.ws.readyState === 1) {
         lobbyStore.ws.send(JSON.stringify({
           type: 'SEND_FRIEND_REQUEST',
@@ -477,7 +504,7 @@ export const useSocialStore = create((set, get) => ({
         .from('profiles')
         .select('id, display_name, elo, avatar_id')
         .order('elo', { ascending: false })
-        .limit(20);
+        .limit(10);
 
       if (error) throw error;
       if (profiles) {
