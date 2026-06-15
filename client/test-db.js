@@ -32,7 +32,8 @@ async function runTest() {
   const { data: profiles, error: profileErr } = await supabase
     .from('profiles')
     .select('*')
-    .limit(5);
+    .order('created_at', { ascending: false })
+    .limit(10);
 
   if (profileErr) {
     console.error('❌ Failed to fetch profiles:', profileErr.message);
