@@ -214,11 +214,27 @@ export const useSocialStore = create((set, get) => ({
         if (existing && existing.length > 0) {
           const relation = existing[0];
           if (relation.status === 'accepted') {
-            lobbyStore.addToast(`${trimmedName} is already in your friends list.`, 'error');
+            // Update local friend name if it changed
+            const { friends } = get();
+            const friendIdx = friends.findIndex(f => f.id === targetProfile.id);
+            if (friendIdx !== -1 && friends[friendIdx].name !== targetProfile.display_name) {
+              const updated = [...friends];
+              updated[friendIdx] = { ...updated[friendIdx], name: targetProfile.display_name };
+              set({ friends: updated });
+            }
+            lobbyStore.addToast(`${targetProfile.display_name} is already in your friends list.`, 'error');
           } else if (relation.user_id === user.id) {
-            lobbyStore.addToast(`Friend request to '${trimmedName}' is already pending.`, 'error');
+            lobbyStore.addToast(`Friend request to '${targetProfile.display_name}' is already pending.`, 'error');
           } else {
-            lobbyStore.addToast(`'${trimmedName}' has already sent you a friend request. Accept it below!`, 'error');
+            // Update local request name if it changed
+            const { friendRequests } = get();
+            const reqIdx = friendRequests.findIndex(r => r.id === targetProfile.id);
+            if (reqIdx !== -1 && friendRequests[reqIdx].name !== targetProfile.display_name) {
+              const updated = [...friendRequests];
+              updated[reqIdx] = { ...updated[reqIdx], name: targetProfile.display_name };
+              set({ friendRequests: updated });
+            }
+            lobbyStore.addToast(`'${targetProfile.display_name}' has already sent you a friend request. Accept it below!`, 'error');
           }
           return;
         }
@@ -373,6 +389,7 @@ export const useSocialStore = create((set, get) => ({
       return { friendRequests: [...state.friendRequests, sender] };
     });
     useLobbyStore.getState().addToast(`Incoming friend request from ${sender.name}!`, 'info');
+    get().loadFriends();
   },
 
   friendRequestAccepted: (friend) => {
@@ -394,6 +411,7 @@ export const useSocialStore = create((set, get) => ({
       return { friends: updated };
     });
     useLobbyStore.getState().addToast(`You are now friends with ${friend.name}!`, 'success');
+    get().loadFriends();
   },
 
   inviteFriend: (friendId) => {

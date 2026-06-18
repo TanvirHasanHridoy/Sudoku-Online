@@ -58,17 +58,23 @@ function getPlayerDetailedStatus(friendId) {
 
   if (!foundClient) return { status: 'offline' };
 
+  let statusVal = 'online';
+  let roomCode = null;
+
   // Check if they are in any room
   for (const room of rooms.values()) {
     if (room.players.some(p => p.id === foundClient.id)) {
-      return {
-        status: room.isGameStarted ? 'in-game' : 'in-lobby',
-        roomCode: room.code
-      };
+      statusVal = room.isGameStarted ? 'in-game' : 'in-lobby';
+      roomCode = room.code;
+      break;
     }
   }
 
-  return { status: 'online' };
+  return {
+    status: statusVal,
+    name: foundClient.name,
+    roomCode
+  };
 }
 
 // Helper: Broadcast status change of playerId to all connected friends
@@ -78,7 +84,8 @@ function broadcastOnlineStatusChange(playerId, status) {
   const supabaseUserId = client ? client.supabaseUserId : null;
 
   // Get detailed status (including roomCode if in-lobby)
-  const detailed = getPlayerDetailedStatus(targetId);
+  // If status is explicitly offline, use it directly. Otherwise, check client rooms.
+  const detailed = status === 'offline' ? { status: 'offline' } : getPlayerDetailedStatus(targetId);
 
   for (const otherClient of connectedClients.values()) {
     if (otherClient.id === targetId) continue;
@@ -95,6 +102,7 @@ function broadcastOnlineStatusChange(playerId, status) {
           payload: {
             friendId: matchedFriendId,
             status: detailed.status,
+            name: client ? client.name : undefined,
             roomCode: detailed.roomCode || null
           }
         }));
@@ -1239,6 +1247,14 @@ wss.on('connection', (ws) => {
         case 'REGISTER_PLAYER': {
           const { playerId, name, elo, supabaseUserId } = payload;
           if (!playerId) return;
+
+          // Cleanup duplicate/old registration on same socket if ID changed (e.g. guest -> Google)
+          if (currentPlayer && currentPlayer.id !== playerId) {
+            console.log(`[WS Re-register] Cleaning up old registration ${currentPlayer.id} for new registration ${playerId}`);
+            connectedClients.delete(currentPlayer.id);
+            broadcastOnlineStatusChange(currentPlayer.id, 'offline');
+          }
+
           registeredPlayerId = playerId;
           
           let resolvedName = name || `Player_${playerId.slice(0, 4)}`;
