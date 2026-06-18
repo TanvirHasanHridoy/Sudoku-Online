@@ -230,6 +230,7 @@ export const useLobbyStore = create((set, get) => ({
                 return {
                   ...f,
                   status: info.status,
+                  name: info.name || f.name,
                   roomCode: info.roomCode || null
                 };
               });
@@ -245,6 +246,7 @@ export const useLobbyStore = create((set, get) => ({
                   return { 
                     ...f, 
                     status: payload.status,
+                    name: payload.name || f.name,
                     roomCode: payload.roomCode || null
                   };
                 }
@@ -256,14 +258,23 @@ export const useLobbyStore = create((set, get) => ({
           }
           case 'FRIEND_NAME_UPDATE': {
             import('./useSocialStore').then(({ useSocialStore }) => {
-              const { friends } = useSocialStore.getState();
+              const { friends, friendRequests } = useSocialStore.getState();
               const updatedFriends = friends.map(f => {
                 if (f.id === payload.friendId) {
                   return { ...f, name: payload.name };
                 }
                 return f;
               });
-              useSocialStore.setState({ friends: updatedFriends });
+              const updatedRequests = friendRequests.map(r => {
+                if (r.id === payload.friendId) {
+                  return { ...r, name: payload.name };
+                }
+                return r;
+              });
+              useSocialStore.setState({ 
+                friends: updatedFriends,
+                friendRequests: updatedRequests
+              });
             });
             break;
           }
