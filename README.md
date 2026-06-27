@@ -14,7 +14,7 @@ Sudoku Showdown is a state-of-the-art, feature-rich, **real-time multiplayer Sud
 
 ---
 
-## 🎮 How to Start Playing
+## 🎮 How to Start Playing 
 
 ### 1. Match Selection
 On the home dashboard, choose your playstyle:
