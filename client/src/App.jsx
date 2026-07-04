@@ -245,6 +245,52 @@ export default function App() {
   const [dbUsernameError, setDbUsernameError] = useState("");
   const [usernameSuccess, setUsernameSuccess] = useState(false);
   const [isCheckingUsername, setIsCheckingUsername] = useState(false);
+  const [isSavingUsername, setIsSavingUsername] = useState(false);
+  const [isAddingFriend, setIsAddingFriend] = useState(false);
+  const [actionPendingRequests, setActionPendingRequests] = useState(new Set());
+  const [personalStats, setPersonalStats] = useState({
+    gamesPlayed: 0,
+    gamesCompleted: 0,
+    soloWins: 0,
+    multiplayerWins: 0,
+    totalCompletionTime: 0
+  });
+
+  useEffect(() => {
+    const loadPersonalStats = () => {
+      if (!myPlayerId) return;
+      
+      const { isGuest, profile } = useAuthStore.getState();
+      if (!isGuest && profile) {
+        setPersonalStats({
+          gamesPlayed: profile.games_played || 0,
+          gamesCompleted: profile.games_completed || 0,
+          soloWins: profile.solo_wins || 0,
+          multiplayerWins: profile.multiplayer_wins || 0,
+          totalCompletionTime: profile.total_completion_time || 0
+        });
+      } else {
+        const statsKey = `sudoku_stats_${myPlayerId}`;
+        try {
+          const stats = JSON.parse(localStorage.getItem(statsKey) || '{"gamesPlayed":0,"gamesCompleted":0,"soloWins":0,"multiplayerWins":0,"totalCompletionTime":0}');
+          setPersonalStats(stats);
+        } catch (e) {
+          setPersonalStats({ gamesPlayed: 0, gamesCompleted: 0, soloWins: 0, multiplayerWins: 0, totalCompletionTime: 0 });
+        }
+      }
+    };
+    loadPersonalStats();
+  }, [myPlayerId, gameStatus, activeView, profile]);
+
+  const winRate = personalStats.gamesPlayed > 0 ? Math.round((personalStats.gamesCompleted / personalStats.gamesPlayed) * 100) : 0;
+  
+  const formatAvgTime = () => {
+    if (personalStats.gamesCompleted === 0) return "00:00";
+    const avgSeconds = Math.round(personalStats.totalCompletionTime / personalStats.gamesCompleted);
+    const mins = Math.floor(avgSeconds / 60);
+    const secs = avgSeconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
 
   // Helper for local synchronous name validation
   const getUsernameValidationError = (name) => {
@@ -334,13 +380,19 @@ export default function App() {
       setInputName(myPlayerName);
       return;
     }
-    const res = await updateUsername(trimmed);
-    if (res.success) {
-      setUsernameSuccess(false);
-      setDbUsernameError("");
-    } else {
-      addToast(res.error, "error");
-      setInputName(myPlayerName);
+    setIsSavingUsername(true);
+    try {
+      const res = await updateUsername(trimmed);
+      if (res.success) {
+        setUsernameSuccess(false);
+        setDbUsernameError("");
+        addToast("Username updated successfully!", "success");
+      } else {
+        addToast(res.error, "error");
+        setInputName(myPlayerName);
+      }
+    } finally {
+      setIsSavingUsername(false);
     }
   };
 
@@ -462,17 +514,62 @@ export default function App() {
   useEffect(() => {
     if (gameStatus === "won" && eloSyncedRef.current !== "won") {
       if (forfeitWinnerPending) {
-        adjustElo(forfeitWinnerPending.eloAdjustment || 15);
+        const points = forfeitWinnerPending.eloAdjustment || 15;
+        adjustElo(points);
+        useLobbyStore.getState().addToast(`🏆 Opponent forfeited! +${points} ELO`, "success");
         useLobbyStore.setState({ forfeitWinnerPending: null });
       } else {
-        adjustElo(24);
+        const { difficulty, strikes, hintsRemaining } = useGameStore.getState();
+        let baseWin = 24;
+        let maxHints = 2;
+        if (difficulty === "beginner") {
+          baseWin = 12;
+          maxHints = 3;
+        } else if (difficulty === "easy") {
+          baseWin = 18;
+        } else if (difficulty === "medium") {
+          baseWin = 24;
+        } else if (difficulty === "hard") {
+          baseWin = 30;
+        } else if (difficulty === "expert") {
+          baseWin = 36;
+          maxHints = 1;
+        }
+        const hintsUsed = Math.max(0, maxHints - hintsRemaining);
+        const strikePenalty = strikes * 3;
+        const hintPenalty = hintsUsed * 4;
+        const finalWin = Math.max(5, baseWin - strikePenalty - hintPenalty);
+        
+        adjustElo(finalWin);
+        
+        const details = [];
+        details.push(`Base: +${baseWin}`);
+        if (strikePenalty > 0) details.push(`Strikes: -${strikePenalty}`);
+        if (hintPenalty > 0) details.push(`Hints: -${hintPenalty}`);
+        useLobbyStore.getState().addToast(`🏆 Puzzle Solved! +${finalWin} ELO (${details.join(", ")})`, "success");
       }
       eloSyncedRef.current = "won";
     } else if (gameStatus === "lost" && eloSyncedRef.current !== "lost") {
       if (forfeitWinnerPending) {
         useLobbyStore.setState({ forfeitWinnerPending: null });
       } else {
-        adjustElo(-12);
+        const { difficulty, strikes } = useGameStore.getState();
+        let baseLoss = -12;
+        if (difficulty === "beginner") baseLoss = -6;
+        else if (difficulty === "easy") baseLoss = -9;
+        else if (difficulty === "medium") baseLoss = -12;
+        else if (difficulty === "hard") baseLoss = -15;
+        else if (difficulty === "expert") baseLoss = -18;
+        
+        const strikePenalty = strikes * 2;
+        const finalLoss = Math.max(-30, baseLoss - strikePenalty);
+        
+        adjustElo(finalLoss);
+        
+        const details = [];
+        details.push(`Base: ${baseLoss}`);
+        if (strikePenalty > 0) details.push(`Strikes: -${strikePenalty}`);
+        useLobbyStore.getState().addToast(`💀 Match Lost! ${finalLoss} ELO (${details.join(", ")})`, "error");
       }
       eloSyncedRef.current = "lost";
     } else if (gameStatus === "playing") {
@@ -980,11 +1077,43 @@ export default function App() {
     return `${window.location.origin}/?room=${room.code}`;
   };
 
-  const handleAddFriendSubmit = (e) => {
+  const handleAcceptFriendRequest = async (id) => {
+    setActionPendingRequests(prev => new Set(prev).add(id));
+    try {
+      await acceptFriendRequest(id);
+    } finally {
+      setActionPendingRequests(prev => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
+  };
+
+  const handleDeclineFriendRequest = async (id) => {
+    setActionPendingRequests(prev => new Set(prev).add(id));
+    try {
+      await declineFriendRequest(id);
+    } finally {
+      setActionPendingRequests(prev => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
+  };
+
+  const handleAddFriendSubmit = async (e) => {
     e.preventDefault();
-    if (!friendNameInput.trim()) return;
-    addFriend(friendNameInput);
-    setFriendNameInput("");
+    const trimmed = friendNameInput.trim();
+    if (!trimmed) return;
+    setIsAddingFriend(true);
+    try {
+      await addFriend(trimmed);
+      setFriendNameInput("");
+    } finally {
+      setIsAddingFriend(false);
+    }
   };
 
   const startLocalPractice = () => {
@@ -1248,7 +1377,8 @@ export default function App() {
           ) : isGuest ? (
             <button
               onClick={signInWithGoogle}
-              className="px-3 py-1.5 rounded-xl border border-border-custom hover:bg-accent-glow hover:border-accent-custom hover:text-accent-custom active:scale-95 transition-all flex items-center gap-1.5 text-xs font-bold text-text-custom cursor-pointer"
+              disabled={isSavingUsername || isCheckingUsername}
+              className="px-3 py-1.5 rounded-xl border border-border-custom hover:bg-accent-glow hover:border-accent-custom hover:text-accent-custom active:scale-95 transition-all flex items-center gap-1.5 text-xs font-bold text-text-custom cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
             >
               <LogIn size={14} />
               <span>Link Google</span>
@@ -1271,13 +1401,16 @@ export default function App() {
                   {profile?.display_name}
                 </div>
               </div>
-              <button
-                onClick={signOut}
-                className="p-2 rounded-xl border border-border-custom hover:bg-rose-500/10 hover:border-rose-500 hover:text-rose-500 active:scale-95 transition-all text-xs font-bold text-text-custom"
-                title="Sign Out"
-              >
-                <LogOut size={14} />
-              </button>
+              {activeView !== "game" && (
+                <button
+                  onClick={signOut}
+                  disabled={isSavingUsername || isCheckingUsername}
+                  className="p-2 rounded-xl border border-border-custom hover:bg-rose-500/10 hover:border-rose-500 hover:text-rose-500 active:scale-95 transition-all text-xs font-bold text-text-custom disabled:opacity-50 disabled:pointer-events-none"
+                  title="Sign Out"
+                >
+                  <LogOut size={14} />
+                </button>
+              )}
             </div>
           )}
 
@@ -1362,12 +1495,12 @@ export default function App() {
                   setUsernameSuccess(false);
                   setDbUsernameError("");
                 }}
-                onBlur={handleUsernameSave}
+                disabled={isSavingUsername || isCheckingUsername}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") e.target.blur();
+                  if (e.key === "Enter") handleUsernameSave();
                 }}
                 className="text-xs font-bold leading-tight bg-transparent border-b border-transparent hover:border-border-custom focus:border-accent-custom focus:outline-none w-24 transition-all"
-                title="Click to edit name"
+                title="Click to edit name. Press Enter to save."
               />
               <div className="flex items-center gap-1.5">
                 <div
@@ -1376,6 +1509,9 @@ export default function App() {
                 <span className="text-[9px] font-semibold opacity-65">
                   {isConnected ? `Online (${elo} ELO)` : "Offline"}
                 </span>
+                {isSavingUsername && (
+                  <RefreshCw size={10} className="animate-spin text-accent-custom ml-1 shrink-0" />
+                )}
                 {!isGuest && (
                   <div
                     className="w-2.5 h-2.5 rounded-full bg-indigo-500 flex items-center justify-center text-white"
@@ -1471,13 +1607,29 @@ export default function App() {
                     setUsernameSuccess(false);
                     setDbUsernameError("");
                   }}
-                  onBlur={handleUsernameSave}
+                  disabled={isSavingUsername || isCheckingUsername}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter") e.target.blur();
+                    if (e.key === "Enter") handleUsernameSave();
                   }}
                   className={`w-full text-center text-sm font-bold bg-accent-glow border rounded-xl px-3 py-2 focus:outline-none transition-all ${usernameError ? 'border-rose-500 focus:border-rose-500' : usernameSuccess ? 'border-emerald-500 focus:border-emerald-500' : 'border-border-custom focus:border-accent-custom'}`}
                   placeholder="Your username"
                 />
+                {inputName.trim() !== myPlayerName && !localUsernameError && (
+                  <button
+                    onClick={handleUsernameSave}
+                    disabled={isSavingUsername || isCheckingUsername}
+                    className="mt-2 w-full py-2 bg-accent-custom hover:bg-accent-hover text-white font-bold rounded-xl text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm active:scale-[0.98]"
+                  >
+                    {isSavingUsername ? (
+                      <>
+                        <RefreshCw size={12} className="animate-spin" />
+                        <span>Saving...</span>
+                      </>
+                    ) : (
+                      <span>Save Username</span>
+                    )}
+                  </button>
+                )}
                 {usernameError && (
                   <p className="text-[9px] text-rose-500 text-center font-semibold mt-1">
                     ⚠️ {usernameError}
@@ -1498,7 +1650,7 @@ export default function App() {
                 </p>
               </div>
 
-              {/* Stats */}
+              {/* Core Stats */}
               <div className="w-full grid grid-cols-2 gap-2">
                 <div className="bg-accent-glow/30 rounded-xl p-2 text-center border border-border-custom/30">
                   <p className="text-[10px] opacity-50 uppercase font-bold">
@@ -1515,6 +1667,63 @@ export default function App() {
                   <p className="text-[10px] font-extrabold text-accent-custom leading-tight">
                     {rank}
                   </p>
+                </div>
+              </div>
+
+              {/* Personal Stats Section */}
+              <div className="w-full border-t border-border-custom/20 pt-3 mt-1">
+                <p className="text-[10px] uppercase font-bold opacity-60 tracking-wider mb-2 text-left px-1">
+                  Personal Statistics
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="bg-panel-custom/35 rounded-xl p-2 text-center border border-border-custom/25">
+                    <p className="text-[9px] opacity-50 uppercase font-bold">
+                      Played
+                    </p>
+                    <p className="text-xs font-extrabold text-indigo-400">
+                      {personalStats.gamesPlayed}
+                    </p>
+                  </div>
+                  <div className="bg-panel-custom/35 rounded-xl p-2 text-center border border-border-custom/25">
+                    <p className="text-[9px] opacity-50 uppercase font-bold">
+                      Completed
+                    </p>
+                    <p className="text-xs font-extrabold text-emerald-400">
+                      {personalStats.gamesCompleted}
+                    </p>
+                  </div>
+                  <div className="bg-panel-custom/35 rounded-xl p-2 text-center border border-border-custom/25">
+                    <p className="text-[9px] opacity-50 uppercase font-bold">
+                      Solo Wins
+                    </p>
+                    <p className="text-xs font-bold text-text-custom">
+                      {personalStats.soloWins}
+                    </p>
+                  </div>
+                  <div className="bg-panel-custom/35 rounded-xl p-2 text-center border border-border-custom/25">
+                    <p className="text-[9px] opacity-50 uppercase font-bold">
+                      Match Wins
+                    </p>
+                    <p className="text-xs font-bold text-text-custom">
+                      {personalStats.multiplayerWins}
+                    </p>
+                  </div>
+                  <div className="bg-panel-custom/35 rounded-xl p-2 text-center border border-border-custom/25">
+                    <p className="text-[9px] opacity-50 uppercase font-bold">
+                      Win Rate
+                    </p>
+                    <p className="text-xs font-extrabold text-accent-custom">
+                      {winRate}%
+                    </p>
+                  </div>
+                  <div className="bg-panel-custom/35 rounded-xl p-2 text-center border border-border-custom/25">
+                    <p className="text-[9px] opacity-50 uppercase font-bold">
+                      Avg Solve Time
+                    </p>
+                    <p className="text-xs font-extrabold text-accent-custom">
+                      {formatAvgTime()}
+                    </p>
+                  </div>
                 </div>
               </div>
 
@@ -1562,18 +1771,28 @@ export default function App() {
                       </div>
                       <div className="flex gap-1">
                         <button
-                          onClick={() => acceptFriendRequest(req.id)}
-                          className="w-6 h-6 rounded-lg bg-emerald-500/20 text-emerald-500 hover:bg-emerald-500 hover:text-white transition-all flex items-center justify-center"
+                          onClick={() => handleAcceptFriendRequest(req.id)}
+                          disabled={actionPendingRequests.has(req.id)}
+                          className="w-6 h-6 rounded-lg bg-emerald-500/20 text-emerald-500 hover:bg-emerald-500 hover:text-white transition-all flex items-center justify-center disabled:opacity-50"
                           title="Accept"
                         >
-                          <Check size={12} />
+                          {actionPendingRequests.has(req.id) ? (
+                            <RefreshCw size={12} className="animate-spin" />
+                          ) : (
+                            <Check size={12} />
+                          )}
                         </button>
                         <button
-                          onClick={() => declineFriendRequest(req.id)}
-                          className="w-6 h-6 rounded-lg bg-rose-500/20 text-rose-500 hover:bg-rose-500 hover:text-white transition-all flex items-center justify-center"
+                          onClick={() => handleDeclineFriendRequest(req.id)}
+                          disabled={actionPendingRequests.has(req.id)}
+                          className="w-6 h-6 rounded-lg bg-rose-500/20 text-rose-500 hover:bg-rose-500 hover:text-white transition-all flex items-center justify-center disabled:opacity-50"
                           title="Decline"
                         >
-                          <X size={12} />
+                          {actionPendingRequests.has(req.id) ? (
+                            <RefreshCw size={12} className="animate-spin" />
+                          ) : (
+                            <X size={12} />
+                          )}
                         </button>
                       </div>
                     </div>
@@ -1643,7 +1862,8 @@ export default function App() {
                       <div className="pt-1">
                         <button
                           onClick={() => startNewGame(selectedDifficulty)}
-                          className="w-full py-3 bg-accent-custom hover:bg-accent-hover text-white font-bold text-xs rounded-xl active:scale-[0.98] transition-all flex items-center justify-center gap-1.5 shadow-md shadow-accent-custom/10 cursor-pointer"
+                          disabled={isSavingUsername || isCheckingUsername}
+                          className="w-full py-3 bg-accent-custom hover:bg-accent-hover text-white font-bold text-xs rounded-xl active:scale-[0.98] transition-all flex items-center justify-center gap-1.5 shadow-md shadow-accent-custom/10 cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
                         >
                           <PlayCircle size={14} fill="white" />
                           Play Solo Game
@@ -1662,8 +1882,8 @@ export default function App() {
                           onClick={() =>
                             createRoom(selectedDifficulty, showManaOptionSetting ? enableAbilities : false)
                           }
-                          className="w-full py-3 bg-accent-glow hover:bg-accent-glow/70 border border-border-custom text-text-custom font-bold text-xs rounded-xl active:scale-[0.98] transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-                          disabled={!isConnected}
+                          className="w-full py-3 bg-accent-glow hover:bg-accent-glow/70 border border-border-custom text-text-custom font-bold text-xs rounded-xl active:scale-[0.98] transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
+                          disabled={!isConnected || isSavingUsername || isCheckingUsername}
                         >
                           <Users size={14} className="text-accent-custom" />
                           Create Multiplayer Room
@@ -2125,13 +2345,19 @@ export default function App() {
                   placeholder="Friend Username"
                   value={friendNameInput}
                   onChange={(e) => setFriendNameInput(e.target.value)}
-                  className="flex-1 min-w-0 px-2.5 py-1.5 bg-accent-glow border border-border-custom rounded-lg text-xs focus:outline-none focus:border-accent-custom"
+                  disabled={isAddingFriend}
+                  className="flex-1 min-w-0 px-2.5 py-1.5 bg-accent-glow border border-border-custom rounded-lg text-xs focus:outline-none focus:border-accent-custom disabled:opacity-60"
                 />
                 <button
                   type="submit"
-                  className="shrink-0 px-3 bg-accent-custom hover:bg-accent-hover text-white font-bold rounded-lg text-[10px] active:scale-95 transition-all"
+                  disabled={isAddingFriend}
+                  className="shrink-0 px-3 bg-accent-custom hover:bg-accent-hover text-white font-bold rounded-lg text-[10px] active:scale-95 transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
                 >
-                  Add
+                  {isAddingFriend ? (
+                    <RefreshCw size={10} className="animate-spin" />
+                  ) : (
+                    "Add"
+                  )}
                 </button>
               </form>
               <div className="space-y-2.5 max-h-[160px] overflow-y-auto pr-1">
@@ -3183,13 +3409,19 @@ export default function App() {
                       placeholder="Friend Username"
                       value={friendNameInput}
                       onChange={(e) => setFriendNameInput(e.target.value)}
-                      className="flex-1 min-w-0 px-2.5 py-1.5 bg-accent-glow border border-border-custom rounded-lg text-xs focus:outline-none focus:border-accent-custom"
+                      disabled={isAddingFriend}
+                      className="flex-1 min-w-0 px-2.5 py-1.5 bg-accent-glow border border-border-custom rounded-lg text-xs focus:outline-none focus:border-accent-custom disabled:opacity-60"
                     />
                     <button
                       type="submit"
-                      className="shrink-0 px-3 bg-accent-custom hover:bg-accent-hover text-white font-bold rounded-lg text-[10px] active:scale-95 transition-all"
+                      disabled={isAddingFriend}
+                      className="shrink-0 px-3 bg-accent-custom hover:bg-accent-hover text-white font-bold rounded-lg text-[10px] active:scale-95 transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
                     >
-                      Add
+                      {isAddingFriend ? (
+                        <RefreshCw size={10} className="animate-spin" />
+                      ) : (
+                        "Add"
+                      )}
                     </button>
                   </form>
 
@@ -3217,18 +3449,28 @@ export default function App() {
                             </div>
                             <div className="flex gap-0.5">
                               <button
-                                onClick={() => acceptFriendRequest(req.id)}
-                                className="w-5 h-5 rounded-md bg-emerald-500/20 text-emerald-500 hover:bg-emerald-500 hover:text-white transition-all flex items-center justify-center cursor-pointer"
+                                onClick={() => handleAcceptFriendRequest(req.id)}
+                                disabled={actionPendingRequests.has(req.id)}
+                                className="w-5 h-5 rounded-md bg-emerald-500/20 text-emerald-500 hover:bg-emerald-500 hover:text-white transition-all flex items-center justify-center cursor-pointer disabled:opacity-50"
                                 title="Accept"
                               >
-                                <Check size={10} />
+                                {actionPendingRequests.has(req.id) ? (
+                                  <RefreshCw size={8} className="animate-spin" />
+                                ) : (
+                                  <Check size={10} />
+                                )}
                               </button>
                               <button
-                                onClick={() => declineFriendRequest(req.id)}
-                                className="w-5 h-5 rounded-md bg-rose-500/20 text-rose-500 hover:bg-rose-500 hover:text-white transition-all flex items-center justify-center cursor-pointer"
+                                onClick={() => handleDeclineFriendRequest(req.id)}
+                                disabled={actionPendingRequests.has(req.id)}
+                                className="w-5 h-5 rounded-md bg-rose-500/20 text-rose-500 hover:bg-rose-500 hover:text-white transition-all flex items-center justify-center cursor-pointer disabled:opacity-50"
                                 title="Decline"
                               >
-                                <X size={10} />
+                                {actionPendingRequests.has(req.id) ? (
+                                  <RefreshCw size={8} className="animate-spin" />
+                                ) : (
+                                  <X size={10} />
+                                )}
                               </button>
                             </div>
                           </div>

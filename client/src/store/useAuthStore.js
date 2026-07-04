@@ -53,6 +53,111 @@ const generateUniqueUsername = async (baseName) => {
   return `${sanitizedBase.substring(0, 16 - fallbackSuffix.length)}${fallbackSuffix}`;
 };
 
+// Helper to migrate/duplicate friendships from guest user to Google user
+const migrateFriendships = async (guestId, googleId) => {
+  if (!supabase || !guestId || !googleId) return;
+  try {
+    console.log(`[Auth] Migrating friendships from guest ${guestId} to google ${googleId}`);
+    const { data: friendships, error } = await supabase
+      .from("friendships")
+      .select("*")
+      .or(`user_id.eq.${guestId},friend_id.eq.${guestId}`);
+
+    if (error) {
+      console.error("[Auth] Error fetching friendships for migration:", error);
+      return;
+    }
+
+    if (!friendships || friendships.length === 0) return;
+
+    for (const f of friendships) {
+      let newUserId = f.user_id;
+      let newFriendId = f.friend_id;
+
+      if (f.user_id === guestId) {
+        newUserId = googleId;
+      }
+      if (f.friend_id === guestId) {
+        newFriendId = googleId;
+      }
+
+      // Check if this duplicated friendship already exists for the Google user
+      const { data: existing } = await supabase
+        .from("friendships")
+        .select("*")
+        .or(`and(user_id.eq.${newUserId},friend_id.eq.${newFriendId}),and(user_id.eq.${newFriendId},friend_id.eq.${newUserId})`);
+
+      if (!existing || existing.length === 0) {
+        const { error: insErr } = await supabase
+          .from("friendships")
+          .insert({
+            user_id: newUserId,
+            friend_id: newFriendId,
+            status: f.status
+          });
+        if (insErr) {
+          console.error("[Auth] Error inserting migrated friendship:", insErr);
+        }
+      }
+    }
+    console.log("[Auth] Friendship migration completed.");
+  } catch (err) {
+    console.error("[Auth] Exception migrating friendships:", err);
+  }
+};
+
+// Helper to migrate stats from guest user to Google user
+const migrateStats = async (guestId, googleId) => {
+  if (!guestId || !googleId) return;
+  try {
+    console.log(`[Auth] Migrating stats from guest ${guestId} to google ${googleId}`);
+    
+    // Get guest stats from localStorage
+    const guestKey = `sudoku_stats_${guestId}`;
+    const guestStats = JSON.parse(localStorage.getItem(guestKey) || '{"gamesPlayed":0,"gamesCompleted":0,"soloWins":0,"multiplayerWins":0,"totalCompletionTime":0}');
+
+    // If guest has played no games, nothing to migrate
+    if (guestStats.gamesPlayed === 0) return;
+
+    // Get current google stats from database
+    const { data: googleProfile, error } = await supabase
+      .from("profiles")
+      .select("games_played, games_completed, solo_wins, multiplayer_wins, total_completion_time")
+      .eq("id", googleId)
+      .single();
+
+    if (error) {
+      console.error("[Auth] Error fetching google profile stats for migration:", error);
+      return;
+    }
+
+    const mergedStats = {
+      games_played: (googleProfile.games_played || 0) + guestStats.gamesPlayed,
+      games_completed: (googleProfile.games_completed || 0) + guestStats.gamesCompleted,
+      solo_wins: (googleProfile.solo_wins || 0) + (guestStats.soloWins || 0),
+      multiplayer_wins: (googleProfile.multiplayer_wins || 0) + (guestStats.multiplayerWins || 0),
+      total_completion_time: (googleProfile.total_completion_time || 0) + (guestStats.totalCompletionTime || 0)
+    };
+
+    // Save merged stats to Supabase database
+    const { error: updateError } = await supabase
+      .from("profiles")
+      .update(mergedStats)
+      .eq("id", googleId);
+
+    if (updateError) {
+      console.error("[Auth] Error updating google profile stats during migration:", updateError);
+    } else {
+      console.log("[Auth] Stats migration completed successfully.");
+      // Clean up guest stats from localStorage so we don't migrate them again next time
+      localStorage.removeItem(guestKey);
+    }
+  } catch (err) {
+    console.error("[Auth] Exception migrating stats:", err);
+  }
+};
+
+
 const checkIsGuestUser = (user) => {
   if (!user) return true;
   if (user.is_anonymous) return true;
@@ -100,20 +205,7 @@ export const useAuthStore = create((set, get) => ({
   registerOrSignInGuest: async () => {
     if (!supabase) return null;
     
-    // 1. Try Anonymous Sign-in first
-    try {
-      console.log("[Auth] Attempting anonymous sign-in...");
-      const { data, error } = await supabase.auth.signInAnonymously();
-      if (!error && data?.user) {
-        console.log("[Auth] Anonymous sign-in succeeded!");
-        localStorage.setItem("sudoku_is_guest_auth", "true");
-        return data.user;
-      }
-    } catch (e) {
-      console.warn("[Auth] Anonymous sign-in exception:", e);
-    }
-
-    // 2. If anonymous sign-in is disabled, try dummy email signup
+    // 1. Try dummy email signup/signin first (for persistent guest accounts)
     try {
       let savedCreds = localStorage.getItem("sudoku_guest_creds");
       let email, password;
@@ -158,6 +250,19 @@ export const useAuthStore = create((set, get) => ({
       }
     } catch (e) {
       console.warn("[Auth] Guest email registration exception:", e);
+    }
+
+    // 2. Fallback to Anonymous Sign-in if email registration fails
+    try {
+      console.log("[Auth] Attempting anonymous sign-in fallback...");
+      const { data, error } = await supabase.auth.signInAnonymously();
+      if (!error && data?.user) {
+        console.log("[Auth] Anonymous sign-in succeeded!");
+        localStorage.setItem("sudoku_is_guest_auth", "true");
+        return data.user;
+      }
+    } catch (e) {
+      console.warn("[Auth] Anonymous sign-in exception:", e);
     }
 
     return null;
@@ -401,6 +506,11 @@ export const useAuthStore = create((set, get) => ({
             console.log(
               "[Auth] First migration for this new user, pulling in guest data...",
             );
+            // Migrate friendships and stats
+            if (currentGuestId && currentGuestId.startsWith("p_")) {
+              await migrateFriendships(currentGuestId, user.id);
+              await migrateStats(currentGuestId, user.id);
+            }
             const updates = {};
             if (currentGuestElo) updates.elo = parseInt(currentGuestElo, 10);
 
@@ -599,9 +709,9 @@ export const useAuthStore = create((set, get) => ({
 
       await supabase.auth.signOut();
 
-      // Clear flags
-      localStorage.removeItem("sudoku_is_guest_auth");
-      localStorage.removeItem("sudoku_guest_creds");
+      // Do NOT clear guest credentials to allow returning to the persistent guest account
+      // localStorage.removeItem("sudoku_is_guest_auth");
+      // localStorage.removeItem("sudoku_guest_creds");
 
       console.log("[Auth] Signed out, registering new guest...");
       const guestUser = await get().registerOrSignInGuest();
