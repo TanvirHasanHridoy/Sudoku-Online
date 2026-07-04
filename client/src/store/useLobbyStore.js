@@ -204,6 +204,9 @@ export const useLobbyStore = create((set, get) => ({
           case 'REGISTER_CONFIRMED': {
             set({ myPlayerName: payload.name });
             localStorage.setItem('sudoku_player_name', payload.name);
+            import('./useSocialStore').then(({ useSocialStore }) => {
+              useSocialStore.getState().loadFriends();
+            });
             break;
           }
           case 'FRIEND_REQUEST_RECEIVED': {
