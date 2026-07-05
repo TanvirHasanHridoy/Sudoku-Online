@@ -2,6 +2,108 @@ import { create } from 'zustand';
 import { generateSudoku } from '../utils/generator';
 import { saveGameState, loadGameState, clearGameState } from '../utils/persistence';
 
+
+const parseTimeStringToSeconds = (timeStr) => {
+  if (!timeStr) return 0;
+  const parts = timeStr.split(':').map(Number);
+  if (parts.length === 2) {
+    return parts[0] * 60 + parts[1];
+  }
+  return 0;
+};
+
+const recordGameStarted = async () => {
+  const playerId = localStorage.getItem("sudoku_player_id");
+  if (!playerId) return;
+
+  try {
+    const { useAuthStore } = await import('./useAuthStore');
+    const { supabase, isGuest, user } = useAuthStore.getState();
+
+    if (user && supabase && !isGuest) {
+      // Authenticated user: increment in Supabase
+      try {
+        const { data, error } = await supabase
+          .from("profiles")
+          .select("games_played")
+          .eq("id", user.id)
+          .single();
+
+        if (!error && data) {
+          const currentPlayed = data.games_played || 0;
+          await supabase
+            .from("profiles")
+            .update({ games_played: currentPlayed + 1 })
+            .eq("id", user.id);
+        }
+      } catch (err) {
+        console.warn("Failed to increment games_played in DB:", err);
+      }
+    } else {
+      // Guest: increment in localStorage
+      const statsKey = `sudoku_stats_${playerId}`;
+      const stats = JSON.parse(localStorage.getItem(statsKey) || '{"gamesPlayed":0,"gamesCompleted":0,"soloWins":0,"multiplayerWins":0,"totalCompletionTime":0}');
+      stats.gamesPlayed++;
+      localStorage.setItem(statsKey, JSON.stringify(stats));
+    }
+  } catch (err) {
+    console.error("Error inside recordGameStarted helper:", err);
+  }
+};
+
+const recordGameCompleted = async (isMultiplayer, elapsedSeconds) => {
+  const playerId = localStorage.getItem("sudoku_player_id");
+  if (!playerId) return;
+
+  try {
+    const { useAuthStore } = await import('./useAuthStore');
+    const { supabase, isGuest, user } = useAuthStore.getState();
+
+    if (user && supabase && !isGuest) {
+      // Authenticated user: increment in Supabase
+      try {
+        const { data, error } = await supabase
+          .from("profiles")
+          .select("games_completed, solo_wins, multiplayer_wins, total_completion_time")
+          .eq("id", user.id)
+          .single();
+
+        if (!error && data) {
+          const updates = {
+            games_completed: (data.games_completed || 0) + 1,
+            total_completion_time: (data.total_completion_time || 0) + elapsedSeconds
+          };
+          if (isMultiplayer) {
+            updates.multiplayer_wins = (data.multiplayer_wins || 0) + 1;
+          } else {
+            updates.solo_wins = (data.solo_wins || 0) + 1;
+          }
+          await supabase
+            .from("profiles")
+            .update(updates)
+            .eq("id", user.id);
+        }
+      } catch (err) {
+        console.warn("Failed to increment game completion stats in DB:", err);
+      }
+    } else {
+      // Guest: increment in localStorage
+      const statsKey = `sudoku_stats_${playerId}`;
+      const stats = JSON.parse(localStorage.getItem(statsKey) || '{"gamesPlayed":0,"gamesCompleted":0,"soloWins":0,"multiplayerWins":0,"totalCompletionTime":0}');
+      stats.gamesCompleted++;
+      stats.totalCompletionTime = (stats.totalCompletionTime || 0) + elapsedSeconds;
+      if (isMultiplayer) {
+        stats.multiplayerWins = (stats.multiplayerWins || 0) + 1;
+      } else {
+        stats.soloWins = (stats.soloWins || 0) + 1;
+      }
+      localStorage.setItem(statsKey, JSON.stringify(stats));
+    }
+  } catch (err) {
+    console.error("Error inside recordGameCompleted helper:", err);
+  }
+};
+
 export const useGameStore = create((set, get) => ({
   // Core game states
   difficulty: 'medium',
@@ -130,6 +232,9 @@ export const useGameStore = create((set, get) => ({
 
     // Always persist game state so it is retained on page refresh (for both solo and multiplayer matches)
     saveGameState({ ...nextState, originalCells: originals });
+    
+    // Increment games played stat
+    recordGameStarted();
   },
 
   selectCell: (row, col) => {
@@ -143,7 +248,7 @@ export const useGameStore = create((set, get) => ({
   enterNumber: (num, timeString = '00:00') => {
     const { selectedCell, originalCells, board, solution, notesMode, notes, mistakes, strikes, maxStrikes, gameStatus } = get();
     
-    if (!selectedCell || gameStatus !== 'playing') return;
+    if (!selectedCell || (gameStatus !== 'playing' && gameStatus !== 'practice')) return;
     const [row, col] = selectedCell;
     const cellKey = `${row},${col}`;
 
@@ -248,7 +353,11 @@ export const useGameStore = create((set, get) => ({
         }
 
         if (solved) {
-          newStatus = 'won';
+          newStatus = gameStatus === 'practice' ? 'practice-completed' : 'won';
+          import('./useLobbyStore').then(({ useLobbyStore }) => {
+            const isMultiplayer = !!useLobbyStore.getState().room;
+            recordGameCompleted(isMultiplayer, parseTimeStringToSeconds(timeString));
+          });
         }
 
         set((state) => ({
@@ -263,10 +372,12 @@ export const useGameStore = create((set, get) => ({
       } else {
         // Strike / mistake made
         const newMistakes = { ...mistakes, [cellKey]: true };
-        newStrikes += 1;
         
-        if (newStrikes >= maxStrikes) {
-          newStatus = 'lost';
+        if (gameStatus !== 'practice') {
+          newStrikes += 1;
+          if (newStrikes >= maxStrikes) {
+            newStatus = 'lost';
+          }
         }
 
         set((state) => ({
@@ -302,7 +413,7 @@ export const useGameStore = create((set, get) => ({
 
   eraseCell: () => {
     const { selectedCell, originalCells, board, notes, mistakes, gameStatus } = get();
-    if (!selectedCell || gameStatus !== 'playing') return;
+    if (!selectedCell || (gameStatus !== 'playing' && gameStatus !== 'practice')) return;
     const [row, col] = selectedCell;
     const cellKey = `${row},${col}`;
 
@@ -332,7 +443,7 @@ export const useGameStore = create((set, get) => ({
 
   getHint: (timeString = '00:00') => {
     const { selectedCell, originalCells, board, solution, hintsRemaining, mistakes, gameStatus } = get();
-    if (!selectedCell || gameStatus !== 'playing' || hintsRemaining <= 0) return;
+    if (!selectedCell || (gameStatus !== 'playing' && gameStatus !== 'practice') || hintsRemaining <= 0) return;
     const [row, col] = selectedCell;
     const cellKey = `${row},${col}`;
 
@@ -390,7 +501,16 @@ export const useGameStore = create((set, get) => ({
       if (!solved) break;
     }
 
-    const newStatus = solved ? 'won' : 'playing';
+    const newStatus = solved 
+      ? (gameStatus === 'practice' ? 'practice-completed' : 'won')
+      : gameStatus;
+
+    if (solved) {
+      import('./useLobbyStore').then(({ useLobbyStore }) => {
+        const isMultiplayer = !!useLobbyStore.getState().room;
+        recordGameCompleted(isMultiplayer, parseTimeStringToSeconds(timeString));
+      });
+    }
 
     set((state) => ({
       board: newBoard,
@@ -429,7 +549,7 @@ export const useGameStore = create((set, get) => ({
 
   undo: () => {
     const { history, board, notes, strikes, mistakes, timeline, gameStatus } = get();
-    if (history.length === 0 || gameStatus !== 'playing') return;
+    if (history.length === 0 || (gameStatus !== 'playing' && gameStatus !== 'practice')) return;
 
     const previousState = history[history.length - 1];
     const remainingHistory = history.slice(0, -1);
@@ -458,7 +578,7 @@ export const useGameStore = create((set, get) => ({
 
   redo: () => {
     const { redoStack, board, notes, strikes, mistakes, timeline, gameStatus } = get();
-    if (redoStack.length === 0 || gameStatus !== 'playing') return;
+    if (redoStack.length === 0 || (gameStatus !== 'playing' && gameStatus !== 'practice')) return;
 
     const nextState = redoStack[redoStack.length - 1];
     const remainingRedo = redoStack.slice(0, -1);

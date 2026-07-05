@@ -34,3 +34,7 @@ yarn-debug.log*
 yarn-error.log*
 .eslintcache
 .vite
+
+# Scratch/debug scripts (may contain secrets)
+client/check-db-state.js
+client/scratch-*.js

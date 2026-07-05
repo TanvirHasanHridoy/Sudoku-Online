@@ -30,7 +30,8 @@ export const useSocialStore = create((set, get) => ({
       get().updateRankTier();
     };
 
-    // Sync state with useAuthStore profile ELO
+    // Sync state with useAuthStore profile ELO and reload friends only when the user actually changes.
+    let previousUserId = null;
     useAuthStore.subscribe((state) => {
       if (state.profile) {
         set({ elo: state.profile.elo });
@@ -38,8 +39,20 @@ export const useSocialStore = create((set, get) => ({
         set({ elo: Number(localStorage.getItem('sudoku_elo')) || 1450 });
       }
       updateRank();
-      // Reload friends list whenever auth profile changes (login, logout, sync)
-      get().loadFriends();
+
+      // Only reload friends when the user ID changes (login / logout / account switch).
+      // Avoid reloading on every profile ELO/name update — that clears the list mid-transition.
+      const currentUserId = state.user?.id || null;
+      if (currentUserId !== previousUserId) {
+        previousUserId = currentUserId;
+        if (currentUserId) {
+          // User is logged in — load from database
+          get().loadFriends();
+        } else {
+          // User signed out — clear friends immediately
+          set({ friends: [], friendRequests: [] });
+        }
+      }
     });
 
     // Initial tier check
@@ -92,57 +105,91 @@ export const useSocialStore = create((set, get) => ({
     }
   },
 
+  // Loads friends for whatever user ID is currently in the auth store.
   loadFriends: async () => {
     const { user } = useAuthStore.getState();
     if (!user || !supabase) {
-      // Load guest friends from local storage if any
       const localFriends = JSON.parse(localStorage.getItem('sudoku_friends') || '[]');
       set({ friends: localFriends, friendRequests: [] });
       return;
     }
+    return get().loadFriendsForUserId(user.id);
+  },
+
+  // Loads friends for a SPECIFIC userId — no dependency on auth store state whatsoever.
+  // Use this when you know the exact ID you want (e.g. after sign-out returning to guest).
+  loadFriendsForUserId: async (userId) => {
+    if (!userId || !supabase) return;
+
+    console.log('[Social] Loading friends for user ID:', userId);
 
     try {
-      const myId = user.id;
       const { data: friendships, error } = await supabase
         .from('friendships')
         .select('*')
-        .or(`user_id.eq.${myId},friend_id.eq.${myId}`);
+        .or(`user_id.eq.${userId},friend_id.eq.${userId}`);
 
       if (error) throw error;
 
+      console.log('[Social] Friendships found:', friendships?.length ?? 0);
+
       if (!friendships || friendships.length === 0) {
-        set({ friends: [], friendRequests: [] });
-        return;
+        // Retry once after 800ms — JWT session may not be ready yet right after sign-in
+        console.log('[Social] 0 friendships on first try — retrying in 800ms...');
+        await new Promise(r => setTimeout(r, 800));
+
+        const { data: retryFriendships, error: retryError } = await supabase
+          .from('friendships')
+          .select('*')
+          .or(`user_id.eq.${userId},friend_id.eq.${userId}`);
+
+        if (retryError) throw retryError;
+        console.log('[Social] Retry friendships found:', retryFriendships?.length ?? 0);
+
+        if (!retryFriendships || retryFriendships.length === 0) {
+          set({ friends: [], friendRequests: [] });
+          return;
+        }
+
+        return get()._processFriendships(retryFriendships, userId);
       }
 
-      const friendIds = friendships.map(f => f.user_id === myId ? f.friend_id : f.user_id);
-      const { data: profiles, error: profileError } = await supabase
-        .from('profiles')
-        .select('id, display_name, elo, avatar_id')
-        .in('id', friendIds);
+      return get()._processFriendships(friendships, userId);
 
-      if (profileError) throw profileError;
+    } catch (err) {
+      console.warn('[Social] Failed loading friends:', err);
+    }
+  },
 
-      const profileMap = new Map(profiles.map(p => [p.id, p]));
+  // Internal helper — turns raw friendship rows into friend/request lists and updates state.
+  _processFriendships: (friendships, myId) => {
+    const friendIds = friendships.map(f => f.user_id === myId ? f.friend_id : f.user_id);
 
-      const loadedFriends = [];
-      const loadedRequests = [];
+    supabase
+      .from('profiles')
+      .select('id, display_name, elo, avatar_id')
+      .in('id', friendIds)
+      .then(({ data: profiles, error: profileError }) => {
+        if (profileError) { console.warn('[Social] Failed loading friend profiles:', profileError); return; }
 
-      for (const f of friendships) {
-        const friendId = f.user_id === myId ? f.friend_id : f.user_id;
-        const profile = profileMap.get(friendId);
-        if (!profile) continue;
+        const profileMap = new Map((profiles || []).map(p => [p.id, p]));
+        const loadedFriends = [];
+        const loadedRequests = [];
 
-        if (f.status === 'accepted') {
-          loadedFriends.push({
-            id: profile.id,
-            name: profile.display_name,
-            elo: profile.elo,
-            avatar: profile.avatar_id || 'apex',
-            status: 'offline' // default until sync
-          });
-        } else if (f.status === 'pending') {
-          if (f.friend_id === myId) {
+        for (const f of friendships) {
+          const friendId = f.user_id === myId ? f.friend_id : f.user_id;
+          const profile = profileMap.get(friendId);
+          if (!profile) continue;
+
+          if (f.status === 'accepted') {
+            loadedFriends.push({
+              id: profile.id,
+              name: profile.display_name,
+              elo: profile.elo,
+              avatar: profile.avatar_id || 'apex',
+              status: 'offline'
+            });
+          } else if (f.status === 'pending' && f.friend_id === myId) {
             loadedRequests.push({
               id: profile.id,
               name: profile.display_name,
@@ -151,23 +198,17 @@ export const useSocialStore = create((set, get) => ({
             });
           }
         }
-      }
 
-      set({ friends: loadedFriends, friendRequests: loadedRequests });
+        console.log('[Social] Setting friends list:', loadedFriends.length, 'friend(s),', loadedRequests.length, 'request(s)');
+        set({ friends: loadedFriends, friendRequests: loadedRequests });
 
-      // Notify the server of our friends list so it can send online status
-      const lobbyStore = useLobbyStore.getState();
-      if (lobbyStore.ws && lobbyStore.isConnected && lobbyStore.ws.readyState === 1) {
-        lobbyStore.ws.send(JSON.stringify({
-          type: 'SET_FRIENDS_LIST',
-          payload: { friendIds }
-        }));
-      }
-
-    } catch (err) {
-      console.warn('Failed loading friends from Supabase:', err);
-    }
+        const lobbyStore = useLobbyStore.getState();
+        if (lobbyStore.ws && lobbyStore.isConnected && lobbyStore.ws.readyState === 1) {
+          lobbyStore.ws.send(JSON.stringify({ type: 'SET_FRIENDS_LIST', payload: { friendIds } }));
+        }
+      });
   },
+
 
   addFriend: async (name) => {
     const trimmedName = name.trim();
@@ -190,16 +231,18 @@ export const useSocialStore = create((set, get) => ({
 
     if (user && supabase) {
       try {
-        const { data: targetProfile, error: profileError } = await supabase
+        const { data: searchResults, error: profileError } = await supabase
           .from('profiles')
           .select('id, display_name, elo')
           .ilike('display_name', trimmedName)
-          .single();
+          .order('created_at', { ascending: false });
 
-        if (profileError || !targetProfile) {
+        if (profileError || !searchResults || searchResults.length === 0) {
           lobbyStore.addToast(`Player '${trimmedName}' not found.`, 'error');
           return;
         }
+
+        const targetProfile = searchResults[0];
 
         const { data: existing, error: existingError } = await supabase
           .from('friendships')
@@ -214,11 +257,27 @@ export const useSocialStore = create((set, get) => ({
         if (existing && existing.length > 0) {
           const relation = existing[0];
           if (relation.status === 'accepted') {
-            lobbyStore.addToast(`${trimmedName} is already in your friends list.`, 'error');
+            // Update local friend name if it changed
+            const { friends } = get();
+            const friendIdx = friends.findIndex(f => f.id === targetProfile.id);
+            if (friendIdx !== -1 && friends[friendIdx].name !== targetProfile.display_name) {
+              const updated = [...friends];
+              updated[friendIdx] = { ...updated[friendIdx], name: targetProfile.display_name };
+              set({ friends: updated });
+            }
+            lobbyStore.addToast(`${targetProfile.display_name} is already in your friends list.`, 'error');
           } else if (relation.user_id === user.id) {
-            lobbyStore.addToast(`Friend request to '${trimmedName}' is already pending.`, 'error');
+            lobbyStore.addToast(`Friend request to '${targetProfile.display_name}' is already pending.`, 'error');
           } else {
-            lobbyStore.addToast(`'${trimmedName}' has already sent you a friend request. Accept it below!`, 'error');
+            // Update local request name if it changed
+            const { friendRequests } = get();
+            const reqIdx = friendRequests.findIndex(r => r.id === targetProfile.id);
+            if (reqIdx !== -1 && friendRequests[reqIdx].name !== targetProfile.display_name) {
+              const updated = [...friendRequests];
+              updated[reqIdx] = { ...updated[reqIdx], name: targetProfile.display_name };
+              set({ friendRequests: updated });
+            }
+            lobbyStore.addToast(`'${targetProfile.display_name}' has already sent you a friend request. Accept it below!`, 'error');
           }
           return;
         }
@@ -236,7 +295,7 @@ export const useSocialStore = create((set, get) => ({
         if (lobbyStore.ws && lobbyStore.isConnected && lobbyStore.ws.readyState === 1) {
           lobbyStore.ws.send(JSON.stringify({
             type: 'SEND_FRIEND_REQUEST',
-            payload: { senderId: user.id, targetName: trimmedName }
+            payload: { senderId: lobbyStore.myPlayerId, targetName: trimmedName }
           }));
         }
 
@@ -248,6 +307,33 @@ export const useSocialStore = create((set, get) => ({
         lobbyStore.addToast('Error sending friend request.', 'error');
       }
     } else {
+      // Guests don't persist friendships in DB, but we verify database username existence
+      if (supabase) {
+        try {
+          const { data: targetProfile, error: profileError } = await supabase
+            .from('profiles')
+            .select('id')
+            .ilike('display_name', trimmedName)
+            .single();
+
+          if (profileError || !targetProfile) {
+            // Check if mock user for simulation
+            const VALID_MOCK_USERNAMES = [
+              'ApexSolver_99', 'Kirito101', 'SudokuGod', 'NordicMaster', 
+              'ZenPuzzler', 'SpeedRunner_7', 'SudokuKing', 'GrandmasterX', 
+              'PuzzlerPro', 'NumberCruncher'
+            ];
+            const isMockName = VALID_MOCK_USERNAMES.some(u => u.toLowerCase() === trimmedName.toLowerCase());
+            if (!isMockName) {
+              lobbyStore.addToast('User not found.', 'error');
+              return;
+            }
+          }
+        } catch (err) {
+          console.warn('Guest profile check error:', err);
+        }
+      }
+
       if (lobbyStore.ws && lobbyStore.isConnected && lobbyStore.ws.readyState === 1) {
         lobbyStore.ws.send(JSON.stringify({
           type: 'SEND_FRIEND_REQUEST',
@@ -346,6 +432,7 @@ export const useSocialStore = create((set, get) => ({
       return { friendRequests: [...state.friendRequests, sender] };
     });
     useLobbyStore.getState().addToast(`Incoming friend request from ${sender.name}!`, 'info');
+    get().loadFriends();
   },
 
   friendRequestAccepted: (friend) => {
@@ -367,6 +454,7 @@ export const useSocialStore = create((set, get) => ({
       return { friends: updated };
     });
     useLobbyStore.getState().addToast(`You are now friends with ${friend.name}!`, 'success');
+    get().loadFriends();
   },
 
   inviteFriend: (friendId) => {
@@ -477,7 +565,7 @@ export const useSocialStore = create((set, get) => ({
         .from('profiles')
         .select('id, display_name, elo, avatar_id')
         .order('elo', { ascending: false })
-        .limit(20);
+        .limit(10);
 
       if (error) throw error;
       if (profiles) {
@@ -490,3 +578,5 @@ export const useSocialStore = create((set, get) => ({
     }
   }
 }));
+
+window.useSocialStore = useSocialStore;

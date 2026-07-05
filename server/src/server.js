@@ -58,17 +58,23 @@ function getPlayerDetailedStatus(friendId) {
 
   if (!foundClient) return { status: 'offline' };
 
+  let statusVal = 'online';
+  let roomCode = null;
+
   // Check if they are in any room
   for (const room of rooms.values()) {
     if (room.players.some(p => p.id === foundClient.id)) {
-      return {
-        status: room.isGameStarted ? 'in-game' : 'in-lobby',
-        roomCode: room.code
-      };
+      statusVal = room.isGameStarted ? 'in-game' : 'in-lobby';
+      roomCode = room.code;
+      break;
     }
   }
 
-  return { status: 'online' };
+  return {
+    status: statusVal,
+    name: foundClient.name,
+    roomCode
+  };
 }
 
 // Helper: Broadcast status change of playerId to all connected friends
@@ -78,7 +84,8 @@ function broadcastOnlineStatusChange(playerId, status) {
   const supabaseUserId = client ? client.supabaseUserId : null;
 
   // Get detailed status (including roomCode if in-lobby)
-  const detailed = getPlayerDetailedStatus(targetId);
+  // If status is explicitly offline, use it directly. Otherwise, check client rooms.
+  const detailed = status === 'offline' ? { status: 'offline' } : getPlayerDetailedStatus(targetId);
 
   for (const otherClient of connectedClients.values()) {
     if (otherClient.id === targetId) continue;
@@ -95,6 +102,7 @@ function broadcastOnlineStatusChange(playerId, status) {
           payload: {
             friendId: matchedFriendId,
             status: detailed.status,
+            name: client ? client.name : undefined,
             roomCode: detailed.roomCode || null
           }
         }));
@@ -176,7 +184,8 @@ function getSanitizedRoom(room) {
       isVoiceJoined: !!p.isVoiceJoined,
       isVoiceMuted: !!p.isVoiceMuted,
       elo: p.elo || 1450,
-      disconnected: !!p.disconnected
+      disconnected: !!p.disconnected,
+      hasFinishedGame: !!p.hasFinishedGame
     }))
   };
 }
@@ -382,8 +391,8 @@ wss.on('connection', (ws) => {
             return;
           }
 
-          // Only allow start if all players are ready (excluding spectators)
-          const allReady = room.isMatchmakingRoom || activePlayers.every(p => p.isReady);
+          // Only allow start if all players are ready (excluding spectators). Solo hosts can start immediately.
+          const allReady = room.isMatchmakingRoom || activePlayers.length === 1 || activePlayers.every(p => p.isReady);
 
           if (!allReady) {
             ws.send(JSON.stringify({
@@ -400,7 +409,7 @@ wss.on('connection', (ws) => {
           room.isPaused = false;
           room.pauseVotes = {};
           room.playAgainVotes = {};
-          room.players.forEach(p => { p.progress = 0; p.strikes = 0; p.mana = 0; });
+          room.players.forEach(p => { p.progress = 0; p.strikes = 0; p.mana = 0; p.hasFinishedGame = false; });
 
           broadcastToRoom(currentRoomCode, {
             type: 'GAME_STARTED',
@@ -433,13 +442,18 @@ wss.on('connection', (ws) => {
             currentPlayer.mana = mana;
           }
 
+          if (wasEliminated || wasFinished) {
+            currentPlayer.hasFinishedGame = true;
+          }
+
           broadcastToRoom(currentRoomCode, {
             type: 'PROGRESS_UPDATED',
             payload: {
               playerId: currentPlayer.id,
               progress,
               strikes,
-              mana: currentPlayer.mana || 0
+              mana: currentPlayer.mana || 0,
+              hasFinishedGame: !!currentPlayer.hasFinishedGame
             }
           });
 
@@ -510,7 +524,8 @@ wss.on('connection', (ws) => {
             if (isMatchStarted && activePlayers.length > 1 && !currentPlayer.isSpectator) {
               const winner = room.players.find(p => p.id !== leaverId && !p.isSpectator);
               if (winner) {
-                console.log(`[WS Forfeit] Player ${leaverName} explicitly left active match. Winner: ${winner.name}`);
+                const eloAdjustment = (winner.strikes >= 3) ? 0 : 15;
+                console.log(`[WS Forfeit] Player ${leaverName} explicitly left active match. Winner: ${winner.name}. ELO adjustment: ${eloAdjustment}`);
                 broadcastToRoom(currentRoomCode, {
                   type: 'GAME_OVER_LEAVER',
                   payload: {
@@ -518,9 +533,20 @@ wss.on('connection', (ws) => {
                     winnerName: winner.name,
                     leaverId: leaverId,
                     leaverName: leaverName,
-                    eloAdjustment: 15
+                    eloAdjustment: eloAdjustment
                   }
                 });
+              }
+            }
+
+            // If this player was spectating someone, notify that player they left
+            if (currentPlayer.isSpectator && currentPlayer.spectatingPlayerId) {
+              const watchedPlayer = room.players.find(p => p.id === currentPlayer.spectatingPlayerId);
+              if (watchedPlayer && watchedPlayer.socket && watchedPlayer.socket.readyState === 1) {
+                watchedPlayer.socket.send(JSON.stringify({
+                  type: 'SPECTATOR_ALERT',
+                  payload: { spectatorName: currentPlayer.name, isSpectating: false }
+                }));
               }
             }
 
@@ -718,7 +744,7 @@ wss.on('connection', (ws) => {
               });
               
               // Reset player readiness to vote cycle reset
-              room.players.forEach(p => { p.isReady = false; p.progress = 0; p.strikes = 0; p.mana = 0; });
+              room.players.forEach(p => { p.isReady = false; p.progress = 0; p.strikes = 0; p.mana = 0; p.hasFinishedGame = false; });
               room.isGameStarted = false;
               room.board = null;
               room.solution = null;
@@ -744,12 +770,11 @@ wss.on('connection', (ws) => {
              case 'FETCH_ICE_SERVERS': {
           // NOTE: .env is gitignored and not deployed to production.
           // Hardcoded defaults ensure TURN credentials are always available even without Render env vars.
-          // To rotate: update METERED_API_KEY in Render env vars (env vars take priority over defaults).
-          const METERED_DEFAULT_DOMAIN = 'sudoku-online.metered.live';
-          const METERED_DEFAULT_KEY = 'REDACTED_METERED_API_KEY';
+          // TURN credentials come exclusively from environment variables.
+          // Set METERED_API_KEY and METERED_DOMAIN in your Render (or .env) config.
           const appName = process.env.METERED_APP_NAME || 'sudoku-online';
-          const apiKey = process.env.METERED_API_KEY || process.env.METERED_SECRET_KEY || METERED_DEFAULT_KEY;
-          const domain = process.env.METERED_DOMAIN || (appName ? `${appName}.metered.live` : null) || METERED_DEFAULT_DOMAIN;
+          const apiKey = process.env.METERED_API_KEY || process.env.METERED_SECRET_KEY || '';
+          const domain = process.env.METERED_DOMAIN || (appName ? `${appName}.metered.live` : null) || 'sudoku-online.metered.live';
 
           // Helper to send ice servers and break out cleanly
           const sendIceServers = (iceServers, label) => {
@@ -913,6 +938,26 @@ wss.on('connection', (ws) => {
           if (!name) return;
           const trimmedName = name.trim();
           if (!trimmedName) return;
+
+          const isTaken = Array.from(connectedClients.values()).some(
+            client => client.id !== (registeredPlayerId || currentPlayer?.id) && 
+                      client.name.toLowerCase() === trimmedName.toLowerCase()
+          );
+
+          if (isTaken) {
+            ws.send(JSON.stringify({
+              type: 'ERROR',
+              payload: { message: `Username "${trimmedName}" is already taken by an online player.` }
+            }));
+            const room = rooms.get(currentRoomCode);
+            if (room) {
+              ws.send(JSON.stringify({
+                type: 'ROOM_UPDATED',
+                payload: { room: getSanitizedRoom(room) }
+              }));
+            }
+            break;
+          }
 
           if (currentPlayer) {
             currentPlayer.name = trimmedName;
@@ -1127,6 +1172,15 @@ wss.on('connection', (ws) => {
           const playerInRoom = room.players.find(p => p.id === currentPlayer.id);
           if (!playerInRoom) return;
 
+          if (playerInRoom.hasFinishedGame || playerInRoom.strikes >= 3) {
+            ws.send(JSON.stringify({
+              type: 'ERROR',
+              payload: { message: 'Eliminated or finished players cannot use abilities!' }
+            }));
+            return;
+          }
+          if (!playerInRoom) return;
+
           // Deduct cost authoritatively
           const COSTS = {
             cleanse: 35,
@@ -1172,15 +1226,49 @@ wss.on('connection', (ws) => {
           break;
         }
 
+        case 'CHECK_USERNAME': {
+          const { name, requestId } = payload;
+          const trimmedName = name ? name.trim().toLowerCase() : '';
+          
+          // Check if any online player has this name (case-insensitive)
+          const isOnlineTaken = Array.from(connectedClients.values()).some(
+            client => client.id !== (registeredPlayerId || currentPlayer?.id) && 
+                      client.name.toLowerCase() === trimmedName
+          );
+          
+          ws.send(JSON.stringify({
+            type: 'USERNAME_CHECK_RESPONSE',
+            payload: { name, isOnlineTaken, requestId }
+          }));
+          break;
+        }
+
         case 'REGISTER_PLAYER': {
           const { playerId, name, elo, supabaseUserId } = payload;
           if (!playerId) return;
+
+          // Cleanup duplicate/old registration on same socket if ID changed (e.g. guest -> Google)
+          if (currentPlayer && currentPlayer.id !== playerId) {
+            console.log(`[WS Re-register] Cleaning up old registration ${currentPlayer.id} for new registration ${playerId}`);
+            connectedClients.delete(currentPlayer.id);
+            broadcastOnlineStatusChange(currentPlayer.id, 'offline');
+          }
+
           registeredPlayerId = playerId;
           
+          let resolvedName = name || `Player_${playerId.slice(0, 4)}`;
+          const isTaken = Array.from(connectedClients.values()).some(
+            client => client.id !== playerId && client.name.toLowerCase() === resolvedName.toLowerCase()
+          );
+
+          if (isTaken) {
+            resolvedName = `${resolvedName}_${Math.floor(10 + Math.random() * 90)}`;
+          }
+
           const clientObj = {
             id: playerId,
             socket: ws,
-            name: name || `Player_${playerId.slice(0, 4)}`,
+            name: resolvedName,
             elo: elo || 1450,
             supabaseUserId: supabaseUserId || null,
             friendsList: new Set()
@@ -1188,14 +1276,20 @@ wss.on('connection', (ws) => {
           
           connectedClients.set(playerId, clientObj);
           currentPlayer = clientObj;
-          console.log(`[WS Registered] Player: ${name} (ID: ${playerId}) (Supabase: ${supabaseUserId})`);
+          console.log(`[WS Registered] Player: ${resolvedName} (ID: ${playerId}) (Supabase: ${supabaseUserId})`);
           
+          // Confirm registration name to the client
+          ws.send(JSON.stringify({
+            type: 'REGISTER_CONFIRMED',
+            payload: { name: resolvedName }
+          }));
+
           broadcastOnlineStatusChange(playerId, 'online');
 
           // Apply pending ELO penalties on registration connect
           if (pendingPenalties.has(playerId)) {
             const penalty = pendingPenalties.get(playerId);
-            console.log(`[WS Penalty] Applying pending forfeit ELO penalty of -${penalty} to player ${name}`);
+            console.log(`[WS Penalty] Applying pending forfeit ELO penalty of -${penalty} to player ${resolvedName}`);
             ws.send(JSON.stringify({
               type: 'FORFEIT_PENALTY',
               payload: {
@@ -1293,40 +1387,49 @@ wss.on('connection', (ws) => {
               payload: { targetName: target.name }
             }));
           } else {
-            // Offline simulation check for mock usernames
-            const VALID_MOCK_USERNAMES = [
-              'ApexSolver_99', 'Kirito101', 'SudokuGod', 'NordicMaster', 
-              'ZenPuzzler', 'SpeedRunner_7', 'SudokuKing', 'GrandmasterX', 
-              'PuzzlerPro', 'NumberCruncher'
-            ];
-            const isMockName = VALID_MOCK_USERNAMES.some(u => u.toLowerCase() === targetName.toLowerCase());
-            
-            if (isMockName) {
-              const mockRealName = VALID_MOCK_USERNAMES.find(u => u.toLowerCase() === targetName.toLowerCase());
-              // Simulate friend accepts request in 2.5s
-              setTimeout(() => {
-                ws.send(JSON.stringify({
-                  type: 'FRIEND_REQUEST_ACCEPTED',
-                  payload: {
-                    friend: {
-                      id: 'f_' + Math.random().toString(36).substring(2, 6),
-                      name: mockRealName,
-                      elo: 1000 + Math.floor(Math.random() * 600),
-                      status: 'online'
-                    }
-                  }
-                }));
-              }, 2500);
-
+            if (sender.supabaseUserId) {
+              // Sender is a registered user, request is already persisted in DB.
+              // Just confirm it was sent (they will see it when they get online).
               ws.send(JSON.stringify({
                 type: 'FRIEND_REQUEST_SENT_CONFIRMED',
-                payload: { targetName: mockRealName, simulated: true }
+                payload: { targetName }
               }));
             } else {
-              ws.send(JSON.stringify({
-                type: 'ERROR',
-                payload: { message: `Player "${targetName}" is not online right now.` }
-              }));
+              // Offline simulation check for mock usernames
+              const VALID_MOCK_USERNAMES = [
+                'ApexSolver_99', 'Kirito101', 'SudokuGod', 'NordicMaster', 
+                'ZenPuzzler', 'SpeedRunner_7', 'SudokuKing', 'GrandmasterX', 
+                'PuzzlerPro', 'NumberCruncher'
+              ];
+              const isMockName = VALID_MOCK_USERNAMES.some(u => u.toLowerCase() === targetName.toLowerCase());
+              
+              if (isMockName) {
+                const mockRealName = VALID_MOCK_USERNAMES.find(u => u.toLowerCase() === targetName.toLowerCase());
+                // Simulate friend accepts request in 2.5s
+                setTimeout(() => {
+                  ws.send(JSON.stringify({
+                    type: 'FRIEND_REQUEST_ACCEPTED',
+                    payload: {
+                      friend: {
+                        id: 'f_' + Math.random().toString(36).substring(2, 6),
+                        name: mockRealName,
+                        elo: 1000 + Math.floor(Math.random() * 600),
+                        status: 'online'
+                      }
+                    }
+                  }));
+                }, 2500);
+
+                ws.send(JSON.stringify({
+                  type: 'FRIEND_REQUEST_SENT_CONFIRMED',
+                  payload: { targetName: mockRealName, simulated: true }
+                }));
+              } else {
+                ws.send(JSON.stringify({
+                  type: 'ERROR',
+                  payload: { message: `Player "${targetName}" is not online right now.` }
+                }));
+              }
             }
           }
           break;
@@ -1497,6 +1600,7 @@ wss.on('connection', (ws) => {
           const winner = currentRoom.players.find(p => p.id !== disconnectedId && !p.isSpectator);
 
           if (winner) {
+            const eloAdjustment = (winner.strikes >= 3) ? 0 : 15;
             broadcastToRoom(currentRoomCode, {
               type: 'GAME_OVER_LEAVER',
               payload: {
@@ -1504,7 +1608,7 @@ wss.on('connection', (ws) => {
                 winnerName: winner.name,
                 leaverId: disconnectedId,
                 leaverName: disconnectedName,
-                eloAdjustment: 15
+                eloAdjustment: eloAdjustment
               }
             });
 
