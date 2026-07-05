@@ -17,11 +17,17 @@ const recordGameStarted = async () => {
   if (!playerId) return;
 
   try {
+    // 1. Update local storage stats cache (for both guest and logged-in users)
+    const statsKey = `sudoku_stats_${playerId}`;
+    const stats = JSON.parse(localStorage.getItem(statsKey) || '{"gamesPlayed":0,"gamesCompleted":0,"soloWins":0,"multiplayerWins":0,"totalCompletionTime":0}');
+    stats.gamesPlayed++;
+    localStorage.setItem(statsKey, JSON.stringify(stats));
+
+    // 2. Authenticated user: also update in Supabase
     const { useAuthStore } = await import('./useAuthStore');
     const { supabase, isGuest, user } = useAuthStore.getState();
 
     if (user && supabase && !isGuest) {
-      // Authenticated user: increment in Supabase
       try {
         const { data, error } = await supabase
           .from("profiles")
@@ -39,12 +45,6 @@ const recordGameStarted = async () => {
       } catch (err) {
         console.warn("Failed to increment games_played in DB:", err);
       }
-    } else {
-      // Guest: increment in localStorage
-      const statsKey = `sudoku_stats_${playerId}`;
-      const stats = JSON.parse(localStorage.getItem(statsKey) || '{"gamesPlayed":0,"gamesCompleted":0,"soloWins":0,"multiplayerWins":0,"totalCompletionTime":0}');
-      stats.gamesPlayed++;
-      localStorage.setItem(statsKey, JSON.stringify(stats));
     }
   } catch (err) {
     console.error("Error inside recordGameStarted helper:", err);
@@ -56,11 +56,23 @@ const recordGameCompleted = async (isMultiplayer, elapsedSeconds) => {
   if (!playerId) return;
 
   try {
+    // 1. Update local storage stats cache (for both guest and logged-in users)
+    const statsKey = `sudoku_stats_${playerId}`;
+    const stats = JSON.parse(localStorage.getItem(statsKey) || '{"gamesPlayed":0,"gamesCompleted":0,"soloWins":0,"multiplayerWins":0,"totalCompletionTime":0}');
+    stats.gamesCompleted++;
+    stats.totalCompletionTime = (stats.totalCompletionTime || 0) + elapsedSeconds;
+    if (isMultiplayer) {
+      stats.multiplayerWins = (stats.multiplayerWins || 0) + 1;
+    } else {
+      stats.soloWins = (stats.soloWins || 0) + 1;
+    }
+    localStorage.setItem(statsKey, JSON.stringify(stats));
+
+    // 2. Authenticated user: also update in Supabase
     const { useAuthStore } = await import('./useAuthStore');
     const { supabase, isGuest, user } = useAuthStore.getState();
 
     if (user && supabase && !isGuest) {
-      // Authenticated user: increment in Supabase
       try {
         const { data, error } = await supabase
           .from("profiles")
@@ -86,18 +98,6 @@ const recordGameCompleted = async (isMultiplayer, elapsedSeconds) => {
       } catch (err) {
         console.warn("Failed to increment game completion stats in DB:", err);
       }
-    } else {
-      // Guest: increment in localStorage
-      const statsKey = `sudoku_stats_${playerId}`;
-      const stats = JSON.parse(localStorage.getItem(statsKey) || '{"gamesPlayed":0,"gamesCompleted":0,"soloWins":0,"multiplayerWins":0,"totalCompletionTime":0}');
-      stats.gamesCompleted++;
-      stats.totalCompletionTime = (stats.totalCompletionTime || 0) + elapsedSeconds;
-      if (isMultiplayer) {
-        stats.multiplayerWins = (stats.multiplayerWins || 0) + 1;
-      } else {
-        stats.soloWins = (stats.soloWins || 0) + 1;
-      }
-      localStorage.setItem(statsKey, JSON.stringify(stats));
     }
   } catch (err) {
     console.error("Error inside recordGameCompleted helper:", err);
