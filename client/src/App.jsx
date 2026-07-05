@@ -1366,14 +1366,16 @@ export default function App() {
               <span className="opacity-70 font-semibold">Loading...</span>
             </div>
           ) : isGuest ? (
-            <button
-              onClick={signInWithGoogle}
-              disabled={isSavingUsername || isCheckingUsername}
-              className="px-3 py-1.5 rounded-xl border border-border-custom hover:bg-accent-glow hover:border-accent-custom hover:text-accent-custom active:scale-95 transition-all flex items-center gap-1.5 text-xs font-bold text-text-custom cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
-            >
-              <LogIn size={14} />
-              <span>Link Google</span>
-            </button>
+            activeView !== "game" && (
+              <button
+                onClick={signInWithGoogle}
+                disabled={isSavingUsername || isCheckingUsername}
+                className="px-3 py-1.5 rounded-xl border border-border-custom hover:bg-accent-glow hover:border-accent-custom hover:text-accent-custom active:scale-95 transition-all flex items-center gap-1.5 text-xs font-bold text-text-custom cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
+              >
+                <LogIn size={14} />
+                <span>Link Google</span>
+              </button>
+            )
           ) : (
             <div className="flex items-center gap-2">
               <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl border border-border-custom bg-panel-custom/50">
@@ -2503,6 +2505,29 @@ export default function App() {
                     <X size={11} />
                     Exit
                   </button>
+                </div>
+              </div>
+
+              {/* Compact Stats Panel */}
+              <div className="w-full max-w-[460px] mb-3 px-3 py-2 glass-panel rounded-xl flex items-center justify-between text-[10px] text-text-custom/75 select-none font-semibold shadow-sm border border-border-custom/30 gap-2">
+                <div className="flex items-center gap-1.5">
+                  <span className="opacity-55 uppercase tracking-wider text-[8.5px]">Played</span>
+                  <span className="font-extrabold text-accent-custom text-xs">{personalStats.gamesPlayed}</span>
+                </div>
+                <div className="h-4 w-px bg-border-custom/30"></div>
+                <div className="flex items-center gap-1.5">
+                  <span className="opacity-55 uppercase tracking-wider text-[8.5px]">Won</span>
+                  <span className="font-extrabold text-emerald-500 text-xs">{personalStats.gamesCompleted}</span>
+                </div>
+                <div className="h-4 w-px bg-border-custom/30"></div>
+                <div className="flex items-center gap-1.5">
+                  <span className="opacity-55 uppercase tracking-wider text-[8.5px]">Win Rate</span>
+                  <span className="font-extrabold text-amber-500 text-xs">{winRate}%</span>
+                </div>
+                <div className="h-4 w-px bg-border-custom/30"></div>
+                <div className="flex items-center gap-1.5">
+                  <span className="opacity-55 uppercase tracking-wider text-[8.5px]">Elo Rating</span>
+                  <span className="font-extrabold text-accent-custom text-xs">{profile?.elo || 1450}</span>
                 </div>
               </div>
 
