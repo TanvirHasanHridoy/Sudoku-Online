@@ -770,12 +770,11 @@ wss.on('connection', (ws) => {
              case 'FETCH_ICE_SERVERS': {
           // NOTE: .env is gitignored and not deployed to production.
           // Hardcoded defaults ensure TURN credentials are always available even without Render env vars.
-          // To rotate: update METERED_API_KEY in Render env vars (env vars take priority over defaults).
-          const METERED_DEFAULT_DOMAIN = 'sudoku-online.metered.live';
-          const METERED_DEFAULT_KEY = 'REDACTED_METERED_API_KEY';
+          // TURN credentials come exclusively from environment variables.
+          // Set METERED_API_KEY and METERED_DOMAIN in your Render (or .env) config.
           const appName = process.env.METERED_APP_NAME || 'sudoku-online';
-          const apiKey = process.env.METERED_API_KEY || process.env.METERED_SECRET_KEY || METERED_DEFAULT_KEY;
-          const domain = process.env.METERED_DOMAIN || (appName ? `${appName}.metered.live` : null) || METERED_DEFAULT_DOMAIN;
+          const apiKey = process.env.METERED_API_KEY || process.env.METERED_SECRET_KEY || '';
+          const domain = process.env.METERED_DOMAIN || (appName ? `${appName}.metered.live` : null) || 'sudoku-online.metered.live';
 
           // Helper to send ice servers and break out cleanly
           const sendIceServers = (iceServers, label) => {
