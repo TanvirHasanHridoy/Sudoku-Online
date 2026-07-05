@@ -1427,3 +1427,5 @@ export const useLobbyStore = create((set, get) => ({
     });
   }
 }));
+
+window.useLobbyStore = useLobbyStore;

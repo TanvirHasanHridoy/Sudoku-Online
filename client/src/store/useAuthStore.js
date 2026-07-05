@@ -16,7 +16,7 @@ const sanitizeUsername = (name) => {
 };
 
 // Helper function to generate a unique username
-const generateUniqueUsername = async (baseName) => {
+const generateUniqueUsername = async (baseName, currentUserId = null) => {
   if (!supabase) return baseName;
 
   const sanitizedBase = sanitizeUsername(baseName) || "Player";
@@ -25,11 +25,13 @@ const generateUniqueUsername = async (baseName) => {
   const { data: existing } = await supabase
     .from("profiles")
     .select("id")
-    .eq("display_name", sanitizedBase)
-    .single();
+    .eq("display_name", sanitizedBase);
 
-  if (!existing) {
-    return sanitizedBase; // Name is available
+  // If there are matches, check if any belong to a different user
+  const takenByOther = existing && existing.length > 0 && existing.some(p => p.id !== currentUserId);
+
+  if (!takenByOther) {
+    return sanitizedBase; // Name is available or belongs to current user
   }
 
   // If taken, try appending numbers. Check that candidate length does not exceed 16.
@@ -40,10 +42,10 @@ const generateUniqueUsername = async (baseName) => {
     const { data: existingCandidate } = await supabase
       .from("profiles")
       .select("id")
-      .eq("display_name", candidateName)
-      .single();
+      .eq("display_name", candidateName);
 
-    if (!existingCandidate) {
+    const candidateTaken = existingCandidate && existingCandidate.length > 0 && existingCandidate.some(p => p.id !== currentUserId);
+    if (!candidateTaken) {
       return candidateName; // Found available name
     }
   }
@@ -184,7 +186,8 @@ export const useAuthStore = create((set, get) => ({
       // User chose to switch to Google profile, discarding current guest stats.
       localStorage.setItem(`sudoku_migrated_${pendingGoogleUser.id}`, "true");
       localStorage.removeItem("sudoku_is_guest_auth");
-      localStorage.removeItem("sudoku_guest_creds");
+      // Keep guest credentials persistent to allow returning to the guest account later
+      // localStorage.removeItem("sudoku_guest_creds");
       set({ conflictProfile: null, pendingGoogleUser: null });
       console.log("[Auth] Conflict resolved: switching to Google profile...");
       await get().fetchAndSyncProfile(pendingGoogleUser);
@@ -204,8 +207,30 @@ export const useAuthStore = create((set, get) => ({
 
   registerOrSignInGuest: async () => {
     if (!supabase) return null;
-    
-    // 1. Try dummy email signup/signin first (for persistent guest accounts)
+
+    // ── Strategy 1: Restore anonymous session from saved tokens ──────────────
+    // This is the primary path for anonymous guests (no email/password).
+    // We save the tokens in signInWithGoogle before the OAuth redirect.
+    const savedSession = localStorage.getItem('sudoku_guest_session');
+    if (savedSession) {
+      try {
+        const { access_token, refresh_token } = JSON.parse(savedSession);
+        console.log('[Auth] Attempting to restore saved guest session...');
+        const { data, error } = await supabase.auth.setSession({ access_token, refresh_token });
+        if (!error && data?.user) {
+          console.log('[Auth] Guest session restored! User ID:', data.user.id);
+          // Keep the session saved in case of another Google login cycle
+          // (it will be overwritten by signInWithGoogle with fresh tokens)
+          localStorage.setItem('sudoku_is_guest_auth', 'true');
+          return data.user;
+        }
+        console.warn('[Auth] Guest session restore failed:', error?.message);
+      } catch (e) {
+        console.warn('[Auth] Guest session parse error:', e);
+      }
+    }
+
+    // ── Strategy 2: Email/password sign-in (for email-based guests) ──────────
     try {
       let savedCreds = localStorage.getItem("sudoku_guest_creds");
       let email, password;
@@ -218,49 +243,31 @@ export const useAuthStore = create((set, get) => ({
           // ignore parsing error, will generate new
         }
       }
-      
-      if (!email || !password) {
-        const uuid = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-        email = `guest_${uuid}@sudoku-guest-login.com`;
-        password = Math.random().toString(36).substring(2, 15) + "Pass123!";
-      }
 
-      console.log("[Auth] Attempting guest email sign-in:", email);
-      const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({ email, password });
-      if (!signInError && signInData?.user) {
-        console.log("[Auth] Guest email sign-in succeeded!");
-        localStorage.setItem("sudoku_is_guest_auth", "true");
-        localStorage.setItem("sudoku_guest_creds", JSON.stringify({ email, password }));
-        return signInData.user;
-      }
-
-      console.log("[Auth] Guest email sign-in failed, attempting signUp:", email);
-      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({ email, password });
-      if (!signUpError && signUpData?.user) {
-        if (signUpData.session) {
-          console.log("[Auth] Guest email sign-up succeeded (immediate session)!");
+      if (email && password) {
+        console.log("[Auth] Attempting guest email sign-in:", email);
+        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+        if (!signInError && signInData?.user) {
+          console.log("[Auth] Guest email sign-in succeeded! User ID:", signInData.user.id);
           localStorage.setItem("sudoku_is_guest_auth", "true");
-          localStorage.setItem("sudoku_guest_creds", JSON.stringify({ email, password }));
-          return signUpData.user;
-        } else {
-          console.log("[Auth] Guest email sign-up succeeded but no session (confirmation required).");
+          return signInData.user;
         }
-      } else {
-        console.warn("[Auth] Guest email sign-up failed:", signUpError?.message);
+        console.warn("[Auth] Guest email sign-in failed. Error:", signInError?.message);
       }
     } catch (e) {
-      console.warn("[Auth] Guest email registration exception:", e);
+      console.warn("[Auth] Guest email sign-in exception:", e);
     }
 
-    // 2. Fallback to Anonymous Sign-in if email registration fails
+    // ── Strategy 3: Anonymous sign-in (first-time guests or all else fails) ──
     try {
-      console.log("[Auth] Attempting anonymous sign-in fallback...");
+      console.log("[Auth] Creating new anonymous guest session...");
       const { data, error } = await supabase.auth.signInAnonymously();
       if (!error && data?.user) {
-        console.log("[Auth] Anonymous sign-in succeeded!");
+        console.log("[Auth] Anonymous sign-in succeeded! User ID:", data.user.id);
         localStorage.setItem("sudoku_is_guest_auth", "true");
         return data.user;
       }
+      console.warn('[Auth] Anonymous sign-in failed:', error?.message);
     } catch (e) {
       console.warn("[Auth] Anonymous sign-in exception:", e);
     }
@@ -273,6 +280,18 @@ export const useAuthStore = create((set, get) => ({
       console.warn('[Auth] Supabase client is null, skipping auth init');
       set({ loading: false });
       return;
+    }
+
+    // Restore guest credentials from URL query parameters if present (handles redirect page reloads)
+    const urlParams = new URLSearchParams(window.location.search);
+    const g_e = urlParams.get('g_e');
+    const g_p = urlParams.get('g_p');
+    if (g_e && g_p) {
+      console.log("[Auth] Restoring guest credentials from URL parameters:", g_e);
+      localStorage.setItem("sudoku_guest_creds", JSON.stringify({ email: g_e, password: g_p }));
+      localStorage.setItem("sudoku_is_guest_auth", "true");
+      // Clean query parameters from address bar to keep it neat
+      window.history.replaceState({}, document.title, window.location.origin);
     }
 
     // 1. Register auth state listener FIRST — before any async work —
@@ -400,17 +419,46 @@ export const useAuthStore = create((set, get) => ({
 
       if (profile) {
         console.log("[Auth] Profile found, checking display name constraints...");
-
         const isGuestUser = checkIsGuestUser(user);
         if (isGuestUser) {
-          // Sync guest display name, avatar, and ELO to Supabase profiles table
-          let guestName = localStorage.getItem("sudoku_guest_name");
-          if (!guestName || guestName.includes('@')) {
-            guestName = "S_" + Math.floor(10000 + Math.random() * 90000);
-            localStorage.setItem("sudoku_guest_name", guestName);
+          // RULE: The database is the source of truth for the guest's display name.
+          // We only update the name if the database has a default/unset name (Solver_xxx or S_xxxxx).
+          // If the DB already has a real name (set by the user), keep it and sync localStorage to it.
+          
+          const dbName = profile.display_name;
+          const isDefaultDbName = !dbName || dbName.startsWith("Solver_") || dbName.startsWith("S_");
+          
+          let guestName;
+          if (!isDefaultDbName) {
+            // DB has a real name — this is the authoritative source. Sync localStorage to it.
+            guestName = dbName;
+          } else {
+            // DB has a default name — check if user has set a custom name in localStorage.
+            const localName = localStorage.getItem("sudoku_guest_name");
+            const isDefaultLocalName = !localName || localName.includes('@') || localName.startsWith("Solver_") || localName.startsWith("S_");
+            
+            if (!isDefaultLocalName) {
+              // localStorage has a user-set name — use it and write to DB later.
+              guestName = localName;
+            } else {
+              // Both are default — keep DB name or generate a new one.
+              guestName = dbName || ("S_" + Math.floor(10000 + Math.random() * 90000));
+            }
           }
-          const guestAvatar = localStorage.getItem("sudoku_avatar") || "apex";
-          const guestElo = parseInt(localStorage.getItem("sudoku_elo") || "1450", 10);
+
+          // Always sync localStorage to match the resolved name.
+          localStorage.setItem("sudoku_guest_name", guestName);
+          localStorage.setItem("sudoku_player_name", guestName);
+
+          // Read avatar/elo from guest-specific keys — never from the shared sudoku_avatar/sudoku_elo
+          // keys which may have been overwritten by a Google user session.
+          const guestAvatar = localStorage.getItem("sudoku_guest_avatar") || localStorage.getItem("sudoku_avatar") || "apex";
+          const guestElo = parseInt(localStorage.getItem("sudoku_guest_elo") || localStorage.getItem("sudoku_elo") || "1450", 10);
+
+          // Persist to guest-specific keys so they survive future Google logins.
+          localStorage.setItem("sudoku_guest_id", user.id);
+          localStorage.setItem("sudoku_guest_avatar", guestAvatar);
+          localStorage.setItem("sudoku_guest_elo", guestElo.toString());
 
           let needsUpdate = false;
           const updates = {};
@@ -492,7 +540,16 @@ export const useAuthStore = create((set, get) => ({
           const isMigrated = localStorage.getItem(`sudoku_migrated_${user.id}`);
           const isNewUser = user.created_at && (new Date() - new Date(user.created_at) < 60000);
 
-          if (!isMigrated && !isNewUser && currentGuestId && currentGuestId.startsWith("p_")) {
+          const guestId = localStorage.getItem("sudoku_guest_id");
+
+          if (!isMigrated && !isNewUser && guestId) {
+            // Check if there is an ELO/friends conflict (i.e. profile has already been initialized in the past)
+            // But wait, if they are just logging into their existing Google account, isMigrated checks for this device.
+            // If they are logging in on a different browser, we prevent overwriting.
+            // Let's use the guestId conflict check
+          }
+
+          if (!isMigrated && !isNewUser && currentGuestId && !currentGuestId.startsWith("guest_") && currentGuestId !== guestId) {
             console.log("[Auth] Conflict detected! Google account has an existing profile in the database, pausing sign-in.");
             set({
               conflictProfile: profile,
@@ -507,9 +564,10 @@ export const useAuthStore = create((set, get) => ({
               "[Auth] First migration for this new user, pulling in guest data...",
             );
             // Migrate friendships and stats
-            if (currentGuestId && currentGuestId.startsWith("p_")) {
-              await migrateFriendships(currentGuestId, user.id);
-              await migrateStats(currentGuestId, user.id);
+            const migrationSourceId = guestId || (currentGuestId && currentGuestId.startsWith("p_") ? currentGuestId : null);
+            if (migrationSourceId) {
+              await migrateFriendships(migrationSourceId, user.id);
+              await migrateStats(migrationSourceId, user.id);
             }
             const updates = {};
             if (currentGuestElo) updates.elo = parseInt(currentGuestElo, 10);
@@ -577,7 +635,7 @@ export const useAuthStore = create((set, get) => ({
                 "[Auth] Already migrated, but Google name available and current is default, updating...",
               );
               // Make the Google name unique
-              const uniqueName = await generateUniqueUsername(googleName);
+              const uniqueName = await generateUniqueUsername(googleName, user.id);
               console.log("[Auth] Using unique name:", uniqueName);
               const { data: updatedProfile, error: updateError } = await supabase
                 .from("profiles")
@@ -599,15 +657,23 @@ export const useAuthStore = create((set, get) => ({
           
           // Clear guest flags since we are successfully logged in as Google user
           localStorage.removeItem("sudoku_is_guest_auth");
-          localStorage.removeItem("sudoku_guest_creds");
+          // Keep guest credentials persistent to allow returning to the guest account later
+          // localStorage.removeItem("sudoku_guest_creds");
           set({ isGuest: false });
         }
 
-        // Sync local storage to match the database profile
+        // Always track the active player's Supabase ID
         localStorage.setItem("sudoku_player_id", profile.id);
-        localStorage.setItem("sudoku_player_name", profile.display_name);
-        localStorage.setItem("sudoku_avatar", profile.avatar_id || "apex");
-        localStorage.setItem("sudoku_elo", profile.elo.toString());
+
+        // Only sync the shared display keys (name / avatar / elo) when the active user IS the guest.
+        // When a Google user is logged in we deliberately leave the guest's keys untouched so they
+        // are still intact when we switch back to the guest account on logout.
+        const activeIsGuest = checkIsGuestUser(user);
+        if (activeIsGuest) {
+          localStorage.setItem("sudoku_player_name", profile.display_name);
+          localStorage.setItem("sudoku_avatar", profile.avatar_id || "apex");
+          localStorage.setItem("sudoku_elo", profile.elo.toString());
+        }
 
         // Update LobbyStore local states using setState to trigger reactivity
         console.log(
@@ -620,6 +686,11 @@ export const useAuthStore = create((set, get) => ({
           myPlayerId: profile.id,
           myPlayerName: profile.display_name,
           selectedAvatar: profile.avatar_id || "apex",
+        });
+
+        // Trigger friends load immediately when profile changes
+        import('./useSocialStore').then(({ useSocialStore }) => {
+          useSocialStore.getState().loadFriends();
         });
 
         const lobbyStore = useLobbyStore.getState();
@@ -653,18 +724,39 @@ export const useAuthStore = create((set, get) => ({
   signInWithGoogle: async () => {
     if (!supabase) return;
     try {
+      // ── Save the current guest session tokens BEFORE leaving for OAuth ────
+      // Anonymous guests have no email/password, so the only way to restore
+      // their session after Google logout is by saving the session tokens now.
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
+      if (currentSession && checkIsGuestUser(currentSession.user)) {
+        console.log('[Auth] Saving guest session tokens before Google OAuth for user:', currentSession.user.id);
+        localStorage.setItem('sudoku_guest_session', JSON.stringify({
+          access_token: currentSession.access_token,
+          refresh_token: currentSession.refresh_token
+        }));
+      }
+
+      // ── Build redirect URL (include guest creds as fallback for email guests) ─
+      let redirectUrl = window.location.origin;
+      const creds = localStorage.getItem("sudoku_guest_creds");
+      if (creds) {
+        try {
+          const parsed = JSON.parse(creds);
+          if (parsed.email && parsed.password) {
+            redirectUrl += `?g_e=${encodeURIComponent(parsed.email)}&g_p=${encodeURIComponent(parsed.password)}`;
+          }
+        } catch (e) {}
+      }
+
+      console.log("[Auth] Initiating Google Sign-In with redirect URL:", redirectUrl);
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
-        options: {
-          redirectTo: window.location.origin,
-        },
+        options: { redirectTo: redirectUrl },
       });
       if (error) throw error;
     } catch (err) {
       console.error("Google Sign-In failed:", err);
-      useLobbyStore
-        .getState()
-        .addToast(`Google Sign-In failed: ${err.message}`, "error");
+      useLobbyStore.getState().addToast(`Google Sign-In failed: ${err.message}`, "error");
     }
   },
 
@@ -707,18 +799,25 @@ export const useAuthStore = create((set, get) => ({
         lobbyStore.exitToHome();
       }
 
+      const oldUserId = get().user?.id;
+      console.log("[Auth] Initiating signOut for user:", oldUserId);
       await supabase.auth.signOut();
 
-      // Do NOT clear guest credentials to allow returning to the persistent guest account
-      // localStorage.removeItem("sudoku_is_guest_auth");
-      // localStorage.removeItem("sudoku_guest_creds");
+      // Give Supabase client 500ms to clear session cookies/cache and state
+      await new Promise(resolve => setTimeout(resolve, 500));
 
-      console.log("[Auth] Signed out, registering new guest...");
+      console.log("[Auth] Signed out of Google, registering/signing back in to persistent guest...");
       const guestUser = await get().registerOrSignInGuest();
       if (guestUser) {
         set({ user: guestUser, isGuest: true });
-        console.log("[Auth] Guest authenticated after sign-out, fetching profile...");
+        console.log("[Auth] Guest authenticated after sign-out, fetching profile for ID:", guestUser.id);
         await get().fetchAndSyncProfile(guestUser);
+
+        // Explicitly load this guest's friends by their exact UUID.
+        // This bypasses all auth-store state race conditions by passing the ID directly.
+        console.log("[Auth] Loading friends for returning guest:", guestUser.id);
+        const { useSocialStore } = await import('./useSocialStore');
+        await useSocialStore.getState().loadFriendsForUserId(guestUser.id);
       } else {
         console.log("[Auth] Guest registration failed after sign-out, using local guest fallback");
         let guestId = localStorage.getItem("sudoku_guest_id");
@@ -865,6 +964,10 @@ export const useAuthStore = create((set, get) => ({
     const currentElo = Number(localStorage.getItem("sudoku_elo")) || 1450;
 
     localStorage.setItem("sudoku_player_name", trimmed);
+    const { isGuest } = get();
+    if (isGuest) {
+      localStorage.setItem("sudoku_guest_name", trimmed);
+    }
     useLobbyStore.setState({ myPlayerName: trimmed });
 
     if (lobbyStore.ws && lobbyStore.isConnected && lobbyStore.ws.readyState === 1) {
@@ -907,3 +1010,5 @@ export const useAuthStore = create((set, get) => ({
     return { success: true };
   },
 }));
+
+window.useAuthStore = useAuthStore;

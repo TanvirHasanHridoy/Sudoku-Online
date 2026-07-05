@@ -30,7 +30,8 @@ export const useSocialStore = create((set, get) => ({
       get().updateRankTier();
     };
 
-    // Sync state with useAuthStore profile ELO
+    // Sync state with useAuthStore profile ELO and reload friends only when the user actually changes.
+    let previousUserId = null;
     useAuthStore.subscribe((state) => {
       if (state.profile) {
         set({ elo: state.profile.elo });
@@ -38,8 +39,20 @@ export const useSocialStore = create((set, get) => ({
         set({ elo: Number(localStorage.getItem('sudoku_elo')) || 1450 });
       }
       updateRank();
-      // Reload friends list whenever auth profile changes (login, logout, sync)
-      get().loadFriends();
+
+      // Only reload friends when the user ID changes (login / logout / account switch).
+      // Avoid reloading on every profile ELO/name update — that clears the list mid-transition.
+      const currentUserId = state.user?.id || null;
+      if (currentUserId !== previousUserId) {
+        previousUserId = currentUserId;
+        if (currentUserId) {
+          // User is logged in — load from database
+          get().loadFriends();
+        } else {
+          // User signed out — clear friends immediately
+          set({ friends: [], friendRequests: [] });
+        }
+      }
     });
 
     // Initial tier check
@@ -92,57 +105,91 @@ export const useSocialStore = create((set, get) => ({
     }
   },
 
+  // Loads friends for whatever user ID is currently in the auth store.
   loadFriends: async () => {
     const { user } = useAuthStore.getState();
     if (!user || !supabase) {
-      // Load guest friends from local storage if any
       const localFriends = JSON.parse(localStorage.getItem('sudoku_friends') || '[]');
       set({ friends: localFriends, friendRequests: [] });
       return;
     }
+    return get().loadFriendsForUserId(user.id);
+  },
+
+  // Loads friends for a SPECIFIC userId — no dependency on auth store state whatsoever.
+  // Use this when you know the exact ID you want (e.g. after sign-out returning to guest).
+  loadFriendsForUserId: async (userId) => {
+    if (!userId || !supabase) return;
+
+    console.log('[Social] Loading friends for user ID:', userId);
 
     try {
-      const myId = user.id;
       const { data: friendships, error } = await supabase
         .from('friendships')
         .select('*')
-        .or(`user_id.eq.${myId},friend_id.eq.${myId}`);
+        .or(`user_id.eq.${userId},friend_id.eq.${userId}`);
 
       if (error) throw error;
 
+      console.log('[Social] Friendships found:', friendships?.length ?? 0);
+
       if (!friendships || friendships.length === 0) {
-        set({ friends: [], friendRequests: [] });
-        return;
+        // Retry once after 800ms — JWT session may not be ready yet right after sign-in
+        console.log('[Social] 0 friendships on first try — retrying in 800ms...');
+        await new Promise(r => setTimeout(r, 800));
+
+        const { data: retryFriendships, error: retryError } = await supabase
+          .from('friendships')
+          .select('*')
+          .or(`user_id.eq.${userId},friend_id.eq.${userId}`);
+
+        if (retryError) throw retryError;
+        console.log('[Social] Retry friendships found:', retryFriendships?.length ?? 0);
+
+        if (!retryFriendships || retryFriendships.length === 0) {
+          set({ friends: [], friendRequests: [] });
+          return;
+        }
+
+        return get()._processFriendships(retryFriendships, userId);
       }
 
-      const friendIds = friendships.map(f => f.user_id === myId ? f.friend_id : f.user_id);
-      const { data: profiles, error: profileError } = await supabase
-        .from('profiles')
-        .select('id, display_name, elo, avatar_id')
-        .in('id', friendIds);
+      return get()._processFriendships(friendships, userId);
 
-      if (profileError) throw profileError;
+    } catch (err) {
+      console.warn('[Social] Failed loading friends:', err);
+    }
+  },
 
-      const profileMap = new Map(profiles.map(p => [p.id, p]));
+  // Internal helper — turns raw friendship rows into friend/request lists and updates state.
+  _processFriendships: (friendships, myId) => {
+    const friendIds = friendships.map(f => f.user_id === myId ? f.friend_id : f.user_id);
 
-      const loadedFriends = [];
-      const loadedRequests = [];
+    supabase
+      .from('profiles')
+      .select('id, display_name, elo, avatar_id')
+      .in('id', friendIds)
+      .then(({ data: profiles, error: profileError }) => {
+        if (profileError) { console.warn('[Social] Failed loading friend profiles:', profileError); return; }
 
-      for (const f of friendships) {
-        const friendId = f.user_id === myId ? f.friend_id : f.user_id;
-        const profile = profileMap.get(friendId);
-        if (!profile) continue;
+        const profileMap = new Map((profiles || []).map(p => [p.id, p]));
+        const loadedFriends = [];
+        const loadedRequests = [];
 
-        if (f.status === 'accepted') {
-          loadedFriends.push({
-            id: profile.id,
-            name: profile.display_name,
-            elo: profile.elo,
-            avatar: profile.avatar_id || 'apex',
-            status: 'offline' // default until sync
-          });
-        } else if (f.status === 'pending') {
-          if (f.friend_id === myId) {
+        for (const f of friendships) {
+          const friendId = f.user_id === myId ? f.friend_id : f.user_id;
+          const profile = profileMap.get(friendId);
+          if (!profile) continue;
+
+          if (f.status === 'accepted') {
+            loadedFriends.push({
+              id: profile.id,
+              name: profile.display_name,
+              elo: profile.elo,
+              avatar: profile.avatar_id || 'apex',
+              status: 'offline'
+            });
+          } else if (f.status === 'pending' && f.friend_id === myId) {
             loadedRequests.push({
               id: profile.id,
               name: profile.display_name,
@@ -151,23 +198,17 @@ export const useSocialStore = create((set, get) => ({
             });
           }
         }
-      }
 
-      set({ friends: loadedFriends, friendRequests: loadedRequests });
+        console.log('[Social] Setting friends list:', loadedFriends.length, 'friend(s),', loadedRequests.length, 'request(s)');
+        set({ friends: loadedFriends, friendRequests: loadedRequests });
 
-      // Notify the server of our friends list so it can send online status
-      const lobbyStore = useLobbyStore.getState();
-      if (lobbyStore.ws && lobbyStore.isConnected && lobbyStore.ws.readyState === 1) {
-        lobbyStore.ws.send(JSON.stringify({
-          type: 'SET_FRIENDS_LIST',
-          payload: { friendIds }
-        }));
-      }
-
-    } catch (err) {
-      console.warn('Failed loading friends from Supabase:', err);
-    }
+        const lobbyStore = useLobbyStore.getState();
+        if (lobbyStore.ws && lobbyStore.isConnected && lobbyStore.ws.readyState === 1) {
+          lobbyStore.ws.send(JSON.stringify({ type: 'SET_FRIENDS_LIST', payload: { friendIds } }));
+        }
+      });
   },
+
 
   addFriend: async (name) => {
     const trimmedName = name.trim();
@@ -190,16 +231,18 @@ export const useSocialStore = create((set, get) => ({
 
     if (user && supabase) {
       try {
-        const { data: targetProfile, error: profileError } = await supabase
+        const { data: searchResults, error: profileError } = await supabase
           .from('profiles')
           .select('id, display_name, elo')
           .ilike('display_name', trimmedName)
-          .single();
+          .order('created_at', { ascending: false });
 
-        if (profileError || !targetProfile) {
+        if (profileError || !searchResults || searchResults.length === 0) {
           lobbyStore.addToast(`Player '${trimmedName}' not found.`, 'error');
           return;
         }
+
+        const targetProfile = searchResults[0];
 
         const { data: existing, error: existingError } = await supabase
           .from('friendships')
@@ -535,3 +578,5 @@ export const useSocialStore = create((set, get) => ({
     }
   }
 }));
+
+window.useSocialStore = useSocialStore;
