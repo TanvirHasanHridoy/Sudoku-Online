@@ -198,7 +198,10 @@ export const useLobbyStore = create((set, get) => ({
     socket.onmessage = (event) => {
       try {
         const { type, payload } = JSON.parse(event.data);
-        console.log(`[Client Received] Type: ${type}`, payload);
+        const NOISY_MESSAGES = ['PROGRESS_UPDATED', 'PEER_SIGNAL', 'ICE_CANDIDATE', 'PEER_OFFER', 'PEER_ANSWER', 'PROGRESS_UPDATE', 'SIGNAL_DATA'];
+        if (!NOISY_MESSAGES.includes(type)) {
+          console.log(`[Client Received] Type: ${type}`, payload);
+        }
 
         switch (type) {
           case 'REGISTER_CONFIRMED': {
