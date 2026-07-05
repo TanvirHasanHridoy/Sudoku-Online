@@ -3,6 +3,8 @@ import { generateSudoku } from '../utils/generator';
 import { saveGameState, loadGameState, clearGameState } from '../utils/persistence';
 
 
+import { supabase } from '../lib/supabase';
+
 const parseTimeStringToSeconds = (timeStr) => {
   if (!timeStr) return 0;
   const parts = timeStr.split(':').map(Number);
@@ -18,7 +20,7 @@ const recordGameStarted = async () => {
 
   try {
     const { useAuthStore } = await import('./useAuthStore');
-    const { supabase, user } = useAuthStore.getState();
+    const { user } = useAuthStore.getState();
 
     if (user && supabase) {
       const { error } = await supabase.rpc('increment_game_started', {
@@ -43,7 +45,7 @@ const recordGameCompleted = async (isMultiplayer, elapsedSeconds, isWin) => {
 
   try {
     const { useAuthStore } = await import('./useAuthStore');
-    const { supabase, user } = useAuthStore.getState();
+    const { user } = useAuthStore.getState();
 
     if (user && supabase) {
       const { error } = await supabase.rpc('increment_game_completed', {
