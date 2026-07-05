@@ -670,15 +670,20 @@ export const useAuthStore = create((set, get) => ({
         localStorage.setItem("sudoku_avatar", profile.avatar_id || "apex");
         localStorage.setItem("sudoku_elo", profile.elo.toString());
 
-        // Cache stats in localStorage for instant loading on reload before profile resolves
-        const statsKey = `sudoku_stats_${profile.id}`;
-        localStorage.setItem(statsKey, JSON.stringify({
-          gamesPlayed: profile.games_played || 0,
-          gamesCompleted: profile.games_completed || 0,
-          soloWins: profile.solo_wins || 0,
-          multiplayerWins: profile.multiplayer_wins || 0,
-          totalCompletionTime: profile.total_completion_time || 0
-        }));
+        // Cache stats in localStorage for Google users (where Supabase DB is the source of truth).
+        // For guest users, we do NOT overwrite their local stats cache with DB profile values
+        // because guests accumulate stats locally and Supabase has 0 for them.
+        const activeUserIsGuest = checkIsGuestUser(user);
+        if (!activeUserIsGuest) {
+          const statsKey = `sudoku_stats_${profile.id}`;
+          localStorage.setItem(statsKey, JSON.stringify({
+            gamesPlayed: profile.games_played || 0,
+            gamesCompleted: profile.games_completed || 0,
+            soloWins: profile.solo_wins || 0,
+            multiplayerWins: profile.multiplayer_wins || 0,
+            totalCompletionTime: profile.total_completion_time || 0
+          }));
+        }
 
         // Update LobbyStore local states using setState to trigger reactivity
         console.log(

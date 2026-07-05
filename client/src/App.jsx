@@ -259,34 +259,19 @@ export default function App() {
   useEffect(() => {
     const loadPersonalStats = () => {
       if (!myPlayerId) return;
-      
-      const { isGuest: authIsGuest, profile: authProfile } = useAuthStore.getState();
-      if (!authIsGuest && authProfile) {
-        const stats = {
-          gamesPlayed: authProfile.games_played || 0,
-          gamesCompleted: authProfile.games_completed || 0,
-          soloWins: authProfile.solo_wins || 0,
-          multiplayerWins: authProfile.multiplayer_wins || 0,
-          totalCompletionTime: authProfile.total_completion_time || 0
-        };
+      const statsKey = `sudoku_stats_${myPlayerId}`;
+      try {
+        const stats = JSON.parse(localStorage.getItem(statsKey) || '{"gamesPlayed":0,"gamesCompleted":0,"soloWins":0,"multiplayerWins":0,"totalCompletionTime":0}');
         setPersonalStats(stats);
-        // Cache Google user stats in localStorage under their ID
-        localStorage.setItem(`sudoku_stats_${myPlayerId}`, JSON.stringify(stats));
-      } else {
-        const statsKey = `sudoku_stats_${myPlayerId}`;
-        try {
-          const stats = JSON.parse(localStorage.getItem(statsKey) || '{"gamesPlayed":0,"gamesCompleted":0,"soloWins":0,"multiplayerWins":0,"totalCompletionTime":0}');
-          setPersonalStats(stats);
-        } catch (e) {
-          setPersonalStats({ gamesPlayed: 0, gamesCompleted: 0, soloWins: 0, multiplayerWins: 0, totalCompletionTime: 0 });
-        }
+      } catch (e) {
+        setPersonalStats({ gamesPlayed: 0, gamesCompleted: 0, soloWins: 0, multiplayerWins: 0, totalCompletionTime: 0 });
       }
     };
     loadPersonalStats();
-  }, [myPlayerId, gameStatus, activeView, profile, isGuest]);
+  }, [myPlayerId, gameStatus, activeView, profile]);
 
   const winRate = personalStats.gamesPlayed > 0 ? Math.round((personalStats.gamesCompleted / personalStats.gamesPlayed) * 100) : 0;
-  
+
   const formatAvgTime = () => {
     if (personalStats.gamesCompleted === 0) return "00:00";
     const avgSeconds = Math.round(personalStats.totalCompletionTime / personalStats.gamesCompleted);
@@ -542,9 +527,9 @@ export default function App() {
         const strikePenalty = strikes * 3;
         const hintPenalty = hintsUsed * 4;
         const finalWin = Math.max(5, baseWin - strikePenalty - hintPenalty);
-        
+
         adjustElo(finalWin);
-        
+
         const details = [];
         details.push(`Base: +${baseWin}`);
         if (strikePenalty > 0) details.push(`Strikes: -${strikePenalty}`);
@@ -563,12 +548,12 @@ export default function App() {
         else if (difficulty === "medium") baseLoss = -12;
         else if (difficulty === "hard") baseLoss = -15;
         else if (difficulty === "expert") baseLoss = -18;
-        
+
         const strikePenalty = strikes * 2;
         const finalLoss = Math.max(-30, baseLoss - strikePenalty);
-        
+
         adjustElo(finalLoss);
-        
+
         const details = [];
         details.push(`Base: ${baseLoss}`);
         if (strikePenalty > 0) details.push(`Strikes: -${strikePenalty}`);
@@ -1152,6 +1137,8 @@ export default function App() {
     setActiveView("game");
     addToast("Practice mode active — unlimited lives!", "info");
   };
+
+  console.log("App.jsx toasts list:", toasts);
 
   // Render dual-board spectator dashboard (Responsive Layout)
   const renderSpectatorView = () => {
