@@ -258,17 +258,20 @@ export default function App() {
 
   useEffect(() => {
     const loadPersonalStats = () => {
-      if (!myPlayerId) return;
-      const statsKey = `sudoku_stats_${myPlayerId}`;
-      try {
-        const stats = JSON.parse(localStorage.getItem(statsKey) || '{"gamesPlayed":0,"gamesCompleted":0,"soloWins":0,"multiplayerWins":0,"totalCompletionTime":0}');
-        setPersonalStats(stats);
-      } catch (e) {
+      if (!profile) {
         setPersonalStats({ gamesPlayed: 0, gamesCompleted: 0, soloWins: 0, multiplayerWins: 0, totalCompletionTime: 0 });
+        return;
       }
+      setPersonalStats({
+        gamesPlayed: profile.games_played || 0,
+        gamesCompleted: profile.games_completed || 0,
+        soloWins: profile.solo_wins || 0,
+        multiplayerWins: profile.multiplayer_wins || 0,
+        totalCompletionTime: profile.total_completion_time || 0
+      });
     };
     loadPersonalStats();
-  }, [myPlayerId, gameStatus, activeView, profile]);
+  }, [profile]);
 
   const winRate = personalStats.gamesPlayed > 0 ? Math.round((personalStats.gamesCompleted / personalStats.gamesPlayed) * 100) : 0;
 
