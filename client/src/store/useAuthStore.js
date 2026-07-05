@@ -662,18 +662,23 @@ export const useAuthStore = create((set, get) => ({
           set({ isGuest: false });
         }
 
-        // Always track the active player's Supabase ID
+        // Always track the active player's Supabase ID and display keys (name / avatar / elo)
+        // so that on next reload the correct cached profile is instantly rendered rather than flashing guest details.
+        // The original guest's details remain safe in the sudoku_guest_* keys and are restored on logout.
         localStorage.setItem("sudoku_player_id", profile.id);
+        localStorage.setItem("sudoku_player_name", profile.display_name);
+        localStorage.setItem("sudoku_avatar", profile.avatar_id || "apex");
+        localStorage.setItem("sudoku_elo", profile.elo.toString());
 
-        // Only sync the shared display keys (name / avatar / elo) when the active user IS the guest.
-        // When a Google user is logged in we deliberately leave the guest's keys untouched so they
-        // are still intact when we switch back to the guest account on logout.
-        const activeIsGuest = checkIsGuestUser(user);
-        if (activeIsGuest) {
-          localStorage.setItem("sudoku_player_name", profile.display_name);
-          localStorage.setItem("sudoku_avatar", profile.avatar_id || "apex");
-          localStorage.setItem("sudoku_elo", profile.elo.toString());
-        }
+        // Cache stats in localStorage for instant loading on reload before profile resolves
+        const statsKey = `sudoku_stats_${profile.id}`;
+        localStorage.setItem(statsKey, JSON.stringify({
+          gamesPlayed: profile.games_played || 0,
+          gamesCompleted: profile.games_completed || 0,
+          soloWins: profile.solo_wins || 0,
+          multiplayerWins: profile.multiplayer_wins || 0,
+          totalCompletionTime: profile.total_completion_time || 0
+        }));
 
         // Update LobbyStore local states using setState to trigger reactivity
         console.log(

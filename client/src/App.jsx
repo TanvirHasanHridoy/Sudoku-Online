@@ -260,15 +260,18 @@ export default function App() {
     const loadPersonalStats = () => {
       if (!myPlayerId) return;
       
-      const { isGuest, profile } = useAuthStore.getState();
-      if (!isGuest && profile) {
-        setPersonalStats({
-          gamesPlayed: profile.games_played || 0,
-          gamesCompleted: profile.games_completed || 0,
-          soloWins: profile.solo_wins || 0,
-          multiplayerWins: profile.multiplayer_wins || 0,
-          totalCompletionTime: profile.total_completion_time || 0
-        });
+      const { isGuest: authIsGuest, profile: authProfile } = useAuthStore.getState();
+      if (!authIsGuest && authProfile) {
+        const stats = {
+          gamesPlayed: authProfile.games_played || 0,
+          gamesCompleted: authProfile.games_completed || 0,
+          soloWins: authProfile.solo_wins || 0,
+          multiplayerWins: authProfile.multiplayer_wins || 0,
+          totalCompletionTime: authProfile.total_completion_time || 0
+        };
+        setPersonalStats(stats);
+        // Cache Google user stats in localStorage under their ID
+        localStorage.setItem(`sudoku_stats_${myPlayerId}`, JSON.stringify(stats));
       } else {
         const statsKey = `sudoku_stats_${myPlayerId}`;
         try {
@@ -280,7 +283,7 @@ export default function App() {
       }
     };
     loadPersonalStats();
-  }, [myPlayerId, gameStatus, activeView, profile]);
+  }, [myPlayerId, gameStatus, activeView, profile, isGuest]);
 
   const winRate = personalStats.gamesPlayed > 0 ? Math.round((personalStats.gamesCompleted / personalStats.gamesPlayed) * 100) : 0;
   
@@ -1149,8 +1152,6 @@ export default function App() {
     setActiveView("game");
     addToast("Practice mode active — unlimited lives!", "info");
   };
-
-  console.log("App.jsx toasts list:", toasts);
 
   // Render dual-board spectator dashboard (Responsive Layout)
   const renderSpectatorView = () => {

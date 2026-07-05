@@ -108,9 +108,14 @@ export const useSocialStore = create((set, get) => ({
   // Loads friends for whatever user ID is currently in the auth store.
   loadFriends: async () => {
     const { user } = useAuthStore.getState();
+    const activePlayerId = localStorage.getItem('sudoku_player_id');
+
+    // First load from user-specific cache in localStorage for instant rendering
+    const cacheKey = activePlayerId ? `sudoku_friends_${activePlayerId}` : 'sudoku_friends';
+    const localFriends = JSON.parse(localStorage.getItem(cacheKey) || '[]');
+    set({ friends: localFriends, friendRequests: [] });
+
     if (!user || !supabase) {
-      const localFriends = JSON.parse(localStorage.getItem('sudoku_friends') || '[]');
-      set({ friends: localFriends, friendRequests: [] });
       return;
     }
     return get().loadFriendsForUserId(user.id);
@@ -201,6 +206,10 @@ export const useSocialStore = create((set, get) => ({
 
         console.log('[Social] Setting friends list:', loadedFriends.length, 'friend(s),', loadedRequests.length, 'request(s)');
         set({ friends: loadedFriends, friendRequests: loadedRequests });
+
+        // Cache the resolved friends list in localStorage under the user's ID
+        const cacheKey = myId ? `sudoku_friends_${myId}` : 'sudoku_friends';
+        localStorage.setItem(cacheKey, JSON.stringify(loadedFriends));
 
         const lobbyStore = useLobbyStore.getState();
         if (lobbyStore.ws && lobbyStore.isConnected && lobbyStore.ws.readyState === 1) {
@@ -297,9 +306,10 @@ export const useSocialStore = create((set, get) => ({
             type: 'SEND_FRIEND_REQUEST',
             payload: { senderId: lobbyStore.myPlayerId, targetName: trimmedName }
           }));
+        } else {
+          // Fallback if WS is disconnected: show toast locally since DB insert succeeded
+          lobbyStore.addToast(`Friend request sent to ${trimmedName}!`, 'success');
         }
-
-        lobbyStore.addToast(`Friend request sent to ${trimmedName}!`, 'success');
         get().loadFriends(); // Reload to reflect any state changes
 
       } catch (err) {
