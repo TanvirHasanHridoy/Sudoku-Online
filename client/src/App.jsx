@@ -258,17 +258,20 @@ export default function App() {
 
   useEffect(() => {
     const loadPersonalStats = () => {
-      if (!myPlayerId) return;
-      const statsKey = `sudoku_stats_${myPlayerId}`;
-      try {
-        const stats = JSON.parse(localStorage.getItem(statsKey) || '{"gamesPlayed":0,"gamesCompleted":0,"soloWins":0,"multiplayerWins":0,"totalCompletionTime":0}');
-        setPersonalStats(stats);
-      } catch (e) {
+      if (!profile) {
         setPersonalStats({ gamesPlayed: 0, gamesCompleted: 0, soloWins: 0, multiplayerWins: 0, totalCompletionTime: 0 });
+        return;
       }
+      setPersonalStats({
+        gamesPlayed: profile.games_played || 0,
+        gamesCompleted: profile.games_completed || 0,
+        soloWins: profile.solo_wins || 0,
+        multiplayerWins: profile.multiplayer_wins || 0,
+        totalCompletionTime: profile.total_completion_time || 0
+      });
     };
     loadPersonalStats();
-  }, [myPlayerId, gameStatus, activeView, profile]);
+  }, [profile]);
 
   const winRate = personalStats.gamesPlayed > 0 ? Math.round((personalStats.gamesCompleted / personalStats.gamesPlayed) * 100) : 0;
 
@@ -1363,14 +1366,16 @@ export default function App() {
               <span className="opacity-70 font-semibold">Loading...</span>
             </div>
           ) : isGuest ? (
-            <button
-              onClick={signInWithGoogle}
-              disabled={isSavingUsername || isCheckingUsername}
-              className="px-3 py-1.5 rounded-xl border border-border-custom hover:bg-accent-glow hover:border-accent-custom hover:text-accent-custom active:scale-95 transition-all flex items-center gap-1.5 text-xs font-bold text-text-custom cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
-            >
-              <LogIn size={14} />
-              <span>Link Google</span>
-            </button>
+            activeView !== "game" && (
+              <button
+                onClick={signInWithGoogle}
+                disabled={isSavingUsername || isCheckingUsername}
+                className="px-3 py-1.5 rounded-xl border border-border-custom hover:bg-accent-glow hover:border-accent-custom hover:text-accent-custom active:scale-95 transition-all flex items-center gap-1.5 text-xs font-bold text-text-custom cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
+              >
+                <LogIn size={14} />
+                <span>Link Google</span>
+              </button>
+            )
           ) : (
             <div className="flex items-center gap-2">
               <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl border border-border-custom bg-panel-custom/50">
@@ -2414,7 +2419,7 @@ export default function App() {
         ) : (
           <main className="max-w-6xl mx-auto px-2 sm:px-4 py-2 lg:py-10 grid grid-cols-1 lg:grid-cols-12 gap-3 lg:gap-8 items-start">
             {/* LEFT COLUMN: The Sudoku Puzzle Area */}
-            <section className={`${room ? "lg:col-span-7" : "lg:col-span-12"} flex flex-col items-center relative`}>
+            <section className={`${room ? "lg:col-span-7" : "lg:col-span-8"} flex flex-col items-center relative`}>
               {/* PAUSED MASK SCREEN */}
               {isGamePaused && (
                 <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md rounded-2xl flex flex-col items-center justify-center p-4 z-30 animate-fade-in border border-border-custom/50">
@@ -2502,6 +2507,29 @@ export default function App() {
                   </button>
                 </div>
               </div>
+
+              {/* Compact Stats Panel */}
+              {/* <div className="w-full max-w-[460px] mb-3 px-3 py-2 glass-panel rounded-xl flex items-center justify-between text-[10px] text-text-custom/75 select-none font-semibold shadow-sm border border-border-custom/30 gap-2">
+                <div className="flex items-center gap-1.5">
+                  <span className="opacity-55 uppercase tracking-wider text-[8.5px]">Played</span>
+                  <span className="font-extrabold text-accent-custom text-xs">{personalStats.gamesPlayed}</span>
+                </div>
+                <div className="h-4 w-px bg-border-custom/30"></div>
+                <div className="flex items-center gap-1.5">
+                  <span className="opacity-55 uppercase tracking-wider text-[8.5px]">Won</span>
+                  <span className="font-extrabold text-emerald-500 text-xs">{personalStats.gamesCompleted}</span>
+                </div>
+                <div className="h-4 w-px bg-border-custom/30"></div>
+                <div className="flex items-center gap-1.5">
+                  <span className="opacity-55 uppercase tracking-wider text-[8.5px]">Win Rate</span>
+                  <span className="font-extrabold text-amber-500 text-xs">{winRate}%</span>
+                </div>
+                <div className="h-4 w-px bg-border-custom/30"></div>
+                <div className="flex items-center gap-1.5">
+                  <span className="opacity-55 uppercase tracking-wider text-[8.5px]">Elo Rating</span>
+                  <span className="font-extrabold text-accent-custom text-xs">{profile?.elo || 1450}</span>
+                </div>
+              </div> */}
 
               {/* Mobile Opponent HUD (only shown on mobile/tablet when in a multiplayer match) */}
               {room && room.isGameStarted && activeOpponent && (
@@ -2816,402 +2844,426 @@ export default function App() {
               />
             </section>
 
-            {/* RIGHT COLUMN: Multiplayer Lobby, Live Feed & Opponent Progress (Cols 8 to 12) */}
-            {room && (
-              <section className="lg:col-span-5 flex flex-col gap-6">
-                {/* Matchmaking / Private Lobby Tabs */}
-                <div className="glass-card rounded-2xl p-5">
-                  <div className="flex bg-accent-glow/30 rounded-xl p-1 mb-4 border border-border-custom/40">
-                    <button
-                      onClick={() => setActiveTab("lobby")}
-                      className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold transition-all ${activeTab === "lobby"
-                        ? "bg-panel-custom text-text-custom shadow-xs"
-                        : "opacity-60 hover:opacity-100"
-                        }`}
-                    >
-                      <Users size={16} />
-                      Private Room
-                    </button>
-                    {/* Matchmaking tab is hidden when a game is in progress */}
-                    {!room?.isGameStarted && (
+            {/* RIGHT COLUMN: Multiplayer Lobby / Solo Stats Card (Cols 8 to 12) */}
+            <section className={`${room ? "lg:col-span-5" : "lg:col-span-4"} flex flex-col gap-6 w-full`}>
+              {room ? (
+                <>
+                  {/* Compact Stats Row (multiplayer) */}
+                  <div className="glass-panel p-3 rounded-2xl border border-border-custom/30 flex items-center justify-between text-[10px] text-text-custom/75 select-none font-semibold gap-2 shadow-xs">
+                    <div className="flex items-center gap-1.5">
+                      <span className="opacity-55 uppercase tracking-wider text-[8px]">Played</span>
+                      <span className="font-extrabold text-accent-custom text-xs">{personalStats.gamesPlayed}</span>
+                    </div>
+                    <div className="h-4 w-px bg-border-custom/30"></div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="opacity-55 uppercase tracking-wider text-[8px]">Won</span>
+                      <span className="font-extrabold text-emerald-500 text-xs">{personalStats.gamesCompleted}</span>
+                    </div>
+                    <div className="h-4 w-px bg-border-custom/30"></div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="opacity-55 uppercase tracking-wider text-[8px]">Win Rate</span>
+                      <span className="font-extrabold text-amber-500 text-xs">{winRate}%</span>
+                    </div>
+                    <div className="h-4 w-px bg-border-custom/30"></div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="opacity-55 uppercase tracking-wider text-[8px]">Elo</span>
+                      <span className="font-extrabold text-accent-custom text-xs">{profile?.elo || 1450}</span>
+                    </div>
+                  </div>
+
+                  {/* Matchmaking / Private Lobby Tabs */}
+                  <div className="glass-card rounded-2xl p-5">
+                    <div className="flex bg-accent-glow/30 rounded-xl p-1 mb-4 border border-border-custom/40">
                       <button
-                        onClick={() => setActiveTab("matchmaker")}
-                        className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold transition-all ${activeTab === "matchmaker"
+                        onClick={() => setActiveTab("lobby")}
+                        className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold transition-all ${activeTab === "lobby"
                           ? "bg-panel-custom text-text-custom shadow-xs"
                           : "opacity-60 hover:opacity-100"
                           }`}
                       >
-                        <Trophy size={16} />
-                        Matchmaking
+                        <Users size={16} />
+                        Private Room
                       </button>
-                    )}
-                  </div>
+                      {/* Matchmaking tab is hidden when a game is in progress */}
+                      {!room?.isGameStarted && (
+                        <button
+                          onClick={() => setActiveTab("matchmaker")}
+                          className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold transition-all ${activeTab === "matchmaker"
+                            ? "bg-panel-custom text-text-custom shadow-xs"
+                            : "opacity-60 hover:opacity-100"
+                            }`}
+                        >
+                          <Trophy size={16} />
+                          Matchmaking
+                        </button>
+                      )}
+                    </div>
 
-                  {/* TAB CONTENT: Lobby Connection */}
-                  {activeTab === "lobby" && (
-                    <div className="space-y-4">
-                      {!room ? (
-                        // Room Joining / Creation controls
-                        <div className="space-y-3">
-                          <div className="space-y-1">
-                            <label className="text-[10px] uppercase font-bold opacity-60 tracking-wider">
-                              Join Private Room
-                            </label>
-                            <div className="flex gap-2">
-                              <input
-                                type="text"
-                                placeholder="Enter 6-digit Code"
-                                maxLength={6}
-                                value={inputCode}
-                                onChange={(e) =>
-                                  setInputCode(e.target.value.replace(/\D/g, ""))
-                                }
-                                className="flex-1 px-3 py-2 bg-accent-glow border border-border-custom rounded-xl font-bold tracking-widest text-center text-sm focus:outline-none focus:border-accent-custom"
-                              />
-                              <button
-                                onClick={() => joinRoom(inputCode)}
-                                className="px-4 bg-accent-custom hover:bg-accent-hover text-white font-bold rounded-xl text-xs transition-all active:scale-95"
-                                disabled={inputCode.length !== 6 || !isConnected}
-                              >
-                                Join
-                              </button>
-                            </div>
-                          </div>
-
-                          <div className="relative flex py-2 items-center">
-                            <div className="flex-grow border-t border-border-custom/50"></div>
-                            <span className="flex-shrink mx-4 text-[10px] uppercase font-bold opacity-45 tracking-widest">
-                              or
-                            </span>
-                            <div className="flex-grow border-t border-border-custom/50"></div>
-                          </div>
-
-                          <div className="space-y-1">
-                            <label className="text-[10px] uppercase font-bold opacity-60 tracking-wider">
-                              Difficulty for New Room
-                            </label>
-                            <select
-                              value={selectedDifficulty}
-                              onChange={(e) =>
-                                setSelectedDifficulty(e.target.value)
-                              }
-                              className="w-full px-3 py-2 bg-accent-glow border border-border-custom rounded-xl font-bold text-xs focus:outline-none cursor-pointer"
-                            >
-                              <option value="easy">Easy</option>
-                              <option value="medium">Medium</option>
-                              <option value="hard">Hard</option>
-                              <option value="expert">Expert</option>
-                            </select>
-                          </div>
-
-                          {showManaOptionSetting && (
-                            <div className="flex items-center gap-2 select-none py-1 justify-center">
-                              <input
-                                type="checkbox"
-                                id="enableAbilitiesCheckMobile"
-                                checked={enableAbilities}
-                                onChange={(e) => setEnableAbilities(e.target.checked)}
-                                className="w-4 h-4 rounded border-border-custom text-accent-custom bg-accent-glow/20 focus:ring-accent-custom focus:ring-offset-0 cursor-pointer"
-                              />
-                              <label
-                                htmlFor="enableAbilitiesCheckMobile"
-                                className="text-[10px] uppercase font-bold opacity-80 tracking-wider cursor-pointer"
-                              >
-                                Enable Special Abilities (Mana) for Room
+                    {/* TAB CONTENT: Lobby Connection */}
+                    {activeTab === "lobby" && (
+                      <div className="space-y-4">
+                        {!room ? (
+                          // Room Joining / Creation controls
+                          <div className="space-y-3">
+                            <div className="space-y-1">
+                              <label className="text-[10px] uppercase font-bold opacity-60 tracking-wider">
+                                Join Private Room
                               </label>
-                            </div>
-                          )}
-
-                          <button
-                            onClick={() =>
-                              createRoom(selectedDifficulty, showManaOptionSetting ? enableAbilities : false)
-                            }
-                            className="w-full py-3 bg-accent-glow hover:bg-accent-glow/70 border border-border-custom text-text-custom font-bold text-xs rounded-xl active:scale-95 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-                            disabled={!isConnected}
-                          >
-                            <PlayCircle size={15} className="text-accent-custom" />
-                            Create New Lobby
-                          </button>
-                        </div>
-                      ) : (
-                        // Active Room Lobby
-                        <div className="space-y-4">
-                          <div className="flex items-start justify-between border-b border-border-custom pb-3">
-                            <div>
-                              <span className="text-[10px] uppercase font-bold opacity-50 tracking-wider">
-                                Room Code
-                              </span>
-                              <div className="flex items-center gap-1.5">
-                                <p className="text-xl font-extrabold tracking-widest text-accent-custom transition-all duration-300">
-                                  {room.code}
-                                </p>
+                              <div className="flex gap-2">
+                                <input
+                                  type="text"
+                                  placeholder="Enter 6-digit Code"
+                                  maxLength={6}
+                                  value={inputCode}
+                                  onChange={(e) =>
+                                    setInputCode(e.target.value.replace(/\D/g, ""))
+                                  }
+                                  className="flex-1 px-3 py-2 bg-accent-glow border border-border-custom rounded-xl font-bold tracking-widest text-center text-sm focus:outline-none focus:border-accent-custom"
+                                />
                                 <button
-                                  onClick={copyRoomCode}
-                                  className="text-text-custom opacity-50 hover:opacity-100 transition-all p-1"
-                                  title="Copy Code"
+                                  onClick={() => joinRoom(inputCode)}
+                                  className="px-4 bg-accent-custom hover:bg-accent-hover text-white font-bold rounded-xl text-xs transition-all active:scale-95"
+                                  disabled={inputCode.length !== 6 || !isConnected}
                                 >
-                                  {isCopied ? (
-                                    <Check size={14} className="text-emerald-500" />
-                                  ) : (
-                                    <Clipboard size={14} />
-                                  )}
+                                  Join
                                 </button>
                               </div>
                             </div>
 
-                            {/* Share QR Code Vector */}
-                            <div
-                              className="bg-white p-1.5 rounded-lg border border-border-custom shadow-xs"
-                              title="Share via QR Code"
-                            >
-                              <QRCodeSVG value={getJoinUrl()} size={50} />
-                            </div>
-                          </div>
-
-                          {/* Lobby Connections list */}
-                          <div>
-                            <h3 className="text-xs uppercase font-bold opacity-50 tracking-wider mb-2 flex items-center justify-between">
-                              <span>Lobby Connections</span>
-                              <span className="text-[10px] text-emerald-500 flex items-center gap-1">
-                                <Wifi size={10} /> Live Synced
+                            <div className="relative flex py-2 items-center">
+                              <div className="flex-grow border-t border-border-custom/50"></div>
+                              <span className="flex-shrink mx-4 text-[10px] uppercase font-bold opacity-45 tracking-widest">
+                                or
                               </span>
-                            </h3>
+                              <div className="flex-grow border-t border-border-custom/50"></div>
+                            </div>
 
-                            <div className="space-y-3">
-                              {activePlayers.map((p) => {
-                                const isMe = p.id === myPlayerId;
-                                const voiceJoined = isMe
-                                  ? isVoiceJoined
-                                  : p.isVoiceJoined;
-                                const voiceMuted = isMe
-                                  ? isMicMuted
-                                  : p.isVoiceMuted;
+                            <div className="space-y-1">
+                              <label className="text-[10px] uppercase font-bold opacity-60 tracking-wider">
+                                Difficulty for New Room
+                              </label>
+                              <select
+                                value={selectedDifficulty}
+                                onChange={(e) =>
+                                  setSelectedDifficulty(e.target.value)
+                                }
+                                className="w-full px-3 py-2 bg-accent-glow border border-border-custom rounded-xl font-bold text-xs focus:outline-none cursor-pointer"
+                              >
+                                <option value="easy">Easy</option>
+                                <option value="medium">Medium</option>
+                                <option value="hard">Hard</option>
+                                <option value="expert">Expert</option>
+                              </select>
+                            </div>
 
-                                return (
-                                  <div
-                                    key={p.id}
-                                    className={`border border-border-custom/50 rounded-xl p-3 bg-accent-glow/10 ${isMe
-                                      ? "ring-1 ring-accent-custom/30 bg-accent-glow/20"
-                                      : ""
-                                      }`}
+                            {showManaOptionSetting && (
+                              <div className="flex items-center gap-2 select-none py-1 justify-center">
+                                <input
+                                  type="checkbox"
+                                  id="enableAbilitiesCheckMobile"
+                                  checked={enableAbilities}
+                                  onChange={(e) => setEnableAbilities(e.target.checked)}
+                                  className="w-4 h-4 rounded border-border-custom text-accent-custom bg-accent-glow/20 focus:ring-accent-custom focus:ring-offset-0 cursor-pointer"
+                                />
+                                <label
+                                  htmlFor="enableAbilitiesCheckMobile"
+                                  className="text-[10px] uppercase font-bold opacity-80 tracking-wider cursor-pointer"
+                                >
+                                  Enable Special Abilities (Mana) for Room
+                                </label>
+                              </div>
+                            )}
+
+                            <button
+                              onClick={() =>
+                                createRoom(selectedDifficulty, showManaOptionSetting ? enableAbilities : false)
+                              }
+                              className="w-full py-3 bg-accent-glow hover:bg-accent-glow/70 border border-border-custom text-text-custom font-bold text-xs rounded-xl active:scale-95 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                              disabled={!isConnected}
+                            >
+                              <PlayCircle size={15} className="text-accent-custom" />
+                              Create New Lobby
+                            </button>
+                          </div>
+                        ) : (
+                          // Active Room Lobby
+                          <div className="space-y-4">
+                            <div className="flex items-start justify-between border-b border-border-custom pb-3">
+                              <div>
+                                <span className="text-[10px] uppercase font-bold opacity-50 tracking-wider">
+                                  Room Code
+                                </span>
+                                <div className="flex items-center gap-1.5">
+                                  <p className="text-xl font-extrabold tracking-widest text-accent-custom transition-all duration-300">
+                                    {room.code}
+                                  </p>
+                                  <button
+                                    onClick={copyRoomCode}
+                                    className="text-text-custom opacity-50 hover:opacity-100 transition-all p-1"
+                                    title="Copy Code"
                                   >
-                                    <div className="flex items-center justify-between mb-2">
-                                      <div className="flex items-center gap-2">
-                                        <div
-                                          className={`w-7 h-7 rounded-full bg-accent-custom text-white font-bold flex items-center justify-center text-xs relative transition-all duration-300 overflow-hidden ${voiceJoined && !voiceMuted
-                                            ? "speaking-pulse-avatar shadow-md shadow-emerald-500/20"
-                                            : ""
-                                            }`}
-                                        >
-                                          {AVATARS.find(
-                                            (a) =>
-                                              a.id ===
-                                              (isMe ? selectedAvatar : p.avatar),
-                                          ) ? (
-                                            <img
-                                              src={
-                                                AVATARS.find(
-                                                  (a) =>
-                                                    a.id ===
-                                                    (isMe
-                                                      ? selectedAvatar
-                                                      : p.avatar),
-                                                ).src
-                                              }
-                                              alt="Player Avatar"
-                                              className="w-full h-full object-cover"
-                                            />
-                                          ) : isMe ? (
-                                            "ME"
+                                    {isCopied ? (
+                                      <Check size={14} className="text-emerald-500" />
+                                    ) : (
+                                      <Clipboard size={14} />
+                                    )}
+                                  </button>
+                                </div>
+                              </div>
+
+                              {/* Share QR Code Vector */}
+                              <div
+                                className="bg-white p-1.5 rounded-lg border border-border-custom shadow-xs"
+                                title="Share via QR Code"
+                              >
+                                <QRCodeSVG value={getJoinUrl()} size={50} />
+                              </div>
+                            </div>
+
+                            {/* Lobby Connections list */}
+                            <div>
+                              <h3 className="text-xs uppercase font-bold opacity-50 tracking-wider mb-2 flex items-center justify-between">
+                                <span>Lobby Connections</span>
+                                <span className="text-[10px] text-emerald-500 flex items-center gap-1">
+                                  <Wifi size={10} /> Live Synced
+                                </span>
+                              </h3>
+
+                              <div className="space-y-3">
+                                {activePlayers.map((p) => {
+                                  const isMe = p.id === myPlayerId;
+                                  const voiceJoined = isMe
+                                    ? isVoiceJoined
+                                    : p.isVoiceJoined;
+                                  const voiceMuted = isMe
+                                    ? isMicMuted
+                                    : p.isVoiceMuted;
+
+                                  return (
+                                    <div
+                                      key={p.id}
+                                      className={`border border-border-custom/50 rounded-xl p-3 bg-accent-glow/10 ${isMe
+                                        ? "ring-1 ring-accent-custom/30 bg-accent-glow/20"
+                                        : ""
+                                        }`}
+                                    >
+                                      <div className="flex items-center justify-between mb-2">
+                                        <div className="flex items-center gap-2">
+                                          <div
+                                            className={`w-7 h-7 rounded-full bg-accent-custom text-white font-bold flex items-center justify-center text-xs relative transition-all duration-300 overflow-hidden ${voiceJoined && !voiceMuted
+                                              ? "speaking-pulse-avatar shadow-md shadow-emerald-500/20"
+                                              : ""
+                                              }`}
+                                          >
+                                            {AVATARS.find(
+                                              (a) =>
+                                                a.id ===
+                                                (isMe ? selectedAvatar : p.avatar),
+                                            ) ? (
+                                              <img
+                                                src={
+                                                  AVATARS.find(
+                                                    (a) =>
+                                                      a.id ===
+                                                      (isMe
+                                                        ? selectedAvatar
+                                                        : p.avatar),
+                                                  ).src
+                                                }
+                                                alt="Player Avatar"
+                                                className="w-full h-full object-cover"
+                                              />
+                                            ) : isMe ? (
+                                              "ME"
+                                            ) : (
+                                              p.name?.slice(0, 2)?.toUpperCase() || "P"
+                                            )}
+                                          </div>
+                                          <div>
+                                            <div className="flex items-center gap-1.5">
+                                              <p className="text-xs font-bold leading-tight">
+                                                {p.name} {isMe && "(You)"}
+                                              </p>
+                                              {voiceJoined &&
+                                                (voiceMuted ? (
+                                                  <MicOff
+                                                    size={11}
+                                                    className="text-rose-500"
+                                                    title="Microphone Muted"
+                                                  />
+                                                ) : (
+                                                  <Mic
+                                                    size={11}
+                                                    className="text-emerald-500 animate-pulse-subtle"
+                                                    title="Microphone Active"
+                                                  />
+                                                ))}
+                                            </div>
+                                            <span className="text-[9px] opacity-60">
+                                              {p.elo || 1450} ELO
+                                            </span>
+                                          </div>
+                                        </div>
+
+                                        <div className="flex items-center gap-2">
+                                          {room.isGameStarted ? (
+                                            <div className="flex gap-0.5">
+                                              {Array(3)
+                                                .fill(null)
+                                                .map((_, i) => (
+                                                  <div
+                                                    key={i}
+                                                    className={`w-2 h-2 rounded-full ${i < maxStrikes - p.strikes
+                                                      ? "bg-rose-500"
+                                                      : "border border-dashed border-border-custom opacity-40"
+                                                      }`}
+                                                  />
+                                                ))}
+                                            </div>
                                           ) : (
-                                            p.name?.slice(0, 2)?.toUpperCase() || "P"
+                                            <>
+                                              {isHost && !isMe && (
+                                                <button
+                                                  onClick={() => kickPlayer(p.id)}
+                                                  className="px-2 py-0.5 bg-rose-500/10 hover:bg-rose-500 hover:text-white border border-rose-500/30 text-rose-500 text-[9px] font-bold rounded-lg transition-all active:scale-95 mr-1"
+                                                  title="Kick Player"
+                                                >
+                                                  Kick
+                                                </button>
+                                              )}
+                                              <span
+                                                className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${p.isReady
+                                                  ? "bg-emerald-500/20 text-emerald-500 border border-emerald-500/30"
+                                                  : "bg-accent-glow border border-border-custom text-text-custom opacity-60"
+                                                  }`}
+                                              >
+                                                {p.isReady ? "READY" : "WAITING"}
+                                              </span>
+                                            </>
                                           )}
                                         </div>
-                                        <div>
-                                          <div className="flex items-center gap-1.5">
-                                            <p className="text-xs font-bold leading-tight">
-                                              {p.name} {isMe && "(You)"}
-                                            </p>
-                                            {voiceJoined &&
-                                              (voiceMuted ? (
-                                                <MicOff
-                                                  size={11}
-                                                  className="text-rose-500"
-                                                  title="Microphone Muted"
-                                                />
-                                              ) : (
-                                                <Mic
-                                                  size={11}
-                                                  className="text-emerald-500 animate-pulse-subtle"
-                                                  title="Microphone Active"
-                                                />
-                                              ))}
-                                          </div>
-                                          <span className="text-[9px] opacity-60">
-                                            {p.elo || 1450} ELO
-                                          </span>
-                                        </div>
                                       </div>
 
-                                      <div className="flex items-center gap-2">
-                                        {room.isGameStarted ? (
-                                          <div className="flex gap-0.5">
-                                            {Array(3)
-                                              .fill(null)
-                                              .map((_, i) => (
-                                                <div
-                                                  key={i}
-                                                  className={`w-2 h-2 rounded-full ${i < maxStrikes - p.strikes
-                                                    ? "bg-rose-500"
-                                                    : "border border-dashed border-border-custom opacity-40"
-                                                    }`}
-                                                />
-                                              ))}
-                                          </div>
-                                        ) : (
-                                          <>
-                                            {isHost && !isMe && (
-                                              <button
-                                                onClick={() => kickPlayer(p.id)}
-                                                className="px-2 py-0.5 bg-rose-500/10 hover:bg-rose-500 hover:text-white border border-rose-500/30 text-rose-500 text-[9px] font-bold rounded-lg transition-all active:scale-95 mr-1"
-                                                title="Kick Player"
-                                              >
-                                                Kick
-                                              </button>
-                                            )}
-                                            <span
-                                              className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${p.isReady
-                                                ? "bg-emerald-500/20 text-emerald-500 border border-emerald-500/30"
-                                                : "bg-accent-glow border border-border-custom text-text-custom opacity-60"
-                                                }`}
-                                            >
-                                              {p.isReady ? "READY" : "WAITING"}
+                                      {/* Live completion progress */}
+                                      {room.isGameStarted && (
+                                        <>
+                                          <div className="flex items-center justify-between text-[10px] mb-1 font-semibold opacity-85">
+                                            <span>Board Progress</span>
+                                            <span>
+                                              {isMe ? myProgress : p.progress}%
                                             </span>
-                                          </>
-                                        )}
-                                      </div>
+                                          </div>
+                                          <div className="w-full bg-accent-glow/50 h-1.5 rounded-full overflow-hidden">
+                                            <div
+                                              className="bg-accent-custom h-full rounded-full transition-all duration-300"
+                                              style={{
+                                                width: `${isMe ? myProgress : p.progress}%`,
+                                              }}
+                                            />
+                                          </div>
+                                        </>
+                                      )}
                                     </div>
+                                  );
+                                })}
 
-                                    {/* Live completion progress */}
-                                    {room.isGameStarted && (
-                                      <>
-                                        <div className="flex items-center justify-between text-[10px] mb-1 font-semibold opacity-85">
-                                          <span>Board Progress</span>
-                                          <span>
-                                            {isMe ? myProgress : p.progress}%
-                                          </span>
-                                        </div>
-                                        <div className="w-full bg-accent-glow/50 h-1.5 rounded-full overflow-hidden">
-                                          <div
-                                            className="bg-accent-custom h-full rounded-full transition-all duration-300"
-                                            style={{
-                                              width: `${isMe ? myProgress : p.progress}%`,
-                                            }}
-                                          />
-                                        </div>
-                                      </>
-                                    )}
+                                {/* Spectators display */}
+                                {spectators.length > 0 && (
+                                  <div className="pt-2 border-t border-border-custom/50 space-y-1">
+                                    <span className="text-[10px] uppercase font-bold opacity-45 tracking-wider flex items-center gap-1">
+                                      <Tv size={11} /> Spectators ({spectators.length}
+                                      )
+                                    </span>
+                                    <div className="flex flex-wrap gap-1.5">
+                                      {spectators.map((s) => (
+                                        <span
+                                          key={s.id}
+                                          className="text-[9px] font-semibold bg-accent-glow/50 border border-border-custom px-2 py-0.5 rounded-md"
+                                        >
+                                          {s.name}
+                                        </span>
+                                      ))}
+                                    </div>
                                   </div>
-                                );
-                              })}
-
-                              {/* Spectators display */}
-                              {spectators.length > 0 && (
-                                <div className="pt-2 border-t border-border-custom/50 space-y-1">
-                                  <span className="text-[10px] uppercase font-bold opacity-45 tracking-wider flex items-center gap-1">
-                                    <Tv size={11} /> Spectators ({spectators.length}
-                                    )
-                                  </span>
-                                  <div className="flex flex-wrap gap-1.5">
-                                    {spectators.map((s) => (
-                                      <span
-                                        key={s.id}
-                                        className="text-[9px] font-semibold bg-accent-glow/50 border border-border-custom px-2 py-0.5 rounded-md"
-                                      >
-                                        {s.name}
-                                      </span>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
+                                )}
+                              </div>
                             </div>
-                          </div>
 
-                          {/* Voice Channel Panel */}
-                          <div className="border border-border-custom/50 rounded-xl p-3 bg-accent-glow/5 space-y-2 mt-2 mb-4">
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-1.5">
-                                <Mic
-                                  size={14}
-                                  className={
-                                    isVoiceJoined
-                                      ? "text-emerald-500 animate-pulse"
-                                      : "opacity-60"
-                                  }
-                                />
-                                <span className="text-xs font-bold uppercase tracking-wider">
-                                  Voice Channel
+                            {/* Voice Channel Panel */}
+                            <div className="border border-border-custom/50 rounded-xl p-3 bg-accent-glow/5 space-y-2 mt-2 mb-4">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-1.5">
+                                  <Mic
+                                    size={14}
+                                    className={
+                                      isVoiceJoined
+                                        ? "text-emerald-500 animate-pulse"
+                                        : "opacity-60"
+                                    }
+                                  />
+                                  <span className="text-xs font-bold uppercase tracking-wider">
+                                    Voice Channel
+                                  </span>
+                                </div>
+                                <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border border-border-custom ${voiceConnectionState === 'connected'
+                                  ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
+                                  : voiceConnectionState === 'connecting'
+                                    ? "bg-amber-500/10 border-amber-500/20 text-amber-400 animate-pulse"
+                                    : voiceConnectionState === 'failed'
+                                      ? "bg-rose-500/10 border-rose-500/20 text-rose-400"
+                                      : "bg-accent-glow border-border-custom text-text-custom opacity-70"
+                                  }`}>
+                                  {voiceConnectionState === 'connected'
+                                    ? "Connected"
+                                    : voiceConnectionState === 'connecting'
+                                      ? "Connecting..."
+                                      : voiceConnectionState === 'failed'
+                                        ? "Connection Failed"
+                                        : "Disconnected"}
                                 </span>
                               </div>
-                              <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border border-border-custom ${voiceConnectionState === 'connected'
-                                ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
-                                : voiceConnectionState === 'connecting'
-                                  ? "bg-amber-500/10 border-amber-500/20 text-amber-400 animate-pulse"
-                                  : voiceConnectionState === 'failed'
-                                    ? "bg-rose-500/10 border-rose-500/20 text-rose-400"
-                                    : "bg-accent-glow border-border-custom text-text-custom opacity-70"
-                                }`}>
-                                {voiceConnectionState === 'connected'
-                                  ? "Connected"
-                                  : voiceConnectionState === 'connecting'
-                                    ? "Connecting..."
-                                    : voiceConnectionState === 'failed'
-                                      ? "Connection Failed"
-                                      : "Disconnected"}
-                              </span>
-                            </div>
 
-                            <div className="flex items-center gap-2 pt-1">
-                              {!isVoiceJoined ? (
-                                <button
-                                  onClick={joinVoice}
-                                  className="flex-1 py-2 bg-accent-glow hover:bg-accent-custom hover:text-white border border-border-custom hover:border-accent-custom text-text-custom font-bold text-xs rounded-xl active:scale-95 transition-all flex items-center justify-center gap-1.5"
-                                >
-                                  <Mic size={12} />
-                                  Join Voice Chat
-                                </button>
-                              ) : (
-                                <>
+                              <div className="flex items-center gap-2 pt-1">
+                                {!isVoiceJoined ? (
                                   <button
-                                    onClick={toggleMicMute}
-                                    className={`flex-1 py-2 font-bold text-xs rounded-xl active:scale-95 transition-all flex items-center justify-center gap-1.5 border ${isMicMuted
-                                      ? "bg-rose-500/10 border-rose-500/30 text-rose-500 hover:bg-rose-500 hover:text-white"
-                                      : "bg-emerald-500/10 border-emerald-500/30 text-emerald-500 hover:bg-emerald-500 hover:text-white"
-                                      }`}
+                                    onClick={joinVoice}
+                                    className="flex-1 py-2 bg-accent-glow hover:bg-accent-custom hover:text-white border border-border-custom hover:border-accent-custom text-text-custom font-bold text-xs rounded-xl active:scale-95 transition-all flex items-center justify-center gap-1.5"
                                   >
-                                    {isMicMuted ? (
-                                      <>
-                                        <MicOff size={12} />
-                                        Unmute Mic
-                                      </>
-                                    ) : (
-                                      <>
-                                        <Mic size={12} />
-                                        Mute Mic
-                                      </>
-                                    )}
+                                    <Mic size={12} />
+                                    Join Voice Chat
                                   </button>
-                                  <button
-                                    onClick={leaveVoice}
-                                    className="px-4 py-2 border border-border-custom hover:border-red-400 hover:text-red-500 font-bold text-xs rounded-xl active:scale-95 transition-all"
-                                  >
-                                    Leave
-                                  </button>
-                                </>
-                              )}
-                            </div>
+                                ) : (
+                                  <>
+                                    <button
+                                      onClick={toggleMicMute}
+                                      className={`flex-1 py-2 font-bold text-xs rounded-xl active:scale-95 transition-all flex items-center justify-center gap-1.5 border ${isMicMuted
+                                        ? "bg-rose-500/10 border-rose-500/30 text-rose-500 hover:bg-rose-500 hover:text-white"
+                                        : "bg-emerald-500/10 border-emerald-500/30 text-emerald-500 hover:bg-emerald-500 hover:text-white"
+                                        }`}
+                                    >
+                                      {isMicMuted ? (
+                                        <>
+                                          <MicOff size={12} />
+                                          Unmute Mic
+                                        </>
+                                      ) : (
+                                        <>
+                                          <Mic size={12} />
+                                          Mute Mic
+                                        </>
+                                      )}
+                                    </button>
+                                    <button
+                                      onClick={leaveVoice}
+                                      className="px-4 py-2 border border-border-custom hover:border-red-400 hover:text-red-500 font-bold text-xs rounded-xl active:scale-95 transition-all"
+                                    >
+                                      Leave
+                                    </button>
+                                  </>
+                                )}
+                              </div>
 
-                            {/* Collapsible WebRTC Diagnostics Panel - commented out as requested
+                              {/* Collapsible WebRTC Diagnostics Panel - commented out as requested
                             <div className="mt-2 border-t border-border-custom/30 pt-2">
                               <details className="group" open>
                                 <summary className="text-[10px] text-text-custom/60 group-open:text-accent-custom font-bold cursor-pointer select-none flex items-center justify-between hover:text-text-custom transition-all">
@@ -3244,280 +3296,307 @@ export default function App() {
                               </details>
                             </div>
                             */}
-                          </div>
+                            </div>
 
-                          {/* READY UP ACTION BUTTON */}
-                          {!room.isGameStarted && (
-                            <div className="flex flex-col gap-2 pt-2">
-                              <div className="flex gap-2">
-                                {activePlayers.length > 1 && (
-                                  <button
-                                    onClick={toggleReady}
-                                    className={`flex-1 py-3 rounded-xl font-bold text-sm shadow-md transition-all active:scale-[0.98] ${myStatusInRoom?.isReady
-                                      ? "bg-amber-600 hover:bg-amber-500 text-white"
-                                      : "bg-accent-custom hover:bg-accent-hover text-white"
-                                      }`}
-                                  >
-                                    {myStatusInRoom?.isReady
-                                      ? "Unready Lobby"
-                                      : "Ready to Start"}
-                                  </button>
-                                )}
+                            {/* READY UP ACTION BUTTON */}
+                            {!room.isGameStarted && (
+                              <div className="flex flex-col gap-2 pt-2">
+                                <div className="flex gap-2">
+                                  {activePlayers.length > 1 && (
+                                    <button
+                                      onClick={toggleReady}
+                                      className={`flex-1 py-3 rounded-xl font-bold text-sm shadow-md transition-all active:scale-[0.98] ${myStatusInRoom?.isReady
+                                        ? "bg-amber-600 hover:bg-amber-500 text-white"
+                                        : "bg-accent-custom hover:bg-accent-hover text-white"
+                                        }`}
+                                    >
+                                      {myStatusInRoom?.isReady
+                                        ? "Unready Lobby"
+                                        : "Ready to Start"}
+                                    </button>
+                                  )}
 
-                                {isHost && (
-                                  <button
-                                    onClick={startGame}
-                                    disabled={!allPlayersReady}
-                                    className={`${activePlayers.length === 1 ? "w-full" : "px-6"} py-3 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold rounded-xl text-sm transition-all active:scale-[0.98]`}
-                                    title="Start Match"
-                                  >
-                                    Start Game
-                                  </button>
-                                )}
+                                  {isHost && (
+                                    <button
+                                      onClick={startGame}
+                                      disabled={!allPlayersReady}
+                                      className={`${activePlayers.length === 1 ? "w-full" : "px-6"} py-3 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold rounded-xl text-sm transition-all active:scale-[0.98]`}
+                                      title="Start Match"
+                                    >
+                                      Start Game
+                                    </button>
+                                  )}
+                                </div>
+                                <button
+                                  onClick={() => exitToHome(() => setActiveView("home"))}
+                                  className="w-full py-2.5 bg-slate-800 hover:bg-slate-700/80 border border-slate-700/50 text-slate-300 font-bold rounded-xl text-xs transition-all active:scale-[0.98] mt-1"
+                                >
+                                  {isHost ? "Dismiss Room" : "Leave Room"}
+                                </button>
                               </div>
-                              <button
-                                onClick={() => exitToHome(() => setActiveView("home"))}
-                                className="w-full py-2.5 bg-slate-800 hover:bg-slate-700/80 border border-slate-700/50 text-slate-300 font-bold rounded-xl text-xs transition-all active:scale-[0.98] mt-1"
-                              >
-                                {isHost ? "Dismiss Room" : "Leave Room"}
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* TAB CONTENT: Matchmaker Queue */}
-                  {activeTab === "matchmaker" && (
-                    <div className="space-y-4 py-2 animate-fade-in">
-                      {matchmakingStatus === "searching" ? (
-                        // Search queue actively running
-                        <div className="text-center space-y-4 py-4">
-                          <div className="relative w-16 h-16 mx-auto flex items-center justify-center">
-                            <div className="absolute inset-0 rounded-full border-4 border-accent-custom/20 border-t-accent-custom animate-spin" />
-                            <Search
-                              size={22}
-                              className="text-accent-custom animate-pulse"
-                            />
+                            )}
                           </div>
-                          <div className="space-y-1">
-                            <h3 className="text-sm font-bold text-accent-custom">
-                              Searching for Match...
-                            </h3>
-                            <p className="text-xs opacity-60">
-                              Elapsed time: {searchTimer}s
-                            </p>
-                            <p className="text-[10px] text-accent-custom uppercase font-semibold tracking-wider">
-                              Matching ELO range ±{searchTimer * 25}
-                            </p>
-                          </div>
-
-                          <button
-                            onClick={cancelMatchmaking}
-                            className="px-5 py-2 border border-border-custom hover:border-red-400 hover:text-red-500 text-xs font-bold rounded-xl active:scale-95 transition-all"
-                          >
-                            Cancel Queue
-                          </button>
-                        </div>
-                      ) : matchmakingStatus === "matched" ? (
-                        // Player matched display
-                        <div className="text-center space-y-4 py-4 animate-scale-in">
-                          <div className="w-16 h-16 rounded-full bg-emerald-500/20 text-emerald-500 mx-auto flex items-center justify-center">
-                            <Trophy size={28} />
-                          </div>
-                          <div className="space-y-1">
-                            <h3 className="text-sm font-bold text-emerald-500">
-                              Opponent Found!
-                            </h3>
-                            <p className="text-xs font-extrabold">
-                              {matchOpponent?.name}
-                            </p>
-                            <p className="text-[10px] opacity-60">
-                              {matchOpponent?.elo} ELO ({rank})
-                            </p>
-                          </div>
-                          <div className="text-[10px] text-accent-custom uppercase font-bold animate-pulse">
-                            Generating shared board seed...
-                          </div>
-                        </div>
-                      ) : (
-                        // Normal queue status
-                        <div className="space-y-4">
-                          <div className="text-center space-y-2">
-                            <div className="w-12 h-12 rounded-full bg-accent-glow text-accent-custom mx-auto flex items-center justify-center">
-                              <Trophy size={24} />
-                            </div>
-                            <h3 className="text-sm font-bold">
-                              Queue ELO Competitive
-                            </h3>
-                            <p className="text-xs opacity-70 max-w-[280px] mx-auto">
-                              Search for players worldwide matching your skill (
-                              {elo} ELO ±50) for intense competitive Sudoku.
-                            </p>
-                          </div>
-
-                          <div className="border border-border-custom p-3 rounded-xl bg-accent-glow/10 flex items-center justify-between">
-                            <span className="text-xs font-semibold opacity-70">
-                              Matchmaking Rating:
-                            </span>
-                            <span className="text-xs font-bold text-accent-custom">
-                              Ranked ({rank})
-                            </span>
-                          </div>
-
-                          <button
-                            onClick={() => startMatchmaking(difficulty)}
-                            className="w-full py-3 rounded-xl bg-accent-custom hover:bg-accent-hover text-white font-bold text-sm shadow-md active:scale-[0.98] transition-all flex items-center justify-center gap-1.5"
-                            disabled={!isConnected}
-                          >
-                            <PlayIcon size={14} fill="white" />
-                            Join Match Queue
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {/* Social Friends Sidebar Panel */}
-                <div className="glass-card rounded-2xl p-5">
-                  <h3 className="text-xs uppercase font-bold opacity-50 tracking-wider mb-3 flex items-center gap-1.5">
-                    <UserPlus size={13} />
-                    Friends List & Status
-                  </h3>
-
-                  {/* Friend requests search input */}
-                  <form
-                    onSubmit={handleAddFriendSubmit}
-                    className="flex gap-1.5 mb-4 w-full min-w-0"
-                  >
-                    <input
-                      type="text"
-                      placeholder="Friend Username"
-                      value={friendNameInput}
-                      onChange={(e) => setFriendNameInput(e.target.value)}
-                      disabled={isAddingFriend}
-                      className="flex-1 min-w-0 px-2.5 py-1.5 bg-accent-glow border border-border-custom rounded-lg text-xs focus:outline-none focus:border-accent-custom disabled:opacity-60"
-                    />
-                    <button
-                      type="submit"
-                      disabled={isAddingFriend}
-                      className="shrink-0 px-3 bg-accent-custom hover:bg-accent-hover text-white font-bold rounded-lg text-[10px] active:scale-95 transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
-                    >
-                      {isAddingFriend ? (
-                        <RefreshCw size={10} className="animate-spin" />
-                      ) : (
-                        "Add"
-                      )}
-                    </button>
-                  </form>
-
-                  {/* Pending Friend Requests */}
-                  {friendRequests.length > 0 && (
-                    <div className="mb-4 bg-accent-glow/10 border border-border-custom/50 rounded-xl p-3 space-y-2">
-                      <h4 className="text-[9px] uppercase font-bold opacity-50 tracking-wider flex items-center gap-1">
-                        <UserPlus size={10} /> Pending Requests (
-                        {friendRequests.length})
-                      </h4>
-                      <div className="space-y-2">
-                        {friendRequests.map((req) => (
-                          <div
-                            key={req.id}
-                            className="flex items-center gap-2 text-xs"
-                          >
-                            <div className="w-6 h-6 rounded-full bg-accent-glow border border-border-custom flex items-center justify-center font-bold text-[9px]">
-                              {req.name?.charAt(0)?.toUpperCase() || "F"}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <p className="font-bold truncate leading-tight text-[11px]">
-                                {req.name}
-                              </p>
-                              <p className="text-[8px] opacity-50">{req.elo} ELO</p>
-                            </div>
-                            <div className="flex gap-0.5">
-                              <button
-                                onClick={() => handleAcceptFriendRequest(req.id)}
-                                disabled={actionPendingRequests.has(req.id)}
-                                className="w-5 h-5 rounded-md bg-emerald-500/20 text-emerald-500 hover:bg-emerald-500 hover:text-white transition-all flex items-center justify-center cursor-pointer disabled:opacity-50"
-                                title="Accept"
-                              >
-                                {actionPendingRequests.has(req.id) ? (
-                                  <RefreshCw size={8} className="animate-spin" />
-                                ) : (
-                                  <Check size={10} />
-                                )}
-                              </button>
-                              <button
-                                onClick={() => handleDeclineFriendRequest(req.id)}
-                                disabled={actionPendingRequests.has(req.id)}
-                                className="w-5 h-5 rounded-md bg-rose-500/20 text-rose-500 hover:bg-rose-500 hover:text-white transition-all flex items-center justify-center cursor-pointer disabled:opacity-50"
-                                title="Decline"
-                              >
-                                {actionPendingRequests.has(req.id) ? (
-                                  <RefreshCw size={8} className="animate-spin" />
-                                ) : (
-                                  <X size={10} />
-                                )}
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Friends lists mapping */}
-                  <div className="space-y-2.5 max-h-[160px] overflow-y-auto pr-1">
-                    {friends.map((f) => (
-                      <div
-                        key={f.id}
-                        className="flex items-center justify-between text-xs border-b border-border-custom/30 pb-2 last:border-0 last:pb-0"
-                      >
-                        <div className="flex items-center gap-2">
-                          <div
-                            className={`w-2 h-2 rounded-full ${f.status === "online"
-                              ? "bg-emerald-500 animate-pulse"
-                              : f.status === "in-game"
-                                ? "bg-amber-500 animate-pulse"
-                                : "bg-slate-300 dark:bg-slate-700"
-                              }`}
-                          />
-                          <div>
-                            <p className="font-bold leading-tight">{f.name}</p>
-                            <span className="text-[9px] opacity-60">
-                              {f.elo} ELO
-                            </span>
-                          </div>
-                        </div>
-
-                        {room ? (
-                          <button
-                            onClick={() => inviteFriend(f.id)}
-                            disabled={f.status !== "online"}
-                            className={`px-2 py-1 border transition-all rounded-md text-[9px] font-bold ${f.status === "online"
-                              ? "bg-accent-glow border-border-custom hover:border-accent-custom hover:text-accent-custom active:scale-95 cursor-pointer"
-                              : "bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700 cursor-not-allowed opacity-50"
-                              }`}
-                            title={
-                              f.status !== "online"
-                                ? `Friend must be online (currently: ${f.status})`
-                                : "Invite to Room"
-                            }
-                          >
-                            Invite
-                          </button>
-                        ) : (
-                          <span className="text-[9px] uppercase font-bold opacity-45 px-1">
-                            {f.status}
-                          </span>
                         )}
                       </div>
-                    ))}
+                    )}
+
+                    {/* TAB CONTENT: Matchmaker Queue */}
+                    {activeTab === "matchmaker" && (
+                      <div className="space-y-4 py-2 animate-fade-in">
+                        {matchmakingStatus === "searching" ? (
+                          // Search queue actively running
+                          <div className="text-center space-y-4 py-4">
+                            <div className="relative w-16 h-16 mx-auto flex items-center justify-center">
+                              <div className="absolute inset-0 rounded-full border-4 border-accent-custom/20 border-t-accent-custom animate-spin" />
+                              <Search
+                                size={22}
+                                className="text-accent-custom animate-pulse"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <h3 className="text-sm font-bold text-accent-custom">
+                                Searching for Match...
+                              </h3>
+                              <p className="text-xs opacity-60">
+                                Elapsed time: {searchTimer}s
+                              </p>
+                              <p className="text-[10px] text-accent-custom uppercase font-semibold tracking-wider">
+                                Matching ELO range ±{searchTimer * 25}
+                              </p>
+                            </div>
+
+                            <button
+                              onClick={cancelMatchmaking}
+                              className="px-5 py-2 border border-border-custom hover:border-red-400 hover:text-red-500 text-xs font-bold rounded-xl active:scale-95 transition-all"
+                            >
+                              Cancel Queue
+                            </button>
+                          </div>
+                        ) : matchmakingStatus === "matched" ? (
+                          // Player matched display
+                          <div className="text-center space-y-4 py-4 animate-scale-in">
+                            <div className="w-16 h-16 rounded-full bg-emerald-500/20 text-emerald-500 mx-auto flex items-center justify-center">
+                              <Trophy size={28} />
+                            </div>
+                            <div className="space-y-1">
+                              <h3 className="text-sm font-bold text-emerald-500">
+                                Opponent Found!
+                              </h3>
+                              <p className="text-xs font-extrabold">
+                                {matchOpponent?.name}
+                              </p>
+                              <p className="text-[10px] opacity-60">
+                                {matchOpponent?.elo} ELO ({rank})
+                              </p>
+                            </div>
+                            <div className="text-[10px] text-accent-custom uppercase font-bold animate-pulse">
+                              Generating shared board seed...
+                            </div>
+                          </div>
+                        ) : (
+                          // Normal queue status
+                          <div className="space-y-4">
+                            <div className="text-center space-y-2">
+                              <div className="w-12 h-12 rounded-full bg-accent-glow text-accent-custom mx-auto flex items-center justify-center">
+                                <Trophy size={24} />
+                              </div>
+                              <h3 className="text-sm font-bold">
+                                Queue ELO Competitive
+                              </h3>
+                              <p className="text-xs opacity-70 max-w-[280px] mx-auto">
+                                Search for players worldwide matching your skill (
+                                {elo} ELO ±50) for intense competitive Sudoku.
+                              </p>
+                            </div>
+
+                            <div className="border border-border-custom p-3 rounded-xl bg-accent-glow/10 flex items-center justify-between">
+                              <span className="text-xs font-semibold opacity-70">
+                                Matchmaking Rating:
+                              </span>
+                              <span className="text-xs font-bold text-accent-custom">
+                                Ranked ({rank})
+                              </span>
+                            </div>
+
+                            <button
+                              onClick={() => startMatchmaking(difficulty)}
+                              className="w-full py-3 rounded-xl bg-accent-custom hover:bg-accent-hover text-white font-bold text-sm shadow-md active:scale-[0.98] transition-all flex items-center justify-center gap-1.5"
+                              disabled={!isConnected}
+                            >
+                              <PlayIcon size={14} fill="white" />
+                              Join Match Queue
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Social Friends Sidebar Panel */}
+                  <div className="glass-card rounded-2xl p-5">
+                    <h3 className="text-xs uppercase font-bold opacity-50 tracking-wider mb-3 flex items-center gap-1.5">
+                      <UserPlus size={13} />
+                      Friends List & Status
+                    </h3>
+
+                    {/* Friend requests search input */}
+                    <form
+                      onSubmit={handleAddFriendSubmit}
+                      className="flex gap-1.5 mb-4 w-full min-w-0"
+                    >
+                      <input
+                        type="text"
+                        placeholder="Friend Username"
+                        value={friendNameInput}
+                        onChange={(e) => setFriendNameInput(e.target.value)}
+                        disabled={isAddingFriend}
+                        className="flex-1 min-w-0 px-2.5 py-1.5 bg-accent-glow border border-border-custom rounded-lg text-xs focus:outline-none focus:border-accent-custom disabled:opacity-60"
+                      />
+                      <button
+                        type="submit"
+                        disabled={isAddingFriend}
+                        className="shrink-0 px-3 bg-accent-custom hover:bg-accent-hover text-white font-bold rounded-lg text-[10px] active:scale-95 transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                      >
+                        {isAddingFriend ? (
+                          <RefreshCw size={10} className="animate-spin" />
+                        ) : (
+                          "Add"
+                        )}
+                      </button>
+                    </form>
+
+                    {/* Pending Friend Requests */}
+                    {friendRequests.length > 0 && (
+                      <div className="mb-4 bg-accent-glow/10 border border-border-custom/50 rounded-xl p-3 space-y-2">
+                        <h4 className="text-[9px] uppercase font-bold opacity-50 tracking-wider flex items-center gap-1">
+                          <UserPlus size={10} /> Pending Requests (
+                          {friendRequests.length})
+                        </h4>
+                        <div className="space-y-2">
+                          {friendRequests.map((req) => (
+                            <div
+                              key={req.id}
+                              className="flex items-center gap-2 text-xs"
+                            >
+                              <div className="w-6 h-6 rounded-full bg-accent-glow border border-border-custom flex items-center justify-center font-bold text-[9px]">
+                                {req.name?.charAt(0)?.toUpperCase() || "F"}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="font-bold truncate leading-tight text-[11px]">
+                                  {req.name}
+                                </p>
+                                <p className="text-[8px] opacity-50">{req.elo} ELO</p>
+                              </div>
+                              <div className="flex gap-0.5">
+                                <button
+                                  onClick={() => handleAcceptFriendRequest(req.id)}
+                                  disabled={actionPendingRequests.has(req.id)}
+                                  className="w-5 h-5 rounded-md bg-emerald-500/20 text-emerald-500 hover:bg-emerald-500 hover:text-white transition-all flex items-center justify-center cursor-pointer disabled:opacity-50"
+                                  title="Accept"
+                                >
+                                  {actionPendingRequests.has(req.id) ? (
+                                    <RefreshCw size={8} className="animate-spin" />
+                                  ) : (
+                                    <Check size={10} />
+                                  )}
+                                </button>
+                                <button
+                                  onClick={() => handleDeclineFriendRequest(req.id)}
+                                  disabled={actionPendingRequests.has(req.id)}
+                                  className="w-5 h-5 rounded-md bg-rose-500/20 text-rose-500 hover:bg-rose-500 hover:text-white transition-all flex items-center justify-center cursor-pointer disabled:opacity-50"
+                                  title="Decline"
+                                >
+                                  {actionPendingRequests.has(req.id) ? (
+                                    <RefreshCw size={8} className="animate-spin" />
+                                  ) : (
+                                    <X size={10} />
+                                  )}
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Friends lists mapping */}
+                    <div className="space-y-2.5 max-h-[160px] overflow-y-auto pr-1">
+                      {friends.map((f) => (
+                        <div
+                          key={f.id}
+                          className="flex items-center justify-between text-xs border-b border-border-custom/30 pb-2 last:border-0 last:pb-0"
+                        >
+                          <div className="flex items-center gap-2">
+                            <div
+                              className={`w-2 h-2 rounded-full ${f.status === "online"
+                                ? "bg-emerald-500 animate-pulse"
+                                : f.status === "in-game"
+                                  ? "bg-amber-500 animate-pulse"
+                                  : "bg-slate-300 dark:bg-slate-700"
+                                }`}
+                            />
+                            <div>
+                              <p className="font-bold leading-tight">{f.name}</p>
+                              <span className="text-[9px] opacity-60">
+                                {f.elo} ELO
+                              </span>
+                            </div>
+                          </div>
+
+                          {room ? (
+                            <button
+                              onClick={() => inviteFriend(f.id)}
+                              disabled={f.status !== "online"}
+                              className={`px-2 py-1 border transition-all rounded-md text-[9px] font-bold ${f.status === "online"
+                                ? "bg-accent-glow border-border-custom hover:border-accent-custom hover:text-accent-custom active:scale-95 cursor-pointer"
+                                : "bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700 cursor-not-allowed opacity-50"
+                                }`}
+                              title={
+                                f.status !== "online"
+                                  ? `Friend must be online (currently: ${f.status})`
+                                  : "Invite to Room"
+                              }
+                            >
+                              Invite
+                            </button>
+                          ) : (
+                            <span className="text-[9px] uppercase font-bold opacity-45 px-1">
+                              {f.status}
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              ) : (
+                /* Solo Stats Card — visible beside the board on desktop, below on mobile */
+                <div className="glass-card rounded-2xl p-5 border border-border-custom/30 shadow-md flex flex-col gap-4 animate-scale-in">
+                  <div>
+                    <h3 className="text-xs font-extrabold uppercase tracking-wider text-accent-custom">Career Stats</h3>
+                    <p className="text-[9px] opacity-45 font-bold uppercase tracking-wider mt-0.5">Synced from database</p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="glass-panel p-3 rounded-xl border border-border-custom/30 flex flex-col gap-0.5">
+                      <span className="opacity-55 text-[8.5px] uppercase font-bold tracking-wider">Played</span>
+                      <span className="text-xl font-black text-text-custom tabular-nums">{personalStats.gamesPlayed}</span>
+                    </div>
+                    <div className="glass-panel p-3 rounded-xl border border-border-custom/30 flex flex-col gap-0.5">
+                      <span className="opacity-55 text-[8.5px] uppercase font-bold tracking-wider text-emerald-500">Won</span>
+                      <span className="text-xl font-black text-emerald-500 tabular-nums">{personalStats.gamesCompleted}</span>
+                    </div>
+                    <div className="glass-panel p-3 rounded-xl border border-border-custom/30 flex flex-col gap-0.5">
+                      <span className="opacity-55 text-[8.5px] uppercase font-bold tracking-wider text-amber-500">Win Rate</span>
+                      <span className="text-xl font-black text-amber-500 tabular-nums">{winRate}%</span>
+                    </div>
+                    <div className="glass-panel p-3 rounded-xl border border-border-custom/30 flex flex-col gap-0.5">
+                      <span className="opacity-55 text-[8.5px] uppercase font-bold tracking-wider">Elo Rating</span>
+                      <span className="text-xl font-black text-accent-custom tabular-nums">{profile?.elo || 1450}</span>
+                    </div>
                   </div>
                 </div>
-              </section>
-            )}
+              )}
+            </section>
           </main>
         )
       )}

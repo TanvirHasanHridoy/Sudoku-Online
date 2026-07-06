@@ -112,33 +112,44 @@ const migrateFriendships = async (guestId, googleId) => {
 const migrateStats = async (guestId, googleId) => {
   if (!guestId || !googleId) return;
   try {
-    console.log(`[Auth] Migrating stats from guest ${guestId} to google ${googleId}`);
-    
-    // Get guest stats from localStorage
-    const guestKey = `sudoku_stats_${guestId}`;
-    const guestStats = JSON.parse(localStorage.getItem(guestKey) || '{"gamesPlayed":0,"gamesCompleted":0,"soloWins":0,"multiplayerWins":0,"totalCompletionTime":0}');
+    console.log(`[Auth] Migrating database stats from guest ${guestId} to google ${googleId}`);
 
-    // If guest has played no games, nothing to migrate
-    if (guestStats.gamesPlayed === 0) return;
+    // Get guest stats from Supabase profiles
+    const { data: guestProfile, error: guestError } = await supabase
+      .from("profiles")
+      .select("games_played, games_completed, solo_wins, multiplayer_wins, total_completion_time")
+      .eq("id", guestId)
+      .single();
+
+    if (guestError || !guestProfile) {
+      console.log("[Auth] No guest profile found in DB, skipping stats migration.");
+      return;
+    }
+
+    const guestGamesPlayed = guestProfile.games_played || 0;
+    if (guestGamesPlayed === 0) {
+      console.log("[Auth] Guest has played no games, skipping stats migration.");
+      return;
+    }
 
     // Get current google stats from database
-    const { data: googleProfile, error } = await supabase
+    const { data: googleProfile, error: googleError } = await supabase
       .from("profiles")
       .select("games_played, games_completed, solo_wins, multiplayer_wins, total_completion_time")
       .eq("id", googleId)
       .single();
 
-    if (error) {
-      console.error("[Auth] Error fetching google profile stats for migration:", error);
+    if (googleError) {
+      console.error("[Auth] Error fetching google profile stats for migration:", googleError);
       return;
     }
 
     const mergedStats = {
-      games_played: (googleProfile.games_played || 0) + guestStats.gamesPlayed,
-      games_completed: (googleProfile.games_completed || 0) + guestStats.gamesCompleted,
-      solo_wins: (googleProfile.solo_wins || 0) + (guestStats.soloWins || 0),
-      multiplayer_wins: (googleProfile.multiplayer_wins || 0) + (guestStats.multiplayerWins || 0),
-      total_completion_time: (googleProfile.total_completion_time || 0) + (guestStats.totalCompletionTime || 0)
+      games_played: (googleProfile.games_played || 0) + guestGamesPlayed,
+      games_completed: (googleProfile.games_completed || 0) + (guestProfile.games_completed || 0),
+      solo_wins: (googleProfile.solo_wins || 0) + (guestProfile.solo_wins || 0),
+      multiplayer_wins: (googleProfile.multiplayer_wins || 0) + (guestProfile.multiplayer_wins || 0),
+      total_completion_time: (googleProfile.total_completion_time || 0) + (guestProfile.total_completion_time || 0)
     };
 
     // Save merged stats to Supabase database
@@ -151,8 +162,17 @@ const migrateStats = async (guestId, googleId) => {
       console.error("[Auth] Error updating google profile stats during migration:", updateError);
     } else {
       console.log("[Auth] Stats migration completed successfully.");
-      // Clean up guest stats from localStorage so we don't migrate them again next time
-      localStorage.removeItem(guestKey);
+      // Reset guest stats in the database so they are not merged again in the future
+      await supabase
+        .from("profiles")
+        .update({
+          games_played: 0,
+          games_completed: 0,
+          solo_wins: 0,
+          multiplayer_wins: 0,
+          total_completion_time: 0
+        })
+        .eq("id", guestId);
     }
   } catch (err) {
     console.error("[Auth] Exception migrating stats:", err);
@@ -669,21 +689,6 @@ export const useAuthStore = create((set, get) => ({
         localStorage.setItem("sudoku_player_name", profile.display_name);
         localStorage.setItem("sudoku_avatar", profile.avatar_id || "apex");
         localStorage.setItem("sudoku_elo", profile.elo.toString());
-
-        // Cache stats in localStorage for Google users (where Supabase DB is the source of truth).
-        // For guest users, we do NOT overwrite their local stats cache with DB profile values
-        // because guests accumulate stats locally and Supabase has 0 for them.
-        const activeUserIsGuest = checkIsGuestUser(user);
-        if (!activeUserIsGuest) {
-          const statsKey = `sudoku_stats_${profile.id}`;
-          localStorage.setItem(statsKey, JSON.stringify({
-            gamesPlayed: profile.games_played || 0,
-            gamesCompleted: profile.games_completed || 0,
-            soloWins: profile.solo_wins || 0,
-            multiplayerWins: profile.multiplayer_wins || 0,
-            totalCompletionTime: profile.total_completion_time || 0
-          }));
-        }
 
         // Update LobbyStore local states using setState to trigger reactivity
         console.log(
