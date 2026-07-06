@@ -2419,7 +2419,7 @@ export default function App() {
         ) : (
           <main className="max-w-6xl mx-auto px-2 sm:px-4 py-2 lg:py-10 grid grid-cols-1 lg:grid-cols-12 gap-3 lg:gap-8 items-start">
             {/* LEFT COLUMN: The Sudoku Puzzle Area */}
-            <section className={`${room ? "lg:col-span-7" : "lg:col-span-12"} flex flex-col items-center relative`}>
+            <section className={`${room ? "lg:col-span-7" : "lg:col-span-8"} flex flex-col items-center relative`}>
               {/* PAUSED MASK SCREEN */}
               {isGamePaused && (
                 <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md rounded-2xl flex flex-col items-center justify-center p-4 z-30 animate-fade-in border border-border-custom/50">
@@ -2844,11 +2844,35 @@ export default function App() {
               />
             </section>
 
-            {/* RIGHT COLUMN: Multiplayer Lobby, Live Feed & Opponent Progress (Cols 8 to 12) */}
-            {room && (
-              <section className="lg:col-span-5 flex flex-col gap-6">
-                {/* Matchmaking / Private Lobby Tabs */}
-                <div className="glass-card rounded-2xl p-5">
+            {/* RIGHT COLUMN: Multiplayer Lobby / Solo Stats Card (Cols 8 to 12) */}
+            <section className={`${room ? "lg:col-span-5" : "lg:col-span-4"} flex flex-col gap-6 w-full`}>
+              {room ? (
+                <>
+                  {/* Compact Stats Row (multiplayer) */}
+                  <div className="glass-panel p-3 rounded-2xl border border-border-custom/30 flex items-center justify-between text-[10px] text-text-custom/75 select-none font-semibold gap-2 shadow-xs">
+                    <div className="flex items-center gap-1.5">
+                      <span className="opacity-55 uppercase tracking-wider text-[8px]">Played</span>
+                      <span className="font-extrabold text-accent-custom text-xs">{personalStats.gamesPlayed}</span>
+                    </div>
+                    <div className="h-4 w-px bg-border-custom/30"></div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="opacity-55 uppercase tracking-wider text-[8px]">Won</span>
+                      <span className="font-extrabold text-emerald-500 text-xs">{personalStats.gamesCompleted}</span>
+                    </div>
+                    <div className="h-4 w-px bg-border-custom/30"></div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="opacity-55 uppercase tracking-wider text-[8px]">Win Rate</span>
+                      <span className="font-extrabold text-amber-500 text-xs">{winRate}%</span>
+                    </div>
+                    <div className="h-4 w-px bg-border-custom/30"></div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="opacity-55 uppercase tracking-wider text-[8px]">Elo</span>
+                      <span className="font-extrabold text-accent-custom text-xs">{profile?.elo || 1450}</span>
+                    </div>
+                  </div>
+
+                  {/* Matchmaking / Private Lobby Tabs */}
+                  <div className="glass-card rounded-2xl p-5">
                   <div className="flex bg-accent-glow/30 rounded-xl p-1 mb-4 border border-border-custom/40">
                     <button
                       onClick={() => setActiveTab("lobby")}
@@ -3544,8 +3568,35 @@ export default function App() {
                     ))}
                   </div>
                 </div>
-              </section>
-            )}
+                </>
+              ) : (
+                /* Solo Stats Card — visible beside the board on desktop, below on mobile */
+                <div className="glass-card rounded-2xl p-5 border border-border-custom/30 shadow-md flex flex-col gap-4 animate-scale-in">
+                  <div>
+                    <h3 className="text-xs font-extrabold uppercase tracking-wider text-accent-custom">Career Stats</h3>
+                    <p className="text-[9px] opacity-45 font-bold uppercase tracking-wider mt-0.5">Synced from database</p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="glass-panel p-3 rounded-xl border border-border-custom/30 flex flex-col gap-0.5">
+                      <span className="opacity-55 text-[8.5px] uppercase font-bold tracking-wider">Played</span>
+                      <span className="text-xl font-black text-text-custom tabular-nums">{personalStats.gamesPlayed}</span>
+                    </div>
+                    <div className="glass-panel p-3 rounded-xl border border-border-custom/30 flex flex-col gap-0.5">
+                      <span className="opacity-55 text-[8.5px] uppercase font-bold tracking-wider text-emerald-500">Won</span>
+                      <span className="text-xl font-black text-emerald-500 tabular-nums">{personalStats.gamesCompleted}</span>
+                    </div>
+                    <div className="glass-panel p-3 rounded-xl border border-border-custom/30 flex flex-col gap-0.5">
+                      <span className="opacity-55 text-[8.5px] uppercase font-bold tracking-wider text-amber-500">Win Rate</span>
+                      <span className="text-xl font-black text-amber-500 tabular-nums">{winRate}%</span>
+                    </div>
+                    <div className="glass-panel p-3 rounded-xl border border-border-custom/30 flex flex-col gap-0.5">
+                      <span className="opacity-55 text-[8.5px] uppercase font-bold tracking-wider">Elo Rating</span>
+                      <span className="text-xl font-black text-accent-custom tabular-nums">{profile?.elo || 1450}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </section>
           </main>
         )
       )}
