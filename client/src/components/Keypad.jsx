@@ -106,7 +106,7 @@ export default function Keypad({
           disabled={coop || hintsRemaining === 0}
         >
           <Lightbulb size={20} className={hintsRemaining > 0 ? 'text-amber-500' : ''} />
-          <span className="text-[10px] mt-1 font-medium font-sans">Reveal digit</span>
+          <span className="text-[10px] mt-1 font-medium font-sans">Hint</span>
           {hintsRemaining > 0 && (
             <span className="absolute -top-1.5 -right-1.5 bg-amber-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow-sm">
               {hintsRemaining}

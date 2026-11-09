@@ -1,4 +1,4 @@
-import { guidedHint, raceProgress } from "./utils/play";
+import { raceProgress } from "./utils/play";
 import { useState, useEffect, useRef } from "react";
 import {
   Volume2,
@@ -88,7 +88,6 @@ export default function App() {
   const [focus, setFocus] = useState(() => localStorage.getItem("sudoku_focus") === "true");
   const [lockedDigit, setLockedDigit] = useState(null);
   const [digitFirst, setDigitFirst] = useState(false);
-  const [hintText, setHintText] = useState("");
   const [stayedMatch, setStayedMatch] = useState(null);
   const challengeId = new URLSearchParams(location.search).get("challenge");
   // Settings Panel preferences states
@@ -684,7 +683,7 @@ export default function App() {
     const timer = setTimeout(() => {
       if (room?.matchId && isConnected) setSeconds(useGameStore.getState().elapsedSeconds || 0);
       setLockedDigit(null);
-      setHintText("");
+
     }, 0);
     return () => clearTimeout(timer);
   }, [room?.matchId, isConnected]);
@@ -871,7 +870,7 @@ export default function App() {
   const startNewGame = (diff) => {
     sessionStorage.removeItem("sudoku_challenge");
     useLobbyStore.setState({challenge: null, challengeScore: null, challengeLink: null});
-    setLockedDigit(null); setHintText("");
+    setLockedDigit(null);
     setSeconds(0);
     initGame(diff || difficulty);
     setActiveView("game");
@@ -915,7 +914,7 @@ export default function App() {
     if (room?.coop && !notesMode) {
       if (cell) sendRoomCommand('COOP_MOVE', { row: cell[0], col: cell[1], digit });
     } else enterNumber(digit, formatTime(seconds));
-    setHintText("");
+
   };
   const chooseCell = (r, c) => {
     selectCell(r, c);
@@ -1791,21 +1790,20 @@ export default function App() {
                 </button>
               </div>
 
-              {room?.coop && <p className="text-sm font-semibold">Co-op · two players, one board · untimed</p>}
-              {room && Object.values(room.playAgainVotes || {}).some(Boolean) && <p role="status">
+              {room?.coop && <p className="game-status">Co-op · two players, one board · untimed</p>}
+              {room && Object.values(room.playAgainVotes || {}).some(Boolean) && <p className="game-status" role="status">
                 {room.players.filter(p => room.playAgainVotes[p.id]).map(p => p.name).join(", ")} requested a rematch.
               </p>}
-              {room?.isGameStarted && stayedMatch === room.matchId && activeOpponent && <button onClick={() => {startSpectating(activeOpponent.id); setActiveView("game");}}>Spectate {activeOpponent.name}</button>}
-              {room?.isGameStarted && bothFinished && <button onClick={() => votePlayAgain(true)}>Rematch</button>}
+              {room?.isGameStarted && stayedMatch === room.matchId && activeOpponent && <button className="game-action" onClick={() => {startSpectating(activeOpponent.id); setActiveView("game");}}>Spectate {activeOpponent.name}</button>}
+              {room?.isGameStarted && bothFinished && <button className="game-action" onClick={() => votePlayAgain(true)}>Rematch</button>}
               {/* Lobby Tab */}
               {activeTab === "lobby" && (
                 <div className="space-y-4">
                   {!room ? (
                     <div className="space-y-4">
-                      {challengeId && <button className="w-full glass-card p-3" disabled={!isConnected} onClick={() => {
+                      {challengeId && <button className="game-action" disabled={!isConnected} onClick={() => {
                         setSeconds(0); sendRoomCommand('OPEN_CHALLENGE', {id:challengeId});
                       }}>Play friend’s challenge</button>}
-                      <button className="w-full glass-card p-3" disabled={!isConnected} onClick={() => createRoom(selectedDifficulty, false, true)}>Create two-player co-op room</button>
                       {/* Difficulty Selector */}
                       <div className="space-y-1.5">
                         <label className="text-[10px] uppercase font-bold opacity-60 tracking-wider block">
@@ -1855,6 +1853,10 @@ export default function App() {
                         >
                           <Users size={14} className="text-accent-custom" />
                           Create Multiplayer Room
+                        </button>
+                        <button className="game-action" disabled={!isConnected || isSavingUsername || isCheckingUsername}
+                          onClick={() => createRoom(selectedDifficulty, false, true)}>
+                          <Users size={14} className="text-accent-custom" /> Create two-player co-op room
                         </button>
 
                         {showManaOptionSetting && (
@@ -2797,19 +2799,13 @@ export default function App() {
                   </div>
                 )}
 
-              {!isMeSpectator && !spectatingPlayerId && <div className="flex flex-wrap items-center gap-3 text-sm my-2">
-                <span>{filled} of {total} filled</span>
-                <button aria-pressed={digitFirst} onClick={() => { setDigitFirst(!digitFirst); setLockedDigit(null); }}>
+              {!isMeSpectator && !spectatingPlayerId && <div className="board-tools">
+                <span className="mr-auto text-[10px] font-semibold text-text-custom/70 tabular-nums">{filled} of {total} filled</span>
+                <button className="game-tool" aria-pressed={digitFirst} onClick={() => { setDigitFirst(!digitFirst); setLockedDigit(null); }}>
                   {digitFirst ? lockedDigit ? `Digit ${lockedDigit} locked` : "Choose a digit to lock" : "Digit-first input"}
                 </button>
-                {room?.coop && selectedCell && <button onClick={() => sendRoomCommand('COOP_POINT', {row:selectedCell[0], col:selectedCell[1]})}>Point to cell</button>}
-                {!room && !challenge && <button onClick={() => {
-                  const hint = guidedHint(board, solution);
-                  if (hint) selectCell(hint.row, hint.col);
-                  setHintText(hint?.text || "No single-cell deduction found. Try pencil marks.");
-                }}>Where should I look?</button>}
+                {room?.coop && selectedCell && <button className="game-tool" onClick={() => sendRoomCommand('COOP_POINT', {row:selectedCell[0], col:selectedCell[1]})}>Point to cell</button>}
               </div>}
-              {hintText && <p role="status" className="text-sm mb-2">{hintText}</p>}
               {/* Keypad selector */}
               <Keypad
                 onNumberClick={
@@ -2972,6 +2968,10 @@ export default function App() {
                             >
                               <PlayCircle size={15} className="text-accent-custom" />
                               Create New Lobby
+                            </button>
+                            <button className="game-action" disabled={!isConnected}
+                              onClick={() => createRoom(selectedDifficulty, false, true)}>
+                              <Users size={14} className="text-accent-custom" /> Create two-player co-op room
                             </button>
                           </div>
                         ) : (
@@ -3691,14 +3691,14 @@ export default function App() {
             )}
 
             {!room?.coop && !room?.enableAbilities && <div className="grid gap-2 text-sm">
-              {challengeScore && <p> {challengeScore.name}: {formatTime(challengeScore.seconds)}, {challengeScore.strikes} mistakes, {challengeScore.hintsUsed} hints · You: {formatTime(seconds)}, {strikes} mistakes, {(difficulty === 'expert' ? 1 : difficulty === 'beginner' ? 3 : 2) - hintsRemaining} hints</p>}
-              <button disabled={!isConnected} onClick={shareChallenge}>Challenge a friend</button>
-              {challengeLink && <label>Share link <input readOnly value={challengeLink} onFocus={e => e.target.select()} /></label>}
+              {challengeScore && <p className="game-status"> {challengeScore.name}: {formatTime(challengeScore.seconds)}, {challengeScore.strikes} mistakes, {challengeScore.hintsUsed} hints · You: {formatTime(seconds)}, {strikes} mistakes, {(difficulty === 'expert' ? 1 : difficulty === 'beginner' ? 3 : 2) - hintsRemaining} hints</p>}
+              <button className="game-action" disabled={!isConnected} onClick={shareChallenge}><UserPlus size={14} className="text-accent-custom" /> Challenge a friend</button>
+              {challengeLink && <label className="grid gap-1 text-left text-[10px] font-bold uppercase tracking-wider">Share link <input className="w-full rounded-xl border border-border-custom bg-accent-glow px-3 py-2 text-xs font-medium text-text-custom" readOnly value={challengeLink} onFocus={e => e.target.select()} /></label>}
             </div>}
-            {room && Object.values(room.playAgainVotes || {}).some(Boolean) && <p role="status">
+            {room && Object.values(room.playAgainVotes || {}).some(Boolean) && <p className="game-status" role="status">
               {room.players.filter(p => room.playAgainVotes[p.id]).map(p => p.name).join(", ")} requested a rematch.
             </p>}
-            {room && <button onClick={() => {setStayedMatch(room.matchId); setActiveView("home");}}>Stay in room</button>}
+            {room && <button className="game-action" onClick={() => {setStayedMatch(room.matchId); setActiveView("home");}}>Stay in room</button>}
             {isMultiplayer && bothFinished && (
               <button
                 onClick={() => {
@@ -3850,10 +3850,10 @@ export default function App() {
               ✏️ Keep Solving (Practice Mode)
             </button>
 
-            {room && Object.values(room.playAgainVotes || {}).some(Boolean) && <p role="status">
+            {room && Object.values(room.playAgainVotes || {}).some(Boolean) && <p className="game-status" role="status">
               {room.players.filter(p => room.playAgainVotes[p.id]).map(p => p.name).join(", ")} requested a rematch.
             </p>}
-            {room && <button onClick={() => {setStayedMatch(room.matchId); setActiveView("home");}}>Stay in room</button>}
+            {room && <button className="game-action" onClick={() => {setStayedMatch(room.matchId); setActiveView("home");}}>Stay in room</button>}
             {isMultiplayer && bothFinished && (
               <button
                 onClick={() => {
@@ -4047,9 +4047,9 @@ export default function App() {
             </div>
 
             <div className="space-y-4">
-              <label className="flex items-center gap-3"><input type="checkbox" checked={focus} onChange={e => {
+              <label className="flex items-center gap-3 rounded-xl border border-border-custom bg-accent-glow/20 px-3 py-2 text-left cursor-pointer"><input className="size-4 accent-accent-custom" type="checkbox" checked={focus} onChange={e => {
                 setFocus(e.target.checked); localStorage.setItem("sudoku_focus", e.target.checked);
-              }}/>Focus mode · quiet opponents, emotes and streaks</label>
+              }}/><span><span className="block text-xs font-bold text-text-custom">Focus mode</span><span className="block text-[10px] text-text-custom/70">Mute opponent sounds and hide emotes and streak notices.</span></span></label>
               {/* Keypad Layout Setting */}
               <div className="space-y-2 text-left">
                 <label className="text-[10px] uppercase font-bold opacity-80 tracking-wider">

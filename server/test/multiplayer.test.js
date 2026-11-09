@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 import WebSocket from 'ws';
-import { guidedHint, raceProgress } from '../../client/src/utils/play.js';
+import { raceProgress } from '../../client/src/utils/play.js';
 
 const directory = mkdtempSync(path.join(tmpdir(),'sudoku-test-'));
 const grace = 250;
@@ -134,11 +134,10 @@ test('friend challenge hides score on open and returns identical puzzle',async (
   assert.equal(opened.seconds,undefined);
   b.send('COMPARE_CHALLENGE',{id}); assert.equal((await b.next('CHALLENGE_SCORE')).seconds,76);
 });
-test('progress excludes clues and guided hints give a legal deduction', () => {
+test('progress excludes clues', () => {
   const clues=new Set(solution.flatMap((line,r)=>line.map((_,c)=>puzzle[r][c]!==null?r+','+c:null)).filter(Boolean));
   assert.deepEqual(raceProgress(puzzle,solution,clues),{filled:0,total:2,percent:0});
   assert.deepEqual(raceProgress(solution,solution,clues),{filled:2,total:2,percent:100});
-  assert.match(guidedHint(puzzle,solution).text,/Only 1 fits/);
 });
 
 test('host departure keeps lobby and gives next player control', async () => {

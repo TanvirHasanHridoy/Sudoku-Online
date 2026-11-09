@@ -33,3 +33,11 @@ This implementation targets a single server instance. Competitive progress and p
 * The migration ran against a temporary PostgreSQL-compatible PGlite database. Replaying the same loss twice yielded one result row and one 15-point deduction. The ordinary authenticated role was denied direct execution.
 * `npm run build` passed, including PWA generation. Vite reports bundle-size and dynamic-import warnings. Client ESLint still reports 13 errors, down from 16 on the parent commit.
 * Hosted Supabase authentication and production deployment were not exercised. No production migration or remote push was performed.
+
+## 2026-11-09 · Theme consistency and original hints
+
+On `codex/theme-gameplay-controls`, grouped co-op with the existing hosting actions in both lobbies. Applied the game's theme colors, typography, borders and focus states to challenge and rematch actions, room status, Focus settings and the board toolbar. Removed guided deductions, their UI and their helper. The original **Hint** button and H shortcut continue to use the existing limited hint allowance.
+
+Added client and server environment examples and a deployment section to the README. The public WebSocket endpoint is a frontend build setting. Durable challenge and result storage belongs on a mounted volume. Hosted Elo requires the server-side Supabase configuration and SQL migration.
+
+Verification: all 10 multiplayer tests and the production build passed. Chrome checked all six themes at alternating desktop and phone viewport widths. The co-op and multiplayer buttons matched in computed text color, background, font size and corner radius. In each theme the original Hint consumed one hint, the guided prompt was absent and the digit-first control responded. Hosting settings and the production database were not accessed.
