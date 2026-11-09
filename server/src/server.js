@@ -43,6 +43,7 @@ const matchmakingQueue = [];            // Array of { playerId, name, elo, diffi
 
 // Competitive disconnect tracking registries
 const graceMs = Number(process.env.SUDOKU_GRACE_MS || 30000);
+const lobbyGraceMs = Number(process.env.SUDOKU_LOBBY_GRACE_MS || (process.env.SUDOKU_GRACE_MS ? process.env.SUDOKU_GRACE_MS : 180000)); // 3 minutes for lobby so app switching doesn't kill room
 const heartbeat = setInterval(() => {
   for (const socket of wss.clients) {
     if (socket.alive === false) socket.terminate();
@@ -344,7 +345,8 @@ wss.on('connection', (ws) => {
 
         case 'JOIN_ROOM': {
           const { name, playerId, code, isSpectator, avatar } = payload;
-          const room = rooms.get(code);
+          const cleanCode = String(code || '').trim();
+          const room = rooms.get(cleanCode);
 
           if (!room) {
             ws.send(JSON.stringify({
@@ -404,13 +406,13 @@ wss.on('connection', (ws) => {
             Object.assign(seat, { socket: ws, disconnected: false, isVoiceJoined: false, isVoiceMuted: false });
             currentPlayer = seat;
             connectedClients.set(playerId, registration);
-            currentRoomCode = code;
+            currentRoomCode = room.code;
             if (room.awaitingOutcome?.length && !seat.isSpectator && !seat.hasFinishedGame) {
               finishDepartures(room, room.awaitingOutcome, room.players.filter(p => !p.isSpectator && !p.hasFinishedGame), false);
               room.awaitingOutcome = [];
             }
             // Notify opponent of player reconnected (renegotiate voice chat)
-            broadcastToRoom(code, {
+            broadcastToRoom(room.code, {
               type: 'PLAYER_RECONNECTED',
               payload: {
                 playerId: playerId,
@@ -426,7 +428,7 @@ wss.on('connection', (ws) => {
             room.players.push(currentPlayer);
           }
 
-          currentRoomCode = code;
+          currentRoomCode = room.code;
           broadcastOnlineStatusChange(playerId, 'in-game');
 
           // Notify player of successful join
@@ -444,7 +446,7 @@ wss.on('connection', (ws) => {
           }));
 
           // Notify everyone in the room
-          broadcastToRoom(code, {
+          broadcastToRoom(room.code, {
             type: 'ROOM_UPDATED',
             payload: { room: getSanitizedRoom(room) }
           });
@@ -1619,7 +1621,7 @@ wss.on('connection', (ws) => {
     currentPlayer.isVoiceMuted = false;
     broadcastToRoom(room.code, {type:'VOICE_STATE_UPDATED', payload:{playerId:currentPlayer.id, isJoined:false, isMuted:false}});
     currentPlayer.disconnected = true;
-    const delay = room.isGameStarted && !currentPlayer.isSpectator ? graceMs : 8000;
+    const delay = room.isGameStarted && !currentPlayer.isSpectator ? graceMs : lobbyGraceMs;
     currentPlayer.reconnectBy = Date.now() + delay;
     broadcastToRoom(room.code, { type: 'PLAYER_DISCONNECTED', payload: {
       playerId: currentPlayer.id, name: currentPlayer.name, reconnectBy: currentPlayer.reconnectBy

@@ -951,10 +951,11 @@ export const useLobbyStore = create((set, get) => ({
   joinRoom: (code, isSpectator = false) => {
     const { ws, myPlayerName, myPlayerId, selectedAvatar } = get();
     if (!ws || ws.readyState !== 1) return;
+    const cleanCode = String(code || '').trim();
 
     ws.send(JSON.stringify({
       type: 'JOIN_ROOM',
-      payload: { name: myPlayerName, playerId: myPlayerId, code, resumeToken: localStorage.getItem("sudoku_seat_" + code), isSpectator, avatar: selectedAvatar }
+      payload: { name: myPlayerName, playerId: myPlayerId, code: cleanCode, resumeToken: localStorage.getItem("sudoku_seat_" + cleanCode), isSpectator, avatar: selectedAvatar }
     }));
   },
 

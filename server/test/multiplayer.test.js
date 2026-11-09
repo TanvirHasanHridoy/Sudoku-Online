@@ -191,3 +191,14 @@ test('restart preserves challenge links and results and interrupts active rooms'
   peer.send('OPEN_CHALLENGE',{id}); assert.deepEqual((await peer.next('CHALLENGE_OPENED')).puzzle,puzzle);
   peer.send('JOIN_ROOM',{code,playerId:peer.id}); assert.match((await peer.next('ERROR')).message,/Room not found/);
 });
+
+test('room code trims whitespace and allows join', async () => {
+  const host = await client(), guest = await client();
+  host.send('CREATE_ROOM', {playerId: host.id});
+  const { room } = await host.next('ROOM_CREATED');
+  // Join with padded spaces / whitespace
+  guest.send('JOIN_ROOM', { code: `  ${room.code}  \n`, playerId: guest.id });
+  const joined = await guest.next('ROOM_JOINED');
+  assert.equal(joined.room.code, room.code);
+});
+

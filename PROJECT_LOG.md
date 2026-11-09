@@ -50,11 +50,15 @@ Moved the digit-first toggle from the board toolbar into Player Settings beside 
 
 Merged multiplayer recovery, co-op room synchronization, friend challenges, theme consistency, and digit-first player settings to main. Verified full test suite (10/10 passing) and client production build prior to remote deployment.
 
-## 2026-11-09 · Fix Co-op room start, cell pointing, and Challenge Mode auto-start & expiration
+## 2026-11-09 · Fix Co-op room start, cell pointing, Challenge Mode auto-start & expiration, and Room Not Found issues
 
 On branch `fix/coop-and-challenge-mode`:
 * **Friend Challenge Mode:** Opening a `?challenge=<id>` link now automatically connects, fetches the puzzle, clears the query parameter cleanly, and immediately starts gameplay on the game board without stranding the player on the home screen. Added 48-hour expiration on the backend with descriptive error handling. On challenge completion, renders a head-to-head comparison card showing times, mistakes, hints, and victory/defeat margins.
 * **Co-op Multiplayer:** Fixed lobby start constraint so hosts can start the game once all guests are ready, without needing to click an extraneous "Ready" button. Added visual glowing highlight and floating animated pointer badge for "Point to cell". Added automatic pencil notes cleanup in rows, columns, and 3x3 blocks when partner places numbers. Allowed pencil notes erasing in co-op. Added cell shaking feedback on invalid co-op move attempts.
-* **Verification:** Full regression test suite passed (11/11 tests, including expired challenge validation). Client production build succeeded cleanly (`npm run build`).
-* **Remaining limitations:** Live multiplayer sessions still rely on active WebSocket connection to the game server. Challenged players must solve the identical puzzle on the client.
+* **Room Lookup & Auto-Join (Room Not Found Fix):**
+  - Extended lobby disconnect grace delay from 8 seconds to 3 minutes (`lobbyGraceMs`, configurable via `SUDOKU_LOBBY_GRACE_MS`). Previously, hosts switching mobile tabs or apps to copy/message room codes had their rooms destroyed after 8 seconds of browser WebSocket sleep.
+  - Trimmed whitespace and newlines from room codes on both client and server (`cleanCode = String(code || '').trim()`), preventing copy-paste trailing whitespace from failing room lookups.
+  - Added URL query parameter auto-join (`?room=123456`) in `App.jsx` matching `getJoinUrl()`, allowing friends clicking an invite link to auto-fill the code and join the lobby immediately.
+* **Verification:** Full regression test suite passed (12/12 tests, including expired challenge validation and whitespace-trimmed room joins). Client production build succeeded cleanly (`npm run build`).
+* **Remaining limitations:** Live multiplayer sessions still rely on active WebSocket connection to the game server. Challenged players must solve the identical puzzle on the client. Both players must be connected to the same server deployment (e.g. both on local or both on production).
 

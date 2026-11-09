@@ -91,6 +91,8 @@ export default function App() {
   const [stayedMatch, setStayedMatch] = useState(null);
   const challengeId = new URLSearchParams(location.search).get("challenge");
   const challengeAutoRequested = useRef(false);
+  const roomCodeParam = new URLSearchParams(location.search).get("room");
+  const roomAutoJoined = useRef(false);
   // Settings Panel preferences states
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [keypadLayout, setKeypadLayout] = useState(() => localStorage.getItem("sudoku_keypad_layout") || "single-row");
@@ -696,6 +698,23 @@ export default function App() {
       setSeconds(0);
     }
   }, [challenge, activeView]);
+
+  // Auto-join room from URL query parameter (?room=123456)
+  useEffect(() => {
+    if (roomCodeParam && isConnected && ws?.readyState === 1 && !room && !roomAutoJoined.current) {
+      roomAutoJoined.current = true;
+      const clean = roomCodeParam.replace(/\D/g, "");
+      if (clean.length === 6) {
+        setInputCode(clean);
+        joinRoom(clean);
+        try {
+          const url = new URL(window.location.href);
+          url.searchParams.delete('room');
+          window.history.replaceState({}, '', url.pathname + url.search);
+        } catch {}
+      }
+    }
+  }, [roomCodeParam, isConnected, ws, room, joinRoom]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
