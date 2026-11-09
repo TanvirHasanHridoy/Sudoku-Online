@@ -88,9 +88,9 @@ export default function Keypad({
         </button>
 
         <button
-          disabled={coop} onClick={() => onActionClick('erase')}
-          className="glass-card flex flex-col items-center justify-center py-1.5 lg:py-2.5 rounded-lg lg:rounded-xl border text-text-custom active:scale-95 hover:text-red-500 hover:border-red-400"
-          title="Erase cell value"
+          disabled={coop && !notesMode} onClick={() => onActionClick('erase')}
+          className={`glass-card flex flex-col items-center justify-center py-1.5 lg:py-2.5 rounded-lg lg:rounded-xl border text-text-custom active:scale-95 hover:text-red-500 hover:border-red-400 ${coop && !notesMode ? 'opacity-40 cursor-not-allowed' : ''}`}
+          title={coop ? "Erase your pencil notes" : "Erase cell value"}
         >
           <Trash2 size={20} />
           <span className="text-[10px] mt-1 font-medium font-sans">Erase</span>

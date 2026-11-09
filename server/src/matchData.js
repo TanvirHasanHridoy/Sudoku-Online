@@ -30,10 +30,19 @@ export function resultsFor(playerId) {
 }
 export function saveChallenge(challenge) {
   const id = randomUUID();
-  commit({ ...data, challenges: { ...data.challenges, [id]: challenge } });
+  const createdAt = Date.now();
+  const expiresAt = createdAt + 48 * 60 * 60 * 1000; // 48-hour expiration
+  commit({ ...data, challenges: { ...data.challenges, [id]: { ...challenge, createdAt, expiresAt } } });
   return id;
 }
-export function readChallenge(id) { return Object.hasOwn(data.challenges, id) ? data.challenges[id] : null; }
+export function readChallenge(id) {
+  if (!Object.hasOwn(data.challenges, id)) return null;
+  const challenge = data.challenges[id];
+  if (challenge.expiresAt && Date.now() > challenge.expiresAt) {
+    return { ...challenge, expired: true };
+  }
+  return challenge;
+}
 
 // Durable pending deliveries survive process restart. The database function deduplicates retries.
 let delivering = false;

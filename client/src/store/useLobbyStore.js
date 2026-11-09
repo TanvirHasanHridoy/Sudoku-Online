@@ -26,6 +26,7 @@ const { id: defaultId, name: defaultName, avatar: defaultAvatar } = getCachedPla
 
 export const useLobbyStore = create((set, get) => ({
   challenge: JSON.parse(sessionStorage.getItem('sudoku_challenge') || 'null'), challengeLink: null, challengeScore: null, localReconnectBy: null,
+  coopPointedCell: null,
   ws: null,
   isConnected: false,
   myPlayerId: defaultId,
@@ -249,10 +250,23 @@ export const useLobbyStore = create((set, get) => ({
           case 'CHALLENGE_OPENED': {
             if (get().room) break;
             const solution = payload.puzzle.map(row => [...row]);
-            if (!solveSudoku(solution)) break;
+            if (!solveSudoku(solution)) {
+              get().addToast('Could not solve challenge puzzle.', 'error');
+              break;
+            }
             sessionStorage.setItem('sudoku_challenge', JSON.stringify(payload));
             set({ challenge: payload, challengeScore: null, challengeLink: null });
-            useGameStore.getState().initGame(payload.difficulty, payload.puzzle, solution);
+            useGameStore.getState().initGame(payload.difficulty, payload.puzzle, solution, false);
+
+            try {
+              if (window.history && window.location.search.includes('challenge')) {
+                const url = new URL(window.location.href);
+                url.searchParams.delete('challenge');
+                window.history.replaceState({}, '', url.pathname + url.search);
+              }
+            } catch {}
+
+            get().addToast(`⚔️ Challenge from ${payload.name}! Solve the board to beat their time.`, 'info');
             break;
           }
           case 'CHALLENGE_SCORE': {
@@ -261,11 +275,69 @@ export const useLobbyStore = create((set, get) => ({
           }
           case 'COOP_BOARD': {
             set({ room: payload.room });
-            useGameStore.setState({ board: payload.board, gameStatus: payload.complete ? 'won' : 'playing' });
+            const prevBoard = useGameStore.getState().board;
+            const currentNotes = { ...useGameStore.getState().notes };
+            let notesModified = false;
+
+            // Auto-clean pencil notes in the affected row, col, and 3x3 block
+            payload.board.forEach((row, r) => {
+              row.forEach((digit, c) => {
+                if (digit !== null && prevBoard?.[r]?.[c] !== digit) {
+                  delete currentNotes[`${r},${c}`];
+                  notesModified = true;
+
+                  const startRow = Math.floor(r / 3) * 3;
+                  const startCol = Math.floor(c / 3) * 3;
+                  for (let i = 0; i < 9; i++) {
+                    const rowKey = `${r},${i}`;
+                    if (currentNotes[rowKey]?.includes(digit)) {
+                      currentNotes[rowKey] = currentNotes[rowKey].filter(n => n !== digit);
+                      notesModified = true;
+                    }
+                    const colKey = `${i},${c}`;
+                    if (currentNotes[colKey]?.includes(digit)) {
+                      currentNotes[colKey] = currentNotes[colKey].filter(n => n !== digit);
+                      notesModified = true;
+                    }
+                    const bRow = startRow + Math.floor(i / 3);
+                    const bCol = startCol + (i % 3);
+                    const boxKey = `${bRow},${bCol}`;
+                    if (currentNotes[boxKey]?.includes(digit)) {
+                      currentNotes[boxKey] = currentNotes[boxKey].filter(n => n !== digit);
+                      notesModified = true;
+                    }
+                  }
+                }
+              });
+            });
+
+            useGameStore.setState({
+              board: payload.board,
+              notes: notesModified ? currentNotes : useGameStore.getState().notes,
+              gameStatus: payload.complete ? 'won' : 'playing'
+            });
             break;
           }
           case 'COOP_POINT': {
-            get().addToast(`${payload.name} points to row ${payload.row + 1}, column ${payload.col + 1}.`, 'info');
+            set({ coopPointedCell: { row: payload.row, col: payload.col, name: payload.name, id: Date.now() } });
+            get().addToast(`👉 ${payload.name} points to Row ${payload.row + 1}, Col ${payload.col + 1}!`, 'info');
+            setTimeout(() => {
+              const current = get().coopPointedCell;
+              if (current && current.row === payload.row && current.col === payload.col) {
+                set({ coopPointedCell: null });
+              }
+            }, 4000);
+            break;
+          }
+          case 'COOP_INVALID_MOVE': {
+            const cellKey = `${payload.row},${payload.col}`;
+            useGameStore.setState({ shakingCell: cellKey });
+            get().addToast(payload.message || 'That digit does not fit here.', 'error');
+            setTimeout(() => {
+              if (useGameStore.getState().shakingCell === cellKey) {
+                useGameStore.setState({ shakingCell: null });
+              }
+            }, 500);
             break;
           }
           case 'REGISTER_CONFIRMED': {

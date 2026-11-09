@@ -2,7 +2,7 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -133,6 +133,20 @@ test('friend challenge hides score on open and returns identical puzzle',async (
   const opened=await b.next('CHALLENGE_OPENED'); assert.deepEqual(opened.puzzle,puzzle);
   assert.equal(opened.seconds,undefined);
   b.send('COMPARE_CHALLENGE',{id}); assert.equal((await b.next('CHALLENGE_SCORE')).seconds,76);
+});
+test('expired friend challenge is rejected with descriptive error', async () => {
+  const a = await client(), b = await client();
+  a.send('CREATE_CHALLENGE', { puzzle, difficulty: 'easy', seconds: 50, strikes: 0, hintsUsed: 0 });
+  const { id } = await a.next('CHALLENGE_CREATED');
+  // Mutate file to make challenge expired, then restart server so it reloads matches.json
+  const content = JSON.parse(readFileSync(path.join(directory, 'matches.json'), 'utf8'));
+  content.challenges[id].expiresAt = Date.now() - 1000;
+  writeFileSync(path.join(directory, 'matches.json'), JSON.stringify(content));
+  const stopped = once(server, 'exit'); server.kill(); await stopped; await startServer();
+  const newB = await client(b.id);
+  newB.send('OPEN_CHALLENGE', { id });
+  const err = await newB.next('ERROR');
+  assert.match(err.message, /expired/);
 });
 test('progress excludes clues', () => {
   const clues=new Set(solution.flatMap((line,r)=>line.map((_,c)=>puzzle[r][c]!==null?r+','+c:null)).filter(Boolean));

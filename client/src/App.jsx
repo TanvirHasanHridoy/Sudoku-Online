@@ -90,6 +90,7 @@ export default function App() {
   const [digitFirst, setDigitFirst] = useState(false);
   const [stayedMatch, setStayedMatch] = useState(null);
   const challengeId = new URLSearchParams(location.search).get("challenge");
+  const challengeAutoRequested = useRef(false);
   // Settings Panel preferences states
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [keypadLayout, setKeypadLayout] = useState(() => localStorage.getItem("sudoku_keypad_layout") || "single-row");
@@ -193,7 +194,7 @@ export default function App() {
     incrementStreak,
     triggerAbility,
     wipeInkSplatter,
-    challenge, challengeScore, challengeLink, localReconnectBy,
+    challenge, challengeScore, challengeLink, localReconnectBy, coopPointedCell,
   } = useLobbyStore();
 
   // Zustand Store - Social State
@@ -679,6 +680,23 @@ export default function App() {
     }
   }, [room, activeView, stayedMatch]);
 
+  // Auto-open friend challenge from URL and enter game immediately
+  useEffect(() => {
+    if (challengeId && isConnected && ws?.readyState === 1 && !challengeAutoRequested.current) {
+      challengeAutoRequested.current = true;
+      setSeconds(0);
+      sendRoomCommand('OPEN_CHALLENGE', { id: challengeId });
+    }
+  }, [challengeId, isConnected, ws]);
+
+  // Transition to game view immediately when challenge puzzle is loaded
+  useEffect(() => {
+    if (challenge && activeView !== "game") {
+      setActiveView("game");
+      setSeconds(0);
+    }
+  }, [challenge, activeView]);
+
   useEffect(() => {
     const timer = setTimeout(() => {
       if (room?.matchId && isConnected) setSeconds(useGameStore.getState().elapsedSeconds || 0);
@@ -912,7 +930,11 @@ export default function App() {
     if (isGamePaused || isMeSpectator || spectatingPlayerId) return;
     const cell = useGameStore.getState().selectedCell;
     if (room?.coop && !notesMode) {
-      if (cell) sendRoomCommand('COOP_MOVE', { row: cell[0], col: cell[1], digit });
+      if (cell) {
+        const [r, c] = cell;
+        if (originalCells.has(`${r},${c}`) || (board[r]?.[c] !== null && board[r]?.[c] !== undefined)) return;
+        sendRoomCommand('COOP_MOVE', { row: r, col: c, digit });
+      }
     } else enterNumber(digit, formatTime(seconds));
 
   };
@@ -950,7 +972,7 @@ export default function App() {
           placeDigit(num);
         }
       } else if (e.key === "Backspace" || e.key === "Delete") {
-        if (!room?.coop) eraseCell();
+        if (!room?.coop || notesMode) eraseCell();
       } else if ((e.ctrlKey || e.metaKey) && e.key === "z") {
         e.preventDefault();
         if (!room?.coop) undo();
@@ -994,7 +1016,7 @@ export default function App() {
     if (isGamePaused || spectatingPlayerId || isMeSpectator) return;
     const currentTimeString = formatTime(seconds);
 
-    if (room?.coop && action !== "notes") return;
+    if (room?.coop && action !== "notes" && !(action === "erase" && notesMode)) return;
     if (action === "undo") undo();
     else if (action === "redo") redo();
     else if (action === "notes") toggleNotesMode();
@@ -1021,7 +1043,7 @@ export default function App() {
   const isHost = room?.players?.[0]?.id === myPlayerId;
   const activePlayers = room?.players?.filter((p) => !p.isSpectator) || [];
   const spectators = room?.players?.filter((p) => p.isSpectator) || [];
-  const allPlayersReady = (!room?.coop || activePlayers.length === 2) && (activePlayers.length === 1 || activePlayers.every((p) => p.isReady && !p.disconnected));
+  const allPlayersReady = (!room?.coop || activePlayers.length === 2) && (activePlayers.length === 1 || activePlayers.filter(p => p.id !== room?.players?.[0]?.id).every((p) => p.isReady && !p.disconnected));
   const myStatusInRoom = room?.players?.find((p) => p.id === myPlayerId);
   const isMultiplayer = room && room.players && room.players.filter((p) => !p.isSpectator).length > 1;
   const bothFinished = isMultiplayer && room.players.filter((p) => !p.isSpectator).every((p) => p.hasFinishedGame);
@@ -1801,9 +1823,11 @@ export default function App() {
                 <div className="space-y-4">
                   {!room ? (
                     <div className="space-y-4">
-                      {challengeId && <button className="game-action" disabled={!isConnected} onClick={() => {
-                        setSeconds(0); sendRoomCommand('OPEN_CHALLENGE', {id:challengeId});
-                      }}>Play friend’s challenge</button>}
+                      {challengeId && !challenge && (
+                        <div className="p-3 bg-accent-glow/20 border border-accent-custom/40 rounded-xl text-xs font-bold text-accent-custom text-center animate-pulse flex items-center justify-center gap-2">
+                          ⚔️ Loading friend’s challenge...
+                        </div>
+                      )}
                       {/* Difficulty Selector */}
                       <div className="space-y-1.5">
                         <label className="text-[10px] uppercase font-bold opacity-60 tracking-wider block">
@@ -2441,6 +2465,12 @@ export default function App() {
                     <Timer size={11} className="text-accent-custom shrink-0" />
                     {room?.coop ? "Untimed" : formatTime(seconds)}
                   </span>
+
+                  {challenge && (
+                    <span className="text-[10px] font-extrabold text-amber-400 bg-amber-500/15 border border-amber-500/30 px-2 py-1 rounded-lg flex items-center gap-1 shrink-0" title={`Challenging ${challenge.name}`}>
+                      ⚔️ vs {challenge.name}
+                    </span>
+                  )}
                 </div>
 
                 {/* Center Group: Lives */}
@@ -2655,6 +2685,7 @@ export default function App() {
                     spectatingPlayerId || isMeSpectator ? null : shakingCell
                   }
                   isSpectatingMode={!!(spectatingPlayerId || isMeSpectator)}
+                  coopPointedCell={room?.coop ? coopPointedCell : null}
                 />
                 {hasSpectatedPlayerLeft && (
                   <div className="absolute inset-0 bg-zinc-950/80 backdrop-blur-sm rounded-xl flex flex-col items-center justify-center text-center p-6 z-20 animate-fade-in border border-border-custom">
@@ -3687,11 +3718,61 @@ export default function App() {
               </button>
             )}
 
-            {!room?.coop && !room?.enableAbilities && <div className="grid gap-2 text-sm">
-              {challengeScore && <p className="game-status"> {challengeScore.name}: {formatTime(challengeScore.seconds)}, {challengeScore.strikes} mistakes, {challengeScore.hintsUsed} hints · You: {formatTime(seconds)}, {strikes} mistakes, {(difficulty === 'expert' ? 1 : difficulty === 'beginner' ? 3 : 2) - hintsRemaining} hints</p>}
-              <button className="game-action" disabled={!isConnected} onClick={shareChallenge}><UserPlus size={14} className="text-accent-custom" /> Challenge a friend</button>
-              {challengeLink && <label className="grid gap-1 text-left text-[10px] font-bold uppercase tracking-wider">Share link <input className="w-full rounded-xl border border-border-custom bg-accent-glow px-3 py-2 text-xs font-medium text-text-custom" readOnly value={challengeLink} onFocus={e => e.target.select()} /></label>}
-            </div>}
+            {!room?.coop && !room?.enableAbilities && (
+              <div className="grid gap-2.5 text-sm">
+                {challengeScore && (
+                  <div className="bg-accent-glow/20 border-2 border-accent-custom/40 rounded-2xl p-4 text-xs space-y-3">
+                    <div className="flex items-center justify-between font-bold border-b border-border-custom/40 pb-2">
+                      <span className="text-xs text-accent-custom flex items-center gap-1.5 uppercase tracking-wider font-extrabold">
+                        ⚔️ Challenge Results
+                      </span>
+                      <span className="text-[11px] font-extrabold text-emerald-400">
+                        {seconds < challengeScore.seconds
+                          ? `🏆 You beat ${challengeScore.name} by ${challengeScore.seconds - seconds}s!`
+                          : seconds > challengeScore.seconds
+                            ? `🥈 ${challengeScore.name} was ${seconds - challengeScore.seconds}s faster`
+                            : "🤝 Tied exactly!"}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 text-left">
+                      <div className="p-2.5 rounded-xl bg-panel-custom border border-border-custom/40">
+                        <span className="block text-[10px] font-bold text-accent-custom uppercase">
+                          {challengeScore.name}
+                        </span>
+                        <div className="text-base font-extrabold text-text-custom mt-0.5">
+                          {formatTime(challengeScore.seconds)}
+                        </div>
+                        <div className="text-[10px] opacity-60 mt-0.5">
+                          {challengeScore.strikes} mistakes · {challengeScore.hintsUsed} hints
+                        </div>
+                      </div>
+                      <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
+                        <span className="block text-[10px] font-bold text-emerald-400 uppercase">
+                          You
+                        </span>
+                        <div className="text-base font-extrabold text-text-custom mt-0.5">
+                          {formatTime(seconds)}
+                        </div>
+                        <div className="text-[10px] opacity-60 mt-0.5">
+                          {strikes} mistakes · {(difficulty === 'expert' ? 1 : difficulty === 'beginner' ? 3 : 2) - hintsRemaining} hints
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {!challenge && (
+                  <button className="game-action" disabled={!isConnected} onClick={shareChallenge}>
+                    <UserPlus size={14} className="text-accent-custom" /> Challenge a friend
+                  </button>
+                )}
+                {challengeLink && (
+                  <label className="grid gap-1 text-left text-[10px] font-bold uppercase tracking-wider">
+                    Share challenge link (Valid for 48 hours)
+                    <input className="w-full rounded-xl border border-border-custom bg-accent-glow px-3 py-2 text-xs font-medium text-text-custom" readOnly value={challengeLink} onFocus={e => e.target.select()} />
+                  </label>
+                )}
+              </div>
+            )}
             {room && Object.values(room.playAgainVotes || {}).some(Boolean) && <p className="game-status" role="status">
               {room.players.filter(p => room.playAgainVotes[p.id]).map(p => p.name).join(", ")} requested a rematch.
             </p>}

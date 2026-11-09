@@ -7,7 +7,8 @@ export default function SudokuGrid({
   originalCells = new Set(),
   mistakes = {},
   shakingCell = null,
-  isSpectatingMode = false
+  isSpectatingMode = false,
+  coopPointedCell = null
 }) {
   // Check if a cell is highlighted (same row, col, or 3x3 subgrid)
   const isCellHighlighted = (row, col) => {
@@ -64,6 +65,7 @@ export default function SudokuGrid({
                 const isMistake = mistakes[cellKey];
                 const isShaking = shakingCell === cellKey;
                 const cellNotes = notes[cellKey] || [];
+                const isPointed = coopPointedCell && coopPointedCell.row === rowIndex && coopPointedCell.col === colIndex;
 
                 // Dynamic color logic based on theme state
                 let bgClass = 'bg-panel-custom text-text-custom';
@@ -112,9 +114,15 @@ export default function SudokuGrid({
                       sudoku-cell relative flex items-center justify-center select-none text-lg md:text-xl
                       ${bgClass} ${fontClass}
                       ${isShaking ? 'shaking ring-2 ring-rose-500/80 z-20 bg-rose-500/10' : ''}
+                      ${isPointed ? 'ring-2 ring-amber-400 bg-amber-400/25 z-25 animate-pulse' : ''}
                       ${isSpectatingMode ? 'cursor-default' : 'hover:bg-accent-glow/20 cursor-pointer'} transition-all duration-100
                     `}
                   >
+                    {isPointed && (
+                      <span className="absolute -top-3.5 left-1/2 -translate-x-1/2 z-30 bg-amber-500 text-white font-bold text-[8px] px-1.5 py-0.5 rounded-full shadow-md whitespace-nowrap pointer-events-none animate-bounce flex items-center gap-0.5">
+                        👉 {coopPointedCell.name || 'Partner'}
+                      </span>
+                    )}
                     {isMistake && <span aria-hidden="true" className="absolute top-0 right-1 text-xs">!</span>}
                     {val !== null ? (
                       <span>{val}</span>

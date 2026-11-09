@@ -479,8 +479,9 @@ wss.on('connection', (ws) => {
             return;
           }
 
-          // Only allow start if all players are ready (excluding spectators). Solo hosts can start immediately.
-          const allReady = room.isMatchmakingRoom || activePlayers.length === 1 || activePlayers.every(p => p.isReady);
+          // Only allow start if all guest players are ready (the host is inherently ready by clicking Start).
+          const guests = activePlayers.filter(p => p !== room.players[0]);
+          const allReady = room.isMatchmakingRoom || guests.length === 0 || guests.every(p => p.isReady);
 
           if (!allReady) {
             ws.send(JSON.stringify({
@@ -491,7 +492,7 @@ wss.on('connection', (ws) => {
           }
 
           const { board, solution } = payload; // Generated on host client
-          if (room.players[0] !== currentPlayer || (room.coop && activePlayers.length !== 2)) return;
+          if (room.players[0]?.id !== currentPlayer?.id || (room.coop && activePlayers.length !== 2)) return;
           room.matchId = randomUUID();
           room.rated = !room.coop && activePlayers.length > 1;
           room.sharedBoard = room.coop ? structuredClone(board) : null;
@@ -1067,9 +1068,13 @@ wss.on('connection', (ws) => {
             ws.send(JSON.stringify({ type: 'ERROR', payload: { message: 'This challenge could not be found.' } }));
             break;
           }
-          const { puzzle, difficulty, name, ...score } = challenge;
+          if (challenge.expired) {
+            ws.send(JSON.stringify({ type: 'ERROR', payload: { message: 'This challenge link has expired. Challenges are valid for 48 hours.' } }));
+            break;
+          }
+          const { puzzle, difficulty, name, expiresAt, ...score } = challenge;
           ws.send(JSON.stringify(type === 'OPEN_CHALLENGE'
-            ? { type: 'CHALLENGE_OPENED', payload: { id: payload.id, puzzle, difficulty, name } }
+            ? { type: 'CHALLENGE_OPENED', payload: { id: payload.id, puzzle, difficulty, name, expiresAt } }
             : { type: 'CHALLENGE_SCORE', payload: { id: payload.id, name, ...score } }));
           break;
         }
@@ -1079,7 +1084,7 @@ wss.on('connection', (ws) => {
           const { row, col, digit } = payload;
           if (!Number.isInteger(row) || !Number.isInteger(col) || !Number.isInteger(digit) || room.sharedBoard[row]?.[col] !== null) return;
           if (room.solution[row][col] !== digit) {
-            ws.send(JSON.stringify({ type: 'ERROR', payload: { message: 'That digit does not fit here.' } }));
+            ws.send(JSON.stringify({ type: 'COOP_INVALID_MOVE', payload: { row, col, message: 'That digit does not fit here.' } }));
             return;
           }
           room.sharedBoard[row][col] = digit;
