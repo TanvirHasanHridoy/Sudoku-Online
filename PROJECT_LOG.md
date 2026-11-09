@@ -41,3 +41,7 @@ On `codex/theme-gameplay-controls`, grouped co-op with the existing hosting acti
 Added client and server environment examples and a deployment section to the README. The public WebSocket endpoint is a frontend build setting. Durable challenge and result storage belongs on a mounted volume. Hosted Elo requires the server-side Supabase configuration and SQL migration.
 
 Verification: all 10 multiplayer tests and the production build passed. Chrome checked all six themes at alternating desktop and phone viewport widths. The co-op and multiplayer buttons matched in computed text color, background, font size and corner radius. In each theme the original Hint consumed one hint, the guided prompt was absent and the digit-first control responded. Hosting settings and the production database were not accessed.
+
+## 2026-11-09 - Digit-first control placement
+
+Moved the digit-first toggle from the board toolbar into Player Settings beside Keypad Layout. Long-pressing a keypad digit still locks it during play. Confirmed friend challenge sharing appears on the completion screen for solo games and races with abilities disabled. All 10 regression tests and the production build passed.

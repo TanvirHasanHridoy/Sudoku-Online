@@ -131,7 +131,7 @@ An active player's seat is reserved for 30 seconds after the server detects a lo
 
 * **Friend challenge.** Finish a solo puzzle or a race with abilities disabled, choose **Challenge a friend**, and share the link. The recipient selects **Play friend’s challenge**. Finishing reveals both players’ times, mistakes and hints. Challenges are private by possession of the link and unrated.
 * **Co-op.** Choose **Create two-player co-op room**, share its room code, and have both players ready up. Both see one untimed board. Notes are private. Select a square and choose **Point to cell** to direct your partner there.
-* **Input and focus.** Hold a keypad digit or turn on **Digit-first input** to place it repeatedly. Tap the locked digit to release it. Arrow keys move grid focus. Enable **Focus mode** under Settings to mute opponent move sounds and hide floating emotes and streak notifications.
+* **Input and focus.** Hold a keypad digit or turn on **Player Settings > Digit-first input** to place it repeatedly. Tap the locked digit to release it. Arrow keys move grid focus. Enable **Focus mode** under Settings to mute opponent move sounds and hide floating emotes and streak notifications.
 * **After a race.** Stay in the room, spectate an unfinished opponent, vote for a rematch, or exit. Race progress counts editable cells.
 
 ### Deploying this branch

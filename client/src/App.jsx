@@ -2801,9 +2801,6 @@ export default function App() {
 
               {!isMeSpectator && !spectatingPlayerId && <div className="board-tools">
                 <span className="mr-auto text-[10px] font-semibold text-text-custom/70 tabular-nums">{filled} of {total} filled</span>
-                <button className="game-tool" aria-pressed={digitFirst} onClick={() => { setDigitFirst(!digitFirst); setLockedDigit(null); }}>
-                  {digitFirst ? lockedDigit ? `Digit ${lockedDigit} locked` : "Choose a digit to lock" : "Digit-first input"}
-                </button>
                 {room?.coop && selectedCell && <button className="game-tool" onClick={() => sendRoomCommand('COOP_POINT', {row:selectedCell[0], col:selectedCell[1]})}>Point to cell</button>}
               </div>}
               {/* Keypad selector */}
@@ -4050,6 +4047,14 @@ export default function App() {
               <label className="flex items-center gap-3 rounded-xl border border-border-custom bg-accent-glow/20 px-3 py-2 text-left cursor-pointer"><input className="size-4 accent-accent-custom" type="checkbox" checked={focus} onChange={e => {
                 setFocus(e.target.checked); localStorage.setItem("sudoku_focus", e.target.checked);
               }}/><span><span className="block text-xs font-bold text-text-custom">Focus mode</span><span className="block text-[10px] text-text-custom/70">Mute opponent sounds and hide emotes and streak notices.</span></span></label>
+              <label className="flex items-center gap-3 rounded-xl border border-border-custom bg-accent-glow/20 px-3 py-2 text-left cursor-pointer">
+                <input className="size-4 accent-accent-custom" type="checkbox" checked={digitFirst}
+                  onChange={event => { setDigitFirst(event.target.checked); setLockedDigit(null); }} />
+                <span>
+                  <span className="block text-xs font-bold text-text-custom">Digit-first input</span>
+                  <span className="block text-[10px] text-text-custom/70">Choose a keypad digit, then tap cells to place it.</span>
+                </span>
+              </label>
               {/* Keypad Layout Setting */}
               <div className="space-y-2 text-left">
                 <label className="text-[10px] uppercase font-bold opacity-80 tracking-wider">
