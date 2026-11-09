@@ -45,3 +45,7 @@ Verification: all 10 multiplayer tests and the production build passed. Chrome c
 ## 2026-11-09 - Digit-first control placement
 
 Moved the digit-first toggle from the board toolbar into Player Settings beside Keypad Layout. Long-pressing a keypad digit still locks it during play. Confirmed friend challenge sharing appears on the completion screen for solo games and races with abilities disabled. All 10 regression tests and the production build passed.
+
+## 2026-11-09 · Production merge preparation
+
+Merged multiplayer recovery, co-op room synchronization, friend challenges, theme consistency, and digit-first player settings to main. Verified full test suite (10/10 passing) and client production build prior to remote deployment.
