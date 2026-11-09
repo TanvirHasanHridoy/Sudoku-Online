@@ -38,3 +38,5 @@ yarn-error.log*
 # Scratch/debug scripts (may contain secrets)
 client/check-db-state.js
 client/scratch-*.js
+
+/server/data/

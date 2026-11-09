@@ -125,9 +125,22 @@ sequenceDiagram
     User A->>Supabase: Save custom avatars/Profile sync
 ```
 
-### ⚡ Connection Safeguard & Reconnection
-*   **15-Second Grace Window**: If a player's browser window disconnects or reloads mid-game, the WebSocket server holds their slot for 15 seconds.
-*   **Dynamic Reconnection**: Upon restarting, the client reads the cached active room code and auto-negotiates a reconnection. The opponent is notified, and the board state is synced back instantly.
+### Multiplayer recovery and game modes
+
+An active player's seat is reserved for 30 seconds after the server detects a lost connection. Reopen the game in the same browser to restore the last snapshot received by the server. Lobby and spectator seats have an eight-second grace period. An explicit exit from an unfinished ranked race forfeits immediately. A host leaving a private room passes control to the next player.
+
+* **Friend challenge.** Finish a solo puzzle or a race with abilities disabled, choose **Challenge a friend**, and share the link. The recipient selects **Play friend’s challenge**. Finishing reveals both players’ times, mistakes and hints. Challenges are private by possession of the link and unrated.
+* **Co-op.** Choose **Create two-player co-op room**, share its room code, and have both players ready up. Both see one untimed board. Notes are private. Select a square and choose **Point to cell** to direct your partner there.
+* **Input and focus.** Hold a keypad digit or turn on **Player Settings > Digit-first input** to place it repeatedly. Tap the locked digit to release it. Arrow keys move grid focus. Enable **Focus mode** under Settings to mute opponent move sounds and hide floating emotes and streak notifications.
+* **After a race.** Stay in the room, spectate an unfinished opponent, vote for a rematch, or exit. Race progress counts editable cells.
+
+### Deploying this branch
+
+Deploy the frontend and game server from the same commit. From the repository root, run `npm ci`, build with `npm run build`, and publish `client/dist`. Set `VITE_WS_URL` to your public secure WebSocket address before building. Preserve the existing public Supabase settings for sign-in. Start the backend with `npm start -w server` behind a host that supports WebSocket upgrades. Check its HTTP `/health` endpoint.
+
+Run one backend instance and mount persistent storage at `SUDOKU_DATA_DIR` for challenge links and match results. For account Elo, apply [the rating migration](server/sql/apply_match_result.sql) and configure the matching Supabase URL and service-role key on the backend. Example settings are in [client/.env.example](client/.env.example) and [server/.env.example](server/.env.example). Git transfers code. Hosting variables, storage and SQL migrations are managed separately.
+
+Run `npm test` for the multiplayer regression suite and `npm run build` for the production client. See [PROJECT_LOG.md](PROJECT_LOG.md) for deployment configuration, verification and limitations.
 
 ---
 

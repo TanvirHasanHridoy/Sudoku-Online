@@ -154,7 +154,7 @@ export const useGameStore = create((set, get) => ({
 
   // ─── Actions ──────────────────────────────────────────────────────────────
 
-  initGame: (difficulty = 'medium', externalBoard = null, externalSolution = null) => {
+  initGame: (difficulty = 'medium', externalBoard = null, externalSolution = null, countStart = true) => {
     let puzzle, solution;
     if (externalBoard && externalSolution) {
       puzzle = JSON.parse(JSON.stringify(externalBoard));
@@ -174,7 +174,7 @@ export const useGameStore = create((set, get) => ({
     });
 
     const nextState = {
-      difficulty,
+      difficulty, elapsedSeconds: 0,
       board: puzzle,
       solution,
       originalCells: originals,
@@ -197,7 +197,7 @@ export const useGameStore = create((set, get) => ({
     saveGameState({ ...nextState, originalCells: originals });
     
     // Increment games played stat
-    recordGameStarted();
+    if (countStart) recordGameStarted();
   },
 
   selectCell: (row, col) => {

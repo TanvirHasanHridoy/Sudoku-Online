@@ -2,7 +2,7 @@ import React from 'react';
 import { Undo2, Redo2, Pen, Trash2, Lightbulb } from 'lucide-react';
 
 export default function Keypad({ 
-  onNumberClick, 
+  onNumberClick, lockedDigit, coop, onLock,
   onActionClick, 
   notesMode,
   canUndo = false,
@@ -13,6 +13,9 @@ export default function Keypad({
   isScrambled = false,
   keypadLayout = 'single-row'
 }) {
+  const hold = React.useRef(null);
+  const held = React.useRef(false);
+  React.useEffect(() => () => clearTimeout(hold.current), []);
   const [shuffledButtons, setShuffledButtons] = React.useState([1, 2, 3, 4, 5, 6, 7, 8, 9]);
 
   React.useEffect(() => {
@@ -42,7 +45,7 @@ export default function Keypad({
       <div className="grid grid-cols-5 gap-2">
         <button
           onClick={() => onActionClick('undo')}
-          disabled={!canUndo}
+          disabled={coop || !canUndo}
           className={`
             flex flex-col items-center justify-center py-1.5 lg:py-2.5 rounded-lg lg:rounded-xl border transition-all duration-200
             ${canUndo 
@@ -57,7 +60,7 @@ export default function Keypad({
 
         <button
           onClick={() => onActionClick('redo')}
-          disabled={!canRedo}
+          disabled={coop || !canRedo}
           className={`
             flex flex-col items-center justify-center py-1.5 lg:py-2.5 rounded-lg lg:rounded-xl border transition-all duration-200
             ${canRedo 
@@ -85,7 +88,7 @@ export default function Keypad({
         </button>
 
         <button
-          onClick={() => onActionClick('erase')}
+          disabled={coop} onClick={() => onActionClick('erase')}
           className="glass-card flex flex-col items-center justify-center py-1.5 lg:py-2.5 rounded-lg lg:rounded-xl border text-text-custom active:scale-95 hover:text-red-500 hover:border-red-400"
           title="Erase cell value"
         >
@@ -100,7 +103,7 @@ export default function Keypad({
             ${hintsRemaining === 0 ? 'opacity-40 cursor-not-allowed' : 'hover:border-accent-custom hover:text-accent-custom'}
           `}
           title="Get Hint"
-          disabled={hintsRemaining === 0}
+          disabled={coop || hintsRemaining === 0}
         >
           <Lightbulb size={20} className={hintsRemaining > 0 ? 'text-amber-500' : ''} />
           <span className="text-[10px] mt-1 font-medium font-sans">Hint</span>
@@ -120,7 +123,16 @@ export default function Keypad({
           return (
             <button
               key={num}
-              onClick={() => !isCompleted && onNumberClick(num)}
+              onPointerDown={() => {
+                held.current = false;
+                hold.current = setTimeout(() => { held.current = true; onLock?.(num); }, 450);
+              }}
+              onPointerUp={() => clearTimeout(hold.current)}
+              onPointerCancel={() => clearTimeout(hold.current)}
+              onPointerLeave={() => clearTimeout(hold.current)}
+              onContextMenu={event => event.preventDefault()}
+              onClick={() => { if (!held.current && !isCompleted) onNumberClick(num); held.current = false; }}
+              aria-pressed={lockedDigit === num} style={lockedDigit === num ? {outline: "3px solid var(--accent-color, #6366f1)"} : undefined}
               disabled={isCompleted}
               className={`
                 ${keypadLayout === 'two-rows' ? 'w-[calc(20%-5px)] h-10 lg:h-11' : 'aspect-square'}

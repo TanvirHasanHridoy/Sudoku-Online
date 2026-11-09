@@ -1,3 +1,6 @@
+import { generateSudoku } from '../utils/generator';
+import { raceProgress } from '../utils/play';
+import { solveSudoku } from '../utils/solver';
 import { create } from 'zustand';
 import { useGameStore } from './useGameStore';
 
@@ -17,9 +20,12 @@ const getCachedPlayer = () => {
   return { id, name, avatar };
 };
 
+let retryAttempt = 0;
+let retryTimer;
 const { id: defaultId, name: defaultName, avatar: defaultAvatar } = getCachedPlayer();
 
 export const useLobbyStore = create((set, get) => ({
+  challenge: JSON.parse(sessionStorage.getItem('sudoku_challenge') || 'null'), challengeLink: null, challengeScore: null, localReconnectBy: null,
   ws: null,
   isConnected: false,
   myPlayerId: defaultId,
@@ -157,6 +163,7 @@ export const useLobbyStore = create((set, get) => ({
   },
 
   connectWebSocket: () => {
+    clearTimeout(retryTimer);
     const activeWs = get().ws;
     if (activeWs && activeWs.readyState <= 1) return; // Already connecting or connected
 
@@ -165,7 +172,7 @@ export const useLobbyStore = create((set, get) => ({
     set({ ws: socket }); // Store immediately to prevent duplicate connections!
 
     socket.onopen = async () => {
-      set({ isConnected: true });
+      set({ isConnected: !localStorage.getItem("sudoku_active_room_code") });
       get().addToast('Connected to competitive lobby server!', 'success');
 
       // Register player with the server (use dynamic import to avoid circular dependency)
@@ -179,7 +186,8 @@ export const useLobbyStore = create((set, get) => ({
           payload: {
             playerId: get().myPlayerId,
             name: get().myPlayerName,
-            elo: myElo,
+            elo: myElo, lastResult: localStorage.getItem("sudoku_result_" + get().myPlayerId), resuming: true,
+            accessToken: (await (await import("../lib/supabase")).supabase?.auth.getSession())?.data.session?.access_token,
             supabaseUserId
           }
         }));
@@ -192,7 +200,7 @@ export const useLobbyStore = create((set, get) => ({
       if (activeRoomCode) {
         console.log(`[Auto Reconnect] Restoring multiplayer session for Room: ${activeRoomCode}`);
         get().joinRoom(activeRoomCode);
-      }
+      } else set({isConnected:true, localReconnectBy:null});
     };
 
     socket.onmessage = (event) => {
@@ -203,8 +211,65 @@ export const useLobbyStore = create((set, get) => ({
           console.log(`[Client Received] Type: ${type}`, payload);
         }
 
+        if (get().ws !== socket) return;
         switch (type) {
+          case 'SESSION_REPLACED': {
+            get().leaveVoice();
+            set({ ws: null, room: null, isConnected: false, localReconnectBy: null });
+            useGameStore.setState({gameStatus:'idle'});
+            get().addToast('This seat is open in another tab.', 'info');
+            socket.close();
+            break;
+          }
+          case 'MATCH_RESULT': {
+            const key = 'sudoku_result_' + payload.playerId;
+            if (payload.playerId !== get().myPlayerId) break;
+            const marker = payload.id + (payload.synced ? '/synced' : '');
+            if (localStorage.getItem(key) === marker) break;
+            localStorage.setItem(key, marker);
+            localStorage.setItem('sudoku_elo', String(payload.rating));
+            import('./useAuthStore').then(({useAuthStore}) => {
+              const {profile, isGuest} = useAuthStore.getState();
+              if (isGuest) localStorage.setItem('sudoku_guest_elo', String(payload.rating));
+              if (profile?.id === payload.playerId) useAuthStore.setState({profile:{...profile, elo:payload.rating}});
+            });
+            import('./useSocialStore').then(({useSocialStore}) => {
+              useSocialStore.setState({ elo: payload.rating });
+              useSocialStore.getState().updateRankTier();
+            });
+            get().addToast(`Match ${payload.outcome}: ${payload.delta >= 0 ? '+' : ''}${payload.delta} Elo`, 'info');
+            break;
+          }
+          case 'CHALLENGE_CREATED': {
+            const link = new URL(location.pathname, location.origin);
+            link.searchParams.set('challenge', payload.id);
+            set({ challengeLink: link.href });
+            break;
+          }
+          case 'CHALLENGE_OPENED': {
+            if (get().room) break;
+            const solution = payload.puzzle.map(row => [...row]);
+            if (!solveSudoku(solution)) break;
+            sessionStorage.setItem('sudoku_challenge', JSON.stringify(payload));
+            set({ challenge: payload, challengeScore: null, challengeLink: null });
+            useGameStore.getState().initGame(payload.difficulty, payload.puzzle, solution);
+            break;
+          }
+          case 'CHALLENGE_SCORE': {
+            if (payload.id === get().challenge?.id) set({ challengeScore: payload });
+            break;
+          }
+          case 'COOP_BOARD': {
+            set({ room: payload.room });
+            useGameStore.setState({ board: payload.board, gameStatus: payload.complete ? 'won' : 'playing' });
+            break;
+          }
+          case 'COOP_POINT': {
+            get().addToast(`${payload.name} points to row ${payload.row + 1}, column ${payload.col + 1}.`, 'info');
+            break;
+          }
           case 'REGISTER_CONFIRMED': {
+            retryAttempt = 0;
             set({ myPlayerName: payload.name });
             localStorage.setItem('sudoku_player_name', payload.name);
             import('./useSocialStore').then(({ useSocialStore }) => {
@@ -302,11 +367,13 @@ export const useLobbyStore = create((set, get) => ({
 
           case 'ROOM_CREATED':
           case 'ROOM_JOINED': {
+            sessionStorage.removeItem('sudoku_challenge');
+            localStorage.setItem('sudoku_seat_' + payload.room.code, payload.resumeToken);
             // Persist the room code locally
             localStorage.setItem('sudoku_active_room_code', payload.room.code);
 
             set({ 
-              room: payload.room, 
+              isConnected: true, localReconnectBy: null, room: payload.room, challenge: null, challengeLink: null,
               myPlayerId: payload.myPlayerId,
               showPauseVoteModal: false,
               pauseRequester: null,
@@ -335,15 +402,24 @@ export const useLobbyStore = create((set, get) => ({
               const { difficulty } = payload.room;
               const gameStore = useGameStore.getState();
               
-              // Check if we already have a restored board matching this exact game
-              const hasMatchingBoard = 
-                gameStore.gameStatus === 'playing' &&
-                gameStore.solution &&
-                JSON.stringify(gameStore.solution) === JSON.stringify(payload.solution);
-              
-              if (!hasMatchingBoard) {
-                gameStore.initGame(difficulty, payload.board, payload.solution);
+              const me = payload.room.players.find(p => p.id === payload.myPlayerId);
+              gameStore.initGame(difficulty, payload.board, payload.solution, false);
+              const snap = payload.snapshot;
+              if (snap?.matchId === payload.room.matchId) {
+                const { board, notes, strikes, hintsRemaining, selectedCell, mistakes, timeline, elapsedSeconds } = snap;
+                useGameStore.setState({ board, notes, strikes, hintsRemaining, selectedCell, mistakes, timeline, elapsedSeconds });
+                set({ myMana: me.mana, myStreak: snap.streak || 0, activeInkSplashes: snap.ink || [],
+                  myShieldActive: snap.shieldUntil > Date.now(), shieldUntil: snap.shieldUntil,
+                  isScrambled: snap.scrambleUntil > Date.now(), scrambleUntil: snap.scrambleUntil });
+                for (const [flag, expiry] of [['myShieldActive','shieldUntil'], ['isScrambled','scrambleUntil']]) {
+                  if (snap[expiry] > Date.now()) setTimeout(() => {
+                    if (get()[expiry] === snap[expiry]) set({ [flag]: false });
+                  }, snap[expiry] - Date.now());
+                }
               }
+              if (payload.sharedBoard) useGameStore.setState({ board: payload.sharedBoard });
+              if (me.hasFinishedGame) useGameStore.setState({ gameStatus: me.strikes >= 3 ? 'lost' : 'won' });
+              useGameStore.getState().persistState();
             }
             break;
           }
@@ -379,6 +455,7 @@ export const useLobbyStore = create((set, get) => ({
               isScrambled: false,
               activeInkSplashes: []
             });
+            set({ challengeLink: null, forfeitWinnerPending: null });
             // Initialize local Sudoku board with shared dynamic board
             const { difficulty } = payload.room;
             useGameStore.getState().initGame(difficulty, payload.board, payload.solution); 
@@ -456,7 +533,7 @@ export const useLobbyStore = create((set, get) => ({
             get().addToast('Room consensus reached. Starting new game!', 'success');
             
             // Reset local board states
-            useGameStore.getState().initGame(payload.room.difficulty);
+            if (payload.room.players[0]?.id === get().myPlayerId) get().startGame();
             break;
           }
 
@@ -514,11 +591,11 @@ export const useLobbyStore = create((set, get) => ({
 
           case 'PLAYER_DISCONNECTED': {
             const { playerId, name } = payload;
-            get().addToast(`⚠️ ${name} disconnected. Waiting 15s to reconnect...`, 'error');
+            get().addToast(`${name} disconnected. Holding their seat.`, 'info');
             set((state) => {
               if (!state.room) return {};
               const updatedPlayers = state.room.players.map(p => 
-                p.id === playerId ? { ...p, disconnected: true } : p
+                p.id === playerId ? { ...p, disconnected: true, reconnectBy: payload.reconnectBy } : p
               );
               return { room: { ...state.room, players: updatedPlayers } };
             });
@@ -526,7 +603,7 @@ export const useLobbyStore = create((set, get) => ({
           }
 
           case 'PLAYER_RECONNECTED': {
-            const { playerId, name, room: updatedRoom } = payload;
+            const { name, room: updatedRoom } = payload;
             get().addToast(`⚡ ${name} reconnected!`, 'success');
             set((state) => {
               const activeSpectatorNames = (updatedRoom?.players || [])
@@ -544,7 +621,7 @@ export const useLobbyStore = create((set, get) => ({
           }
 
           case 'GAME_OVER_LEAVER': {
-            const { winnerId, winnerName, leaverId, leaverName, eloAdjustment } = payload;
+            const { winnerId, leaverName, eloAdjustment } = payload;
             
             // If we already left the room locally, ignore this broadcast
             if (!get().room) {
@@ -555,29 +632,7 @@ export const useLobbyStore = create((set, get) => ({
             if (winnerId === get().myPlayerId) {
               set({ forfeitWinnerPending: { leaverName, eloAdjustment } });
               get().addToast(`🏆 Opponent ${leaverName} left! Complete the board successfully to claim +${eloAdjustment} ELO.`, 'success');
-            } else if (leaverId === get().myPlayerId) {
-              // If we are the leaver (explicitly left, or timeout)
-              if (eloAdjustment > 0) {
-                import('./useSocialStore').then(({ useSocialStore }) => {
-                  useSocialStore.getState().adjustElo(-eloAdjustment);
-                });
-                get().addToast(`💀 Match forfeited! You left the game. (-${eloAdjustment} ELO)`, 'error');
-              }
-              const currentStatus = useGameStore.getState().gameStatus;
-              if (currentStatus !== 'practice' && currentStatus !== 'practice-completed') {
-                useGameStore.setState({ gameStatus: 'lost' });
-              }
-              localStorage.removeItem('sudoku_active_room_code');
             }
-            break;
-          }
-
-          case 'FORFEIT_PENALTY': {
-            const { eloAdjustment } = payload;
-            import('./useSocialStore').then(({ useSocialStore }) => {
-              useSocialStore.getState().adjustElo(eloAdjustment); // eloAdjustment is negative
-            });
-            get().addToast(`💀 You lost ${Math.abs(eloAdjustment)} ELO for forfeiting your last match.`, 'error');
             break;
           }
 
@@ -627,7 +682,7 @@ export const useLobbyStore = create((set, get) => ({
             
             // If it is cleanse, activate local shield immediately
             if (abilityType === 'cleanse') {
-              set({ myShieldActive: true });
+              set({ myShieldActive: true, shieldUntil: Date.now() + 5000 });
               get().cleanseAllSabotages();
               
               // Clear shield after 5 seconds
@@ -664,7 +719,7 @@ export const useLobbyStore = create((set, get) => ({
               }
               set({ activeInkSplashes: splashes });
             } else if (abilityType === 'scramble') {
-              set({ isScrambled: true });
+              set({ isScrambled: true, scrambleUntil: Date.now() + 7000 });
               
               // Scramble keypad for 7 seconds
               setTimeout(() => {
@@ -677,8 +732,12 @@ export const useLobbyStore = create((set, get) => ({
 
           case 'ERROR': {
             get().addToast(payload.message, 'error');
-            if (payload.message && payload.message.toLowerCase().includes('room not found')) {
+            if (localStorage.getItem('sudoku_active_room_code') && (payload.message?.includes('Room not found') || payload.message?.includes('reserved for its original session'))) {
               localStorage.removeItem('sudoku_active_room_code');
+              if (get().room || localStorage.getItem('sudoku_active_room_code')) get().addToast('This room is no longer active.', 'info');
+              get().leaveVoice();
+              set({ room: null, isConnected: true, localReconnectBy: null, forfeitWinnerPending: null });
+              useGameStore.getState().resetPersistedState();
             }
             break;
           }
@@ -750,7 +809,7 @@ export const useLobbyStore = create((set, get) => ({
                 if (ws && isConnected && ws.readyState === 1) {
                   ws.send(JSON.stringify({
                     type: 'SYNC_GAMEPLAY',
-                    payload: { board, notes, selectedCell }
+                    payload: { matchId:get().room.matchId, spectatorOnly:true, board, notes, selectedCell }
                   }));
                 }
               } else {
@@ -773,7 +832,7 @@ export const useLobbyStore = create((set, get) => ({
               const isPlayerB = activePlayers[1]?.id === playerId;
 
               const updates = {
-                spectatedPlayerBoardState: { board, notes, selectedCell }
+                spectatedPlayerBoardState: state.spectatingPlayerId === playerId ? { board, notes, selectedCell } : state.spectatedPlayerBoardState
               };
               if (isPlayerA) {
                 updates.spectatedPlayerABoard = { board, notes, selectedCell };
@@ -794,27 +853,26 @@ export const useLobbyStore = create((set, get) => ({
     };
 
     socket.onclose = () => {
+      if (get().ws !== socket) return;
       get().leaveVoice(); // Safely clean up local tracks & connections
       set({ 
         ws: null, 
-        isConnected: false
+        isConnected: false, localReconnectBy: get().localReconnectBy || (get().room ? Date.now() + (get().room.isGameStarted ? 30000 : 8000) : null)
       });
       get().addToast('Disconnected from competitive lobby server. Retrying...', 'error');
       
-      // Auto-reconnect after 3s
-      setTimeout(() => {
-        get().connectWebSocket();
-      }, 3000);
+      const delay = Math.min(8000, 1000 * 2 ** Math.min(retryAttempt++, 3)) + Math.random() * 400;
+      retryTimer = setTimeout(get().connectWebSocket, delay);
     };
   },
 
-  createRoom: (difficulty = 'medium', enableAbilities = true) => {
+  createRoom: (difficulty = 'medium', enableAbilities = true, coop = false) => {
     const { ws, myPlayerName, myPlayerId, selectedAvatar } = get();
     if (!ws || ws.readyState !== 1) return;
 
     ws.send(JSON.stringify({
       type: 'CREATE_ROOM',
-      payload: { name: myPlayerName, playerId: myPlayerId, difficulty, avatar: selectedAvatar, enableAbilities }
+      payload: { name: myPlayerName, playerId: myPlayerId, difficulty, avatar: selectedAvatar, enableAbilities, coop }
     }));
   },
 
@@ -824,7 +882,7 @@ export const useLobbyStore = create((set, get) => ({
 
     ws.send(JSON.stringify({
       type: 'JOIN_ROOM',
-      payload: { name: myPlayerName, playerId: myPlayerId, code, isSpectator, avatar: selectedAvatar }
+      payload: { name: myPlayerName, playerId: myPlayerId, code, resumeToken: localStorage.getItem("sudoku_seat_" + code), isSpectator, avatar: selectedAvatar }
     }));
   },
 
@@ -842,10 +900,7 @@ export const useLobbyStore = create((set, get) => ({
     const { ws, room } = get();
     if (!ws || ws.readyState !== 1 || !room) return;
     const activeDifficulty = room.difficulty || 'medium';
-    useGameStore.getState().initGame(activeDifficulty);
-    const generatedPuzzle = useGameStore.getState().board;
-    const generatedSolution = useGameStore.getState().solution;
-
+    const { puzzle: generatedPuzzle, solution: generatedSolution } = generateSudoku(activeDifficulty);
     ws.send(JSON.stringify({
       type: 'START_GAME',
       payload: {
@@ -861,7 +916,8 @@ export const useLobbyStore = create((set, get) => ({
 
     ws.send(JSON.stringify({
       type: 'UPDATE_PROGRESS',
-      payload: { progress, strikes, mana: mana !== undefined ? mana : myMana }
+      payload: { progress, strikes, matchId: room.matchId,
+        hintsUsed: (room.difficulty === 'expert' ? 1 : room.difficulty === 'beginner' ? 3 : 2) - useGameStore.getState().hintsRemaining, mana: mana !== undefined ? mana : myMana }
     }));
   },
 
@@ -958,17 +1014,6 @@ export const useLobbyStore = create((set, get) => ({
 
     const { ws, isConnected, room } = get();
 
-    // Apply forfeit penalty immediately if leaving a started multiplayer game
-    if (room && room.isGameStarted && !room.isSpectator) {
-      const activePlayers = room.players ? room.players.filter(p => !p.isSpectator) : [];
-      if (activePlayers.length > 1) {
-        import('./useSocialStore').then(({ useSocialStore }) => {
-          useSocialStore.getState().adjustElo(-15);
-        });
-        get().addToast('You left the active match and forfeited 15 ELO.', 'error');
-      }
-    }
-
     // Notify the server so other players are informed and the player is removed from the room
     if (ws && isConnected && ws.readyState === 1 && room) {
       ws.send(JSON.stringify({
@@ -977,6 +1022,8 @@ export const useLobbyStore = create((set, get) => ({
       }));
     }
 
+    sessionStorage.removeItem('sudoku_challenge');
+    set({ challenge: null, challengeScore: null, challengeLink: null });
     // Clear persisted room code
     localStorage.removeItem('sudoku_active_room_code');
 
@@ -1383,15 +1430,8 @@ export const useLobbyStore = create((set, get) => ({
     const gameStore = useGameStore.getState();
     const solution = gameStore.solution;
     if (solution && solution.length > 0) {
-      let correctCount = 0;
-      gameStore.board.forEach((row, r) => {
-        row.forEach((val, c) => {
-          if (val !== null && val === solution[r][c]) {
-            correctCount++;
-          }
-        });
-      });
-      const progress = Math.round((correctCount / 81) * 100);
+      const {percent: progress} = raceProgress(gameStore.board, solution, gameStore.originalCells);
+
       get().sendProgress(progress, gameStore.strikes, nextMana);
     }
   },
@@ -1431,4 +1471,5 @@ export const useLobbyStore = create((set, get) => ({
   }
 }));
 
+window.addEventListener('online', () => useLobbyStore.getState().connectWebSocket());
 window.useLobbyStore = useLobbyStore;

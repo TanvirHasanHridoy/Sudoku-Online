@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+import { openMatchData, flushProfileResults, recordResult, resultsFor, readChallenge, saveChallenge } from './matchData.js';
 import express from 'express';
 import { createServer } from 'http';
 import { WebSocketServer } from 'ws';
@@ -9,6 +11,7 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
+openMatchData();
 
 const app = express();
 app.use(cors());
@@ -39,8 +42,86 @@ const connectedClients = new Map();     // Map<playerId, { id, socket, name, elo
 const matchmakingQueue = [];            // Array of { playerId, name, elo, difficulty, socket, queuedAt }
 
 // Competitive disconnect tracking registries
-const disconnectTimeouts = new Map();   // Map<playerId, NodeJS.Timeout>
-const pendingPenalties = new Map();     // Map<playerId, Number>
+const graceMs = Number(process.env.SUDOKU_GRACE_MS || 30000);
+const heartbeat = setInterval(() => {
+  for (const socket of wss.clients) {
+    if (socket.alive === false) socket.terminate();
+    else { socket.alive = false; socket.ping(); }
+  }
+}, 10000);
+heartbeat.unref();
+
+function syncRatings() {
+  return flushProfileResults(result => {
+    const client = connectedClients.get(result.playerId);
+    if (client?.socket.readyState === 1) {
+      client.elo = result.rating;
+      client.socket.send(JSON.stringify({type:'MATCH_RESULT', payload:result}));
+    }
+  });
+}
+setInterval(syncRatings, 15000).unref();
+
+function settle(room, player, outcome, delta) {
+  if (!room.rated || player.result) return;
+  const result = recordResult(room, player, outcome, delta);
+  player.result = result;
+  void syncRatings();
+  const target = connectedClients.get(player.id);
+  if (target) {
+    target.elo = result.rating;
+    if (target.socket.readyState === 1) target.socket.send(JSON.stringify({ type: 'MATCH_RESULT', payload: result }));
+  }
+}
+
+function finishDepartures(room, departed, survivors, abandoned) {
+  for (const player of departed) {
+    settle(room, player, abandoned ? 'abandoned' : 'forfeit', abandoned ? 0 : -15);
+  }
+  if (!abandoned && survivors.length === 1 && !survivors[0].disconnected) {
+    survivors[0].forfeitBonus = true;
+    const leaver = departed.at(-1);
+    broadcastToRoom(room.code, { type: 'GAME_OVER_LEAVER', payload: {
+      winnerId: survivors[0].id, leaverId: leaver.id, leaverName: leaver.name, eloAdjustment: 15
+    }});
+  }
+}
+
+function depart(room, player, expired) {
+  const others = room.players.filter(p => p !== player && !p.isSpectator);
+  if (room.rated && room.isGameStarted && !player.isSpectator && !player.hasFinishedGame && !player.result) {
+    const survivors = others.filter(p => !p.hasFinishedGame);
+    const departed = [...(room.awaitingOutcome || []), player];
+    if (expired && survivors.length && survivors.every(p => p.disconnected)) {
+      room.awaitingOutcome = departed;
+    } else {
+      const abandoned = expired && !others.length && departed.length > 1;
+      finishDepartures(room, departed, survivors, abandoned);
+      room.awaitingOutcome = [];
+    }
+  }
+  clearTimeout(player.disconnectTimer);
+  room.players = room.players.filter(p => p !== player);
+  delete room.pauseVotes[player.id];
+  delete room.playAgainVotes[player.id];
+  if (!player.isSpectator && (room.pauseRequesterId || room.isPaused)) {
+    room.pauseRequesterId = null;
+    room.pauseVotes = {};
+    room.isPaused = false;
+    broadcastToRoom(room.code, { type: 'PAUSE_DISMISSED', payload: { room: getSanitizedRoom(room) } });
+  }
+  broadcastToRoom(room.code, { type: 'PLAYER_LEFT', payload: { playerId: player.id, name: player.name } });
+  if (!room.players.some(p => !p.isSpectator)) {
+    broadcastToRoom(room.code, { type: 'KICKED', payload: { message: 'Everyone has left the room.' } });
+    rooms.delete(room.code);
+  } else {
+    if (room.players[0].isSpectator) {
+      const index = room.players.findIndex(p => !p.isSpectator);
+      room.players.unshift(room.players.splice(index, 1)[0]);
+    }
+    broadcastToRoom(room.code, { type: 'ROOM_UPDATED', payload: { room: getSanitizedRoom(room) } });
+  }
+}
 
 // Metered TURN server response caching (12 hours lifetime)
 let cachedMeteredIceServers = null;
@@ -164,6 +245,7 @@ function broadcastToRoom(roomCode, data, excludeSocketId = null) {
 function getSanitizedRoom(room) {
   return {
     code: room.code,
+    matchId: room.matchId, rated: !!room.rated, coop: !!room.coop,
     difficulty: room.difficulty,
     enableAbilities: room.enableAbilities,
     board: room.board,
@@ -184,7 +266,7 @@ function getSanitizedRoom(room) {
       isVoiceJoined: !!p.isVoiceJoined,
       isVoiceMuted: !!p.isVoiceMuted,
       elo: p.elo || 1450,
-      disconnected: !!p.disconnected,
+      disconnected: !!p.disconnected, reconnectBy: p.reconnectBy,
       hasFinishedGame: !!p.hasFinishedGame
     }))
   };
@@ -194,12 +276,20 @@ wss.on('connection', (ws) => {
   let currentPlayer = null;
   let currentRoomCode = null;
   let registeredPlayerId = null;
+  let registration = null;
+  ws.on('error', error => console.warn('[Socket]', error.message));
+  ws.on('pong', () => { ws.alive = true; });
 
   ws.on('message', async (message) => {
     try {
       const { type, payload } = JSON.parse(message.toString());
-      console.log(`[WS Msg Received] Type: ${type}`, payload);
-
+      const seated = currentRoomCode && rooms.get(currentRoomCode)?.players.includes(currentPlayer);
+      if (seated && currentPlayer.socket !== ws) return;
+      if (currentRoomCode && !seated) { currentRoomCode = null; currentPlayer = connectedClients.get(registeredPlayerId); }
+      if (seated && (type === 'CREATE_ROOM' || (type === 'JOIN_ROOM' && payload.code !== currentRoomCode))) return;
+      if (seated && type === 'REGISTER_PLAYER' && payload.playerId !== currentPlayer.id) return;
+      if (registration && connectedClients.get(registeredPlayerId)?.socket !== ws && !['REGISTER_PLAYER','JOIN_ROOM'].includes(type)) return;
+      if (['JOIN_ROOM', 'CREATE_ROOM', 'JOIN_MATCHMAKING_QUEUE'].includes(type) && registeredPlayerId !== payload.playerId) return;
       switch (type) {
         case 'CREATE_ROOM': {
           const { name, playerId, difficulty, avatar, enableAbilities } = payload;
@@ -221,9 +311,9 @@ wss.on('connection', (ws) => {
           };
 
           const room = {
-            code,
+            code, coop: !!payload.coop,
             difficulty: difficulty || 'medium',
-            enableAbilities: enableAbilities !== false, // Default to true if undefined
+            enableAbilities: !payload.coop && enableAbilities !== false, // Default to true if undefined
             board: null,
             solution: null,
             isGameStarted: false,
@@ -243,6 +333,9 @@ wss.on('connection', (ws) => {
             type: 'ROOM_CREATED',
             payload: {
               room: getSanitizedRoom(room),
+              resumeToken: currentPlayer.resumeToken ||= randomUUID(),
+              snapshot: currentPlayer.snapshot,
+              sharedBoard: room.sharedBoard,
               myPlayerId: playerId
             }
           }));
@@ -276,18 +369,18 @@ wss.on('connection', (ws) => {
           }
 
           // Forced spectator: anyone who enters after game started becomes spectator
-          const forcedSpectator = room.isGameStarted ? true : !!isSpectator;
+          const forcedSpectator = room.isGameStarted || (room.coop && room.players.filter(p => !p.isSpectator).length >= 2) || !!isSpectator;
 
           // Check if player already in the room
           const existingPlayerIndex = room.players.findIndex(p => p.id === playerId);
           const client = connectedClients.get(playerId);
           const elo = client ? client.elo : 1450;
           
-          currentPlayer = {
+          const newSeat = {
             id: playerId,
             name: name || `User_${playerId.slice(0, 4)}`,
             avatar: avatar || 'apex',
-            isReady: forcedSpectator ? false : false,
+            isReady: false,
             progress: 0,
             strikes: 0,
             mana: 0,
@@ -298,30 +391,24 @@ wss.on('connection', (ws) => {
 
           if (existingPlayerIndex !== -1) {
             // Reconnect logic: restore socket reference and retain original isSpectator state
-            if (disconnectTimeouts.has(playerId)) {
-              clearTimeout(disconnectTimeouts.get(playerId));
-              disconnectTimeouts.delete(playerId);
+            const seat = room.players[existingPlayerIndex];
+            if (seat.socket !== ws && seat.resumeToken && seat.resumeToken !== payload.resumeToken) {
+              ws.send(JSON.stringify({ type: 'ERROR', payload: { message: 'Seat is reserved for its original session.' } }));
+              return;
             }
-            room.players[existingPlayerIndex].socket = ws;
-            room.players[existingPlayerIndex].disconnected = false;
-            room.players[existingPlayerIndex].isVoiceJoined = false;
-            room.players[existingPlayerIndex].isVoiceMuted = false;
-            currentPlayer = room.players[existingPlayerIndex];
-
+            if (seat.socket && seat.socket !== ws && seat.socket.readyState === 1) {
+              seat.socket.send(JSON.stringify({ type: 'SESSION_REPLACED', payload: {} }));
+            }
+            clearTimeout(seat.disconnectTimer);
+            seat.reconnectBy = null;
+            Object.assign(seat, { socket: ws, disconnected: false, isVoiceJoined: false, isVoiceMuted: false });
+            currentPlayer = seat;
+            connectedClients.set(playerId, registration);
             currentRoomCode = code;
-            broadcastOnlineStatusChange(playerId, 'in-game');
-
-            // Notify player of successful join
-            ws.send(JSON.stringify({
-              type: 'ROOM_JOINED',
-              payload: {
-                room: getSanitizedRoom(room),
-                myPlayerId: playerId,
-                board: room.board,
-                solution: room.solution
-              }
-            }));
-
+            if (room.awaitingOutcome?.length && !seat.isSpectator && !seat.hasFinishedGame) {
+              finishDepartures(room, room.awaitingOutcome, room.players.filter(p => !p.isSpectator && !p.hasFinishedGame), false);
+              room.awaitingOutcome = [];
+            }
             // Notify opponent of player reconnected (renegotiate voice chat)
             broadcastToRoom(code, {
               type: 'PLAYER_RECONNECTED',
@@ -332,13 +419,10 @@ wss.on('connection', (ws) => {
               }
             }, playerId);
 
-            // Notify everyone in the room
-            broadcastToRoom(code, {
-              type: 'ROOM_UPDATED',
-              payload: { room: getSanitizedRoom(room) }
-            });
-            break;
           } else {
+            if (registration?.socket !== ws || Array.from(rooms.values()).some(r => r.players.some(p => p.id === playerId))) return;
+            connectedClients.set(playerId, registration);
+            currentPlayer = newSeat;
             room.players.push(currentPlayer);
           }
 
@@ -350,6 +434,9 @@ wss.on('connection', (ws) => {
             type: 'ROOM_JOINED',
             payload: {
               room: getSanitizedRoom(room),
+              resumeToken: currentPlayer.resumeToken ||= randomUUID(),
+              snapshot: currentPlayer.snapshot,
+              sharedBoard: room.sharedBoard,
               myPlayerId: playerId,
               board: room.board, // Send active board if already started
               solution: room.solution // Send active solution for correctness tracking
@@ -383,6 +470,7 @@ wss.on('connection', (ws) => {
 
           // If the game is already started, don't allow resetting it if there is an opponent
           const activePlayers = room.players.filter(p => !p.isSpectator);
+          if (activePlayers.some(p => p.disconnected)) return;
           if (room.isGameStarted && activePlayers.length > 1) {
             ws.send(JSON.stringify({
               type: 'ERROR',
@@ -403,6 +491,15 @@ wss.on('connection', (ws) => {
           }
 
           const { board, solution } = payload; // Generated on host client
+          if (room.players[0] !== currentPlayer || (room.coop && activePlayers.length !== 2)) return;
+          room.matchId = randomUUID();
+          room.rated = !room.coop && activePlayers.length > 1;
+          room.sharedBoard = room.coop ? structuredClone(board) : null;
+          for (const p of room.players) {
+            p.snapshot = null; p.result = null; p.forfeitBonus = false;
+            p.verifiedAccount = connectedClients.get(p.id)?.verifiedAccount;
+            p.elo = connectedClients.get(p.id)?.elo ?? p.elo;
+          }
           room.board = board;
           room.solution = solution;
           room.isGameStarted = true;
@@ -432,7 +529,9 @@ wss.on('connection', (ws) => {
           const room = rooms.get(currentRoomCode);
           if (!room || !currentPlayer) return;
 
+          if (payload.matchId !== room.matchId || currentPlayer.isSpectator || currentPlayer.hasFinishedGame || room.coop) return;
           const { progress, strikes, mana } = payload;
+          if (!Number.isFinite(progress) || progress < 0 || progress > 100 || !Number.isInteger(strikes) || strikes < 0) return;
           const wasEliminated = currentPlayer.strikes < 3 && strikes >= 3;
           const wasFinished = currentPlayer.progress < 100 && progress >= 100;
 
@@ -444,6 +543,10 @@ wss.on('connection', (ws) => {
 
           if (wasEliminated || wasFinished) {
             currentPlayer.hasFinishedGame = true;
+            const base = ({ beginner: 12, easy: 18, medium: 24, hard: 30, expert: 36 })[room.difficulty] || 24;
+            const delta = wasEliminated ? (currentPlayer.forfeitBonus ? 0 : Math.max(-30, -base / 2 - strikes * 2))
+              : currentPlayer.forfeitBonus ? 15 : Math.max(5, base - strikes * 3 - Math.max(0, Number(payload.hintsUsed) || 0) * 4);
+            settle(room, currentPlayer, wasEliminated ? 'lost' : 'won', delta);
           }
 
           broadcastToRoom(currentRoomCode, {
@@ -496,94 +599,7 @@ wss.on('connection', (ws) => {
 
           console.log(`[WS Leave] Player ${currentPlayer.name} explicitly left room ${currentRoomCode}`);
 
-          const isHost = room.players[0]?.id === currentPlayer.id;
-
-          if (isHost && !room.isGameStarted) {
-            // Host is dissolving the room before game starts!
-            console.log(`[WS Leave] Host ${currentPlayer.name} dissolved room ${currentRoomCode}`);
-            broadcastToRoom(currentRoomCode, {
-              type: 'KICKED',
-              payload: { message: 'The host has dismissed the room.' }
-            }, currentPlayer.id); // exclude the host
-
-            // Remove room and update status of all players remaining
-            room.players.forEach(p => {
-              if (p.id !== currentPlayer.id) {
-                broadcastOnlineStatusChange(p.id, 'online');
-              }
-            });
-            rooms.delete(currentRoomCode);
-          } else {
-            // Normal leave flow for guests or mid-game host exit
-            const isMatchStarted = room.isGameStarted;
-            const leaverId = currentPlayer.id;
-            const leaverName = currentPlayer.name;
-
-            // If game is started and is multiplayer, apply forfeit ELO adjustments immediately
-            const activePlayers = room.players.filter(p => !p.isSpectator);
-            if (isMatchStarted && activePlayers.length > 1 && !currentPlayer.isSpectator) {
-              const winner = room.players.find(p => p.id !== leaverId && !p.isSpectator);
-              if (winner) {
-                const eloAdjustment = (winner.strikes >= 3) ? 0 : 15;
-                console.log(`[WS Forfeit] Player ${leaverName} explicitly left active match. Winner: ${winner.name}. ELO adjustment: ${eloAdjustment}`);
-                broadcastToRoom(currentRoomCode, {
-                  type: 'GAME_OVER_LEAVER',
-                  payload: {
-                    winnerId: winner.id,
-                    winnerName: winner.name,
-                    leaverId: leaverId,
-                    leaverName: leaverName,
-                    eloAdjustment: eloAdjustment
-                  }
-                });
-              }
-            }
-
-            // If this player was spectating someone, notify that player they left
-            if (currentPlayer.isSpectator && currentPlayer.spectatingPlayerId) {
-              const watchedPlayer = room.players.find(p => p.id === currentPlayer.spectatingPlayerId);
-              if (watchedPlayer && watchedPlayer.socket && watchedPlayer.socket.readyState === 1) {
-                watchedPlayer.socket.send(JSON.stringify({
-                  type: 'SPECTATOR_ALERT',
-                  payload: { spectatorName: currentPlayer.name, isSpectating: false }
-                }));
-              }
-            }
-
-            // Notify remaining players before removing
-            broadcastToRoom(currentRoomCode, {
-              type: 'PLAYER_LEFT',
-              payload: {
-                playerId: currentPlayer.id,
-                name: currentPlayer.name
-              }
-            }, currentPlayer.id);
-
-            // Remove player from room
-            room.players = room.players.filter(p => p.id !== currentPlayer.id);
-            delete room.pauseVotes[currentPlayer.id];
-            delete room.playAgainVotes[currentPlayer.id];
-
-            // Reset pauseRequesterId if the leaver was the requester
-            if (room.pauseRequesterId === currentPlayer.id) {
-              room.pauseRequesterId = null;
-              room.pauseVotes = {};
-              // Dismiss any active vote modals
-              broadcastToRoom(currentRoomCode, {
-                type: 'PAUSE_DISMISSED',
-                payload: { room: getSanitizedRoom(room) }
-              });
-            }
-
-            if (room.players.length === 0) {
-              rooms.delete(currentRoomCode);
-            } else {
-              broadcastToRoom(currentRoomCode, {
-                type: 'ROOM_UPDATED',
-                payload: { room: getSanitizedRoom(room) }
-              });
-            }
-          }
+          depart(room, currentPlayer, false);
 
           const playerLeaverId = currentPlayer.id;
           // Clear current player/room tracking so onclose doesn't re-notify
@@ -728,6 +744,7 @@ wss.on('connection', (ws) => {
           const room = rooms.get(currentRoomCode);
           if (!room || !currentPlayer) return;
 
+          if (!room.isGameStarted || currentPlayer.isSpectator || !room.players.filter(p => !p.isSpectator).every(p => p.hasFinishedGame)) return;
           const { vote } = payload;
           room.playAgainVotes[currentPlayer.id] = !!vote;
 
@@ -737,18 +754,10 @@ wss.on('connection', (ws) => {
 
           if (allVoted) {
             if (allApproved) {
-              // Trigger a vote passed event. The host client will catch this and send new board structures.
-              broadcastToRoom(currentRoomCode, {
-                type: 'PLAY_AGAIN_APPROVED',
-                payload: { room: getSanitizedRoom(room) }
-              });
-              
-              // Reset player readiness to vote cycle reset
-              room.players.forEach(p => { p.isReady = false; p.progress = 0; p.strikes = 0; p.mana = 0; p.hasFinishedGame = false; });
               room.isGameStarted = false;
-              room.board = null;
-              room.solution = null;
+              room.players.forEach(p => { p.isReady = !p.isSpectator; });
               room.playAgainVotes = {};
+              broadcastToRoom(room.code, { type: 'PLAY_AGAIN_APPROVED', payload: { room: getSanitizedRoom(room) } });
             } else {
               // Reset votes
               room.playAgainVotes = {};
@@ -989,7 +998,8 @@ wss.on('connection', (ws) => {
           const room = rooms.get(currentRoomCode);
           if (!room || !currentPlayer) return;
 
-          currentPlayer.isSpectator = true;
+          if (!currentPlayer.isSpectator && !currentPlayer.hasFinishedGame) return;
+          if (!room.players.some(p => p.id === targetPlayerId && !p.isSpectator && p !== currentPlayer)) return;
           currentPlayer.spectatingPlayerId = targetPlayerId;
 
           // Notify everyone of room registration changes
@@ -1017,7 +1027,6 @@ wss.on('connection', (ws) => {
           if (!room || !currentPlayer) return;
 
           const targetPlayerId = currentPlayer.spectatingPlayerId;
-          currentPlayer.isSpectator = false;
           currentPlayer.spectatingPlayerId = null;
 
           // Notify everyone of room registration changes
@@ -1041,17 +1050,63 @@ wss.on('connection', (ws) => {
           break;
         }
 
+        case 'CREATE_CHALLENGE': {
+          const { puzzle, difficulty, seconds, strikes, hintsUsed } = payload;
+          if (!Array.isArray(puzzle) || puzzle.length !== 9 || !puzzle.every(row => Array.isArray(row) && row.length === 9 &&
+            row.every(v => v === null || Number.isInteger(v) && v >= 1 && v <= 9))) return;
+          if (![seconds, strikes, hintsUsed].every(n => Number.isInteger(n) && n >= 0) ||
+            !['beginner', 'easy', 'medium', 'hard', 'expert'].includes(difficulty)) return;
+          const id = saveChallenge({ puzzle, difficulty, seconds, strikes, hintsUsed, name: currentPlayer?.name || 'Challenger' });
+          ws.send(JSON.stringify({ type: 'CHALLENGE_CREATED', payload: { id } }));
+          break;
+        }
+        case 'OPEN_CHALLENGE':
+        case 'COMPARE_CHALLENGE': {
+          const challenge = readChallenge(payload.id);
+          if (!challenge) {
+            ws.send(JSON.stringify({ type: 'ERROR', payload: { message: 'This challenge could not be found.' } }));
+            break;
+          }
+          const { puzzle, difficulty, name, ...score } = challenge;
+          ws.send(JSON.stringify(type === 'OPEN_CHALLENGE'
+            ? { type: 'CHALLENGE_OPENED', payload: { id: payload.id, puzzle, difficulty, name } }
+            : { type: 'CHALLENGE_SCORE', payload: { id: payload.id, name, ...score } }));
+          break;
+        }
+        case 'COOP_MOVE': {
+          const room = rooms.get(currentRoomCode);
+          if (!room?.coop || !room.isGameStarted || room.isPaused || currentPlayer.isSpectator || payload.matchId !== room.matchId) return;
+          const { row, col, digit } = payload;
+          if (!Number.isInteger(row) || !Number.isInteger(col) || !Number.isInteger(digit) || room.sharedBoard[row]?.[col] !== null) return;
+          if (room.solution[row][col] !== digit) {
+            ws.send(JSON.stringify({ type: 'ERROR', payload: { message: 'That digit does not fit here.' } }));
+            return;
+          }
+          room.sharedBoard[row][col] = digit;
+          const complete = room.sharedBoard.every(line => line.every(cell => cell !== null));
+          if (complete) room.players.filter(p => !p.isSpectator).forEach(p => { p.hasFinishedGame = true; });
+          broadcastToRoom(room.code, { type: 'COOP_BOARD', payload: { board: room.sharedBoard, complete, room: getSanitizedRoom(room) } });
+          break;
+        }
+        case 'COOP_POINT': {
+          const room = rooms.get(currentRoomCode);
+          if (room?.coop && room.isGameStarted && !currentPlayer.isSpectator && payload.matchId === room.matchId)
+            broadcastToRoom(room.code, { type: 'COOP_POINT', payload: { name: currentPlayer.name, row: payload.row, col: payload.col } }, currentPlayer.id);
+          break;
+        }
         case 'SYNC_GAMEPLAY': {
           const room = rooms.get(currentRoomCode);
           if (!room || !currentPlayer) return;
 
+          if (!room.isGameStarted || payload.matchId !== room.matchId || currentPlayer.isSpectator) return;
+          if (!payload.spectatorOnly) currentPlayer.snapshot = { ...payload, version: (currentPlayer.snapshot?.version || 0) + 1 };
           // Broadcast gameplay state to spectator clients in the room
           broadcastToRoom(currentRoomCode, {
             type: 'GAMEPLAY_SYNCED',
             payload: {
               playerId: currentPlayer.id,
               board: payload.board,
-              notes: payload.notes,
+              notes: room.coop ? {} : payload.notes,
               selectedCell: payload.selectedCell
             }
           }, currentPlayer.id); // Exclude the sender
@@ -1274,8 +1329,22 @@ wss.on('connection', (ws) => {
             friendsList: new Set()
           };
           
-          connectedClients.set(playerId, clientObj);
-          currentPlayer = clientObj;
+          const previous = connectedClients.get(playerId);
+          if (previous?.socket === ws) clientObj.verifiedAccount = previous.verifiedAccount;
+          if (payload.accessToken && process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
+            void fetch(process.env.SUPABASE_URL + '/auth/v1/user', {
+              signal: AbortSignal.timeout(8000), headers: { apikey:process.env.SUPABASE_SERVICE_ROLE_KEY, Authorization:'Bearer ' + payload.accessToken }
+            }).then(r => r.ok ? r.json() : null).then(identity => {
+              if (identity?.id !== playerId || connectedClients.get(playerId)?.socket !== ws) return;
+              connectedClients.get(playerId).verifiedAccount = playerId;
+              if (currentPlayer?.id === playerId) currentPlayer.verifiedAccount = playerId;
+            }).catch(() => {});
+          }
+          registration = clientObj;
+          const bound = Array.from(rooms.values()).some(r => r.players.some(p => p.id === playerId && p.socket !== ws));
+          if (!bound) connectedClients.set(playerId, clientObj);
+          if (currentRoomCode && currentPlayer?.id === playerId && clientObj.verifiedAccount) currentPlayer.verifiedAccount = clientObj.verifiedAccount;
+          if (!currentRoomCode) currentPlayer = clientObj;
           console.log(`[WS Registered] Player: ${resolvedName} (ID: ${playerId}) (Supabase: ${supabaseUserId})`);
           
           // Confirm registration name to the client
@@ -1286,17 +1355,9 @@ wss.on('connection', (ws) => {
 
           broadcastOnlineStatusChange(playerId, 'online');
 
-          // Apply pending ELO penalties on registration connect
-          if (pendingPenalties.has(playerId)) {
-            const penalty = pendingPenalties.get(playerId);
-            console.log(`[WS Penalty] Applying pending forfeit ELO penalty of -${penalty} to player ${resolvedName}`);
-            ws.send(JSON.stringify({
-              type: 'FORFEIT_PENALTY',
-              payload: {
-                eloAdjustment: -penalty
-              }
-            }));
-            pendingPenalties.delete(playerId);
+          const latest = resultsFor(playerId).at(-1);
+          if (latest && payload.lastResult !== latest.id + (latest.synced ? '/synced' : '') && payload.resuming) {
+            ws.send(JSON.stringify({ type: 'MATCH_RESULT', payload: latest }));
           }
           break;
         }
@@ -1520,7 +1581,7 @@ wss.on('connection', (ws) => {
   });
 
   ws.on('close', () => {
-    if (registeredPlayerId) {
+    if (connectedClients.get(registeredPlayerId)?.socket === ws) {
       broadcastOnlineStatusChange(registeredPlayerId, 'offline');
       connectedClients.delete(registeredPlayerId);
       const idx = matchmakingQueue.findIndex(q => q.playerId === registeredPlayerId);
@@ -1530,7 +1591,7 @@ wss.on('connection', (ws) => {
       }
     }
 
-    if (!currentRoomCode || !currentPlayer) return;
+    if (!currentRoomCode || !currentPlayer || currentPlayer.socket !== ws) return;
 
     console.log(`[WS Client Left] Player: ${currentPlayer.name} from Room: ${currentRoomCode}`);
     const room = rooms.get(currentRoomCode);
@@ -1548,140 +1609,20 @@ wss.on('connection', (ws) => {
       }
     }
 
-    const disconnectedId = currentPlayer.id;
-    const disconnectedName = currentPlayer.name;
-
-    // Mark the player's socket as disconnected (null) rather than immediately deleting them
     currentPlayer.socket = null;
     currentPlayer.isVoiceJoined = false;
     currentPlayer.isVoiceMuted = false;
-
-    // Broadcast voice state updated to others immediately so their connection is torn down
-    broadcastToRoom(currentRoomCode, {
-      type: 'VOICE_STATE_UPDATED',
-      payload: {
-        playerId: currentPlayer.id,
-        isMuted: false,
-        isJoined: false
-      }
-    });
-
-    // Determine if we should wait for 15s (multiplayer match started) or 8s (grace period for reloading)
-    const activePlayers = room.players.filter(p => !p.isSpectator);
-    const isMultiplayerGame = room.isGameStarted && activePlayers.length > 1;
-
-    if (isMultiplayerGame && !currentPlayer.isSpectator) {
-      currentPlayer.disconnected = true;
-
-      // Broadcast PLAYER_DISCONNECTED with 15s grace period parameters
-      broadcastToRoom(currentRoomCode, {
-        type: 'PLAYER_DISCONNECTED',
-        payload: {
-          playerId: disconnectedId,
-          name: disconnectedName,
-          secondsRemaining: 15
-        }
-      });
-
-      if (disconnectTimeouts.has(disconnectedId)) {
-        clearTimeout(disconnectTimeouts.get(disconnectedId));
-      }
-
-      const timeoutId = setTimeout(() => {
-        disconnectTimeouts.delete(disconnectedId);
-        
-        const currentRoom = rooms.get(currentRoomCode);
-        if (!currentRoom) return;
-
-        const player = currentRoom.players.find(p => p.id === disconnectedId);
-        // If the player still has no active socket, process match forfeit ELO adjustments
-        if (player && (!player.socket || player.socket.readyState !== 1)) {
-          console.log(`[WS Forfeit] Player ${disconnectedName} timed out after disconnect. Forfeiting match.`);
-          const winner = currentRoom.players.find(p => p.id !== disconnectedId && !p.isSpectator);
-
-          if (winner) {
-            const eloAdjustment = (winner.strikes >= 3) ? 0 : 15;
-            broadcastToRoom(currentRoomCode, {
-              type: 'GAME_OVER_LEAVER',
-              payload: {
-                winnerId: winner.id,
-                winnerName: winner.name,
-                leaverId: disconnectedId,
-                leaverName: disconnectedName,
-                eloAdjustment: eloAdjustment
-              }
-            });
-
-            // Store pending penalty to apply on next registration connect
-            pendingPenalties.set(disconnectedId, 15);
-          }
-
-          // Clean up room players list
-          currentRoom.players = currentRoom.players.filter(p => p.id !== disconnectedId);
-          delete currentRoom.pauseVotes[disconnectedId];
-          delete currentRoom.playAgainVotes[disconnectedId];
-
-          const remainingActive = currentRoom.players.filter(p => !p.isSpectator);
-          if (remainingActive.length === 0) {
-            rooms.delete(currentRoomCode);
-            console.log(`[WS Room Deleted] Room ${currentRoomCode} deleted after forfeit.`);
-          } else {
-            broadcastToRoom(currentRoomCode, {
-              type: 'ROOM_UPDATED',
-              payload: { room: getSanitizedRoom(currentRoom) }
-            });
-          }
-        }
-      }, 15000);
-
-      disconnectTimeouts.set(disconnectedId, timeoutId);
-    } else {
-      currentPlayer.disconnected = true;
-
-      if (disconnectTimeouts.has(disconnectedId)) {
-        clearTimeout(disconnectTimeouts.get(disconnectedId));
-      }
-
-      // Default 8-second grace period for solo games or unstarted lobby rooms
-      const timeoutId = setTimeout(() => {
-        disconnectTimeouts.delete(disconnectedId);
-        
-        const currentRoom = rooms.get(currentRoomCode);
-        if (!currentRoom) return;
-
-        const player = currentRoom.players.find(p => p.id === disconnectedId);
-        if (player && (!player.socket || player.socket.readyState !== 1)) {
-          currentRoom.players = currentRoom.players.filter(p => p.id !== disconnectedId);
-          delete currentRoom.pauseVotes[disconnectedId];
-          delete currentRoom.playAgainVotes[disconnectedId];
-
-          if (currentRoom.pauseRequesterId === disconnectedId) {
-            currentRoom.pauseRequesterId = null;
-            currentRoom.pauseVotes = {};
-            broadcastToRoom(currentRoomCode, {
-              type: 'PAUSE_DISMISSED',
-              payload: { room: getSanitizedRoom(currentRoom) }
-            });
-          }
-
-          if (currentRoom.players.length === 0) {
-            rooms.delete(currentRoomCode);
-            console.log(`[WS Room Deleted] Room ${currentRoomCode} is empty.`);
-          } else {
-            broadcastToRoom(currentRoomCode, {
-              type: 'PLAYER_LEFT',
-              payload: { playerId: disconnectedId, name: disconnectedName }
-            });
-            broadcastToRoom(currentRoomCode, {
-              type: 'ROOM_UPDATED',
-              payload: { room: getSanitizedRoom(currentRoom) }
-            });
-          }
-        }
-      }, 8000);
-
-      disconnectTimeouts.set(disconnectedId, timeoutId);
-    }
+    broadcastToRoom(room.code, {type:'VOICE_STATE_UPDATED', payload:{playerId:currentPlayer.id, isJoined:false, isMuted:false}});
+    currentPlayer.disconnected = true;
+    const delay = room.isGameStarted && !currentPlayer.isSpectator ? graceMs : 8000;
+    currentPlayer.reconnectBy = Date.now() + delay;
+    broadcastToRoom(room.code, { type: 'PLAYER_DISCONNECTED', payload: {
+      playerId: currentPlayer.id, name: currentPlayer.name, reconnectBy: currentPlayer.reconnectBy
+    }});
+    const seat = currentPlayer;
+    seat.disconnectTimer = setTimeout(() => {
+      if (rooms.get(room.code) === room && room.players.includes(seat) && !seat.socket) depart(room, seat, true);
+    }, delay);
   });
 });
 
@@ -1806,5 +1747,5 @@ app.get('/health', (req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`🚀 Co-doku Multiplayer Server running on port ${PORT}`);
+  console.log(`🚀 Co-doku Multiplayer Server running on port ${server.address().port}`);
 });
