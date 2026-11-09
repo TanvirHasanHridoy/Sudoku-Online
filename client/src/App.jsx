@@ -1,3 +1,4 @@
+import { guidedHint, raceProgress } from "./utils/play";
 import { useState, useEffect, useRef } from "react";
 import {
   Volume2,
@@ -84,6 +85,12 @@ export default function App() {
   const [showThemeMenu, setShowThemeMenu] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
 
+  const [focus, setFocus] = useState(() => localStorage.getItem("sudoku_focus") === "true");
+  const [lockedDigit, setLockedDigit] = useState(null);
+  const [digitFirst, setDigitFirst] = useState(false);
+  const [hintText, setHintText] = useState("");
+  const [stayedMatch, setStayedMatch] = useState(null);
+  const challengeId = new URLSearchParams(location.search).get("challenge");
   // Settings Panel preferences states
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [keypadLayout, setKeypadLayout] = useState(() => localStorage.getItem("sudoku_keypad_layout") || "single-row");
@@ -142,7 +149,6 @@ export default function App() {
     showPauseVoteModal,
     activeLobbyInvitation,
     toasts,
-    forfeitWinnerPending,
     setEmoteCallback,
     connectWebSocket,
     createRoom,
@@ -188,6 +194,7 @@ export default function App() {
     incrementStreak,
     triggerAbility,
     wipeInkSplatter,
+    challenge, challengeScore, challengeLink, localReconnectBy,
   } = useLobbyStore();
 
   // Zustand Store - Social State
@@ -238,7 +245,7 @@ export default function App() {
   const lastSentStrikesRef = useRef(null);
   const lastSentStateRef = useRef("");
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
-  const [disconnectCountdown, setDisconnectCountdown] = useState(15);
+  const [disconnectCountdown, setDisconnectCountdown] = useState(30);
   const [mobileSpectatorTab, setMobileSpectatorTab] = useState("playerA");
 
   // Real-time username checking & validation states
@@ -306,28 +313,14 @@ export default function App() {
       p.strikes < 3,
   );
 
-  // React to opponent disconnect state and countdown 15s grace period
+  const deadline = localReconnectBy || activeOpponent?.reconnectBy;
   useEffect(() => {
-    let interval = null;
-    if (activeOpponent && activeOpponent.disconnected) {
-      setDisconnectCountdown(15);
-      interval = setInterval(() => {
-        setDisconnectCountdown((prev) => {
-          if (prev <= 1) {
-            clearInterval(interval);
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-    } else {
-      setDisconnectCountdown(15);
-    }
-
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [activeOpponent?.disconnected, activeOpponent?.id]);
+    if (!deadline) return;
+    const tick = () => setDisconnectCountdown(Math.max(0, Math.ceil((deadline - Date.now()) / 1000)));
+    tick();
+    const timer = setInterval(tick, 500);
+    return () => clearInterval(timer);
+  }, [deadline]);
 
   useEffect(() => {
     const trimmed = inputName.trim();
@@ -456,7 +449,7 @@ export default function App() {
 
       // Attempt to restore a solo game in progress from localStorage
       // Only restore if we're not already in a multiplayer room
-      const restored = loadPersistedState();
+      const restored = !localStorage.getItem("sudoku_active_room_code") && loadPersistedState();
       if (restored) {
         // Restore elapsed timer from persisted state
         const saved = JSON.parse(
@@ -503,13 +496,12 @@ export default function App() {
   // Sync ELO ELO score adjustment inside won/lost states
   const eloSyncedRef = useRef(null);
   useEffect(() => {
+    if (room?.rated || room?.coop || challenge || isMeSpectator) {
+      eloSyncedRef.current = gameStatus;
+      return;
+    }
     if (gameStatus === "won" && eloSyncedRef.current !== "won") {
-      if (forfeitWinnerPending) {
-        const points = forfeitWinnerPending.eloAdjustment || 15;
-        adjustElo(points);
-        useLobbyStore.getState().addToast(`🏆 Opponent forfeited! +${points} ELO`, "success");
-        useLobbyStore.setState({ forfeitWinnerPending: null });
-      } else {
+      {
         const { difficulty, strikes, hintsRemaining } = useGameStore.getState();
         let baseWin = 24;
         let maxHints = 2;
@@ -541,9 +533,7 @@ export default function App() {
       }
       eloSyncedRef.current = "won";
     } else if (gameStatus === "lost" && eloSyncedRef.current !== "lost") {
-      if (forfeitWinnerPending) {
-        useLobbyStore.setState({ forfeitWinnerPending: null });
-      } else {
+      {
         const { difficulty, strikes } = useGameStore.getState();
         let baseLoss = -12;
         if (difficulty === "beginner") baseLoss = -6;
@@ -566,26 +556,12 @@ export default function App() {
     } else if (gameStatus === "playing") {
       eloSyncedRef.current = "playing";
     }
-  }, [gameStatus, adjustElo, forfeitWinnerPending]);
+  }, [gameStatus, adjustElo, room?.rated, room?.coop, challenge, isMeSpectator]);
 
   // Sync ELO progress update to socket whenever my board progress changes
-  const calculateProgress = () => {
-    if (!solution || solution.length === 0) return 0;
-    let correctCount = 0;
-    board.forEach((row, r) => {
-      row.forEach((val, c) => {
-        if (val !== null && val === solution[r][c]) {
-          correctCount++;
-        }
-      });
-    });
-    return Math.round((correctCount / 81) * 100);
-  };
-
-  const myProgress = calculateProgress();
-
+  const { percent: myProgress, filled, total } = raceProgress(board, solution, originalCells);
   useEffect(() => {
-    if (isConnected && room && gameStatus !== "idle") {
+    if (isConnected && room?.isGameStarted && !isMeSpectator && gameStatus !== "idle") {
       if (
         lastSentProgressRef.current !== myProgress ||
         lastSentStrikesRef.current !== strikes
@@ -603,21 +579,21 @@ export default function App() {
     if (
       isConnected &&
       room &&
-      gameStatus === "playing" &&
+      ["playing", "won", "lost"].includes(gameStatus) &&
       statusInRoom &&
       !statusInRoom.isSpectator
     ) {
-      const stateStr = JSON.stringify({ board, notes, selectedCell });
+      const lobby = useLobbyStore.getState();
+      const snapshot = { matchId: room.matchId, board, notes, selectedCell, hintsRemaining, mistakes, strikes,
+        timeline, elapsedSeconds: seconds, streak: lobby.myStreak, ink: lobby.activeInkSplashes,
+        shieldUntil: lobby.myShieldActive ? lobby.shieldUntil : 0, scrambleUntil: lobby.isScrambled ? lobby.scrambleUntil : 0 };
+      const stateStr = JSON.stringify(snapshot);
       if (lastSentStateRef.current !== stateStr) {
         if (ws && ws.readyState === 1) {
           ws.send(
             JSON.stringify({
               type: "SYNC_GAMEPLAY",
-              payload: {
-                board,
-                notes,
-                selectedCell,
-              },
+              payload: snapshot,
             }),
           );
           lastSentStateRef.current = stateStr;
@@ -631,7 +607,7 @@ export default function App() {
     isConnected,
     room,
     gameStatus,
-    myPlayerId,
+    myPlayerId, seconds, hintsRemaining, mistakes, strikes, timeline, myStreak, activeInkSplashes, myShieldActive, isScrambled,
     ws,
   ]);
 
@@ -659,10 +635,10 @@ export default function App() {
   }, [theme]);
 
   // Timer Effect: stop timer if game is paused!
-  const isGamePaused = room?.isPaused;
+  const isGamePaused = room?.isPaused || (room && !isConnected);
 
   useEffect(() => {
-    if (gameStatus === "playing" && !isGamePaused) {
+    if (gameStatus === "playing" && !isGamePaused && !room?.coop) {
       timerRef.current = setInterval(() => {
         setSeconds((prev) => {
           const next = prev + 1;
@@ -684,7 +660,7 @@ export default function App() {
       clearInterval(timerRef.current);
     }
     return () => clearInterval(timerRef.current);
-  }, [gameStatus, isGamePaused]);
+  }, [gameStatus, isGamePaused, room?.coop]);
 
   // Switch to game view when playing starts
   useEffect(() => {
@@ -698,61 +674,20 @@ export default function App() {
 
   // Robust fallback: if room is active and game is started, guarantee we are in the game view
   useEffect(() => {
-    if (room && room.isGameStarted && activeView !== "game") {
+    if (room && room.isGameStarted && stayedMatch !== room.matchId && activeView !== "game") {
       setActiveView("game");
       setActiveTab("lobby");
     }
-  }, [room, activeView]);
-
-  // Reset seconds to 0 when a new multiplayer room is joined or a fresh match is started
-  const prevRoomCodeRef = useRef(null);
-  const prevGameStartedRef = useRef(false);
+  }, [room, activeView, stayedMatch]);
 
   useEffect(() => {
-    if (!room) return;
-
-    // 1. If room code changed (joined a new room), reset timer
-    if (prevRoomCodeRef.current !== room.code) {
-      const savedState = JSON.parse(
-        localStorage.getItem("sudoku_game_state") || "{}",
-      );
-      if (savedState && savedState.elapsedSeconds && room.isGameStarted) {
-        const secondsToSet = savedState.elapsedSeconds;
-        setTimeout(() => {
-          setSeconds(secondsToSet);
-        }, 0);
-      } else {
-        setTimeout(() => {
-          setSeconds(0);
-        }, 0);
-      }
-      prevRoomCodeRef.current = room.code;
-    }
-
-    // 2. If game just started in the room, reset timer
-    if (room.isGameStarted && !prevGameStartedRef.current) {
-      // Check if we are reconnecting (have a saved board that matches)
-      const savedState = JSON.parse(
-        localStorage.getItem("sudoku_game_state") || "{}",
-      );
-      const hasMatchingBoard =
-        savedState &&
-        savedState.gameStatus === "playing" &&
-        savedState.solution &&
-        room.isGameStarted;
-
-      // If we are NOT reconnecting, reset timer to 0
-      if (!hasMatchingBoard) {
-        setTimeout(() => {
-          setSeconds(0);
-        }, 0);
-      }
-      prevGameStartedRef.current = true;
-    } else if (!room.isGameStarted) {
-      prevGameStartedRef.current = false;
-    }
-  }, [room]);
-
+    const timer = setTimeout(() => {
+      if (room?.matchId && isConnected) setSeconds(useGameStore.getState().elapsedSeconds || 0);
+      setLockedDigit(null);
+      setHintText("");
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [room?.matchId, isConnected]);
   // Auto-exit to home if we were in a room but it became null (e.g., kicked or left)
   const prevRoomRef = useRef(null);
   useEffect(() => {
@@ -864,7 +799,7 @@ export default function App() {
                   ? 20
                   : 25;
           addMana(reward);
-          addToast(`🔥 Streak x${nextStreak}! +${reward} Mana`, "success");
+          if (!focus) addToast(`🔥 Streak x${nextStreak}! +${reward} Mana`, "success");
         }
       }
     }
@@ -906,11 +841,11 @@ export default function App() {
       if (prev) {
         // If progress increased
         if (p.progress > prev.progress) {
-          playSound.opponentCorrect(soundEnabled);
+          playSound.opponentCorrect(soundEnabled && !focus);
         }
         // If strikes increased
         if (p.strikes > prev.strikes) {
-          playSound.opponentStrike(soundEnabled);
+          playSound.opponentStrike(soundEnabled && !focus);
         }
       }
 
@@ -921,7 +856,7 @@ export default function App() {
     });
 
     prevOpponentsStateRef.current = currentOpponentsState;
-  }, [room, gameStatus, myPlayerId, soundEnabled]);
+  }, [room, gameStatus, myPlayerId, soundEnabled, focus]);
 
   // Format timer
   const formatTime = (secs) => {
@@ -934,6 +869,9 @@ export default function App() {
 
   // Reset Timer when starting a new game
   const startNewGame = (diff) => {
+    sessionStorage.removeItem("sudoku_challenge");
+    useLobbyStore.setState({challenge: null, challengeScore: null, challengeLink: null});
+    setLockedDigit(null); setHintText("");
     setSeconds(0);
     initGame(diff || difficulty);
     setActiveView("game");
@@ -968,11 +906,36 @@ export default function App() {
 
   const completedNumbers = getCompletedNumbers();
 
+  const sendRoomCommand = (type, payload = {}) => {
+    if (ws?.readyState === 1) ws.send(JSON.stringify({ type, payload: { ...payload, matchId: room?.matchId } }));
+  };
+  const placeDigit = (digit) => {
+    if (isGamePaused || isMeSpectator || spectatingPlayerId) return;
+    const cell = useGameStore.getState().selectedCell;
+    if (room?.coop && !notesMode) {
+      if (cell) sendRoomCommand('COOP_MOVE', { row: cell[0], col: cell[1], digit });
+    } else enterNumber(digit, formatTime(seconds));
+    setHintText("");
+  };
+  const chooseCell = (r, c) => {
+    selectCell(r, c);
+    if (digitFirst && lockedDigit) placeDigit(lockedDigit);
+  };
+  const shareChallenge = () => {
+    const puzzle = board.map((row,r) => row.map((v,c) => originalCells.has(r + ',' + c) ? v : null));
+    sendRoomCommand('CREATE_CHALLENGE', { puzzle, difficulty, seconds, strikes,
+      hintsUsed: (difficulty === 'expert' ? 1 : difficulty === 'beginner' ? 3 : 2) - hintsRemaining });
+  };
+  useEffect(() => {
+    if (challenge && gameStatus === "won" && ws?.readyState === 1)
+      ws.send(JSON.stringify({type: "COMPARE_CHALLENGE", payload: {id: challenge.id}}));
+  }, [challenge, gameStatus, isConnected, ws]);
   // Keyboard support for playing convenience
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (
         (gameStatus !== "playing" && gameStatus !== "practice") ||
+        activeView !== "game" || e.target.closest?.("input, select, textarea, [contenteditable=true]") ||
         isGamePaused ||
         spectatingPlayerId ||
         isMeSpectator
@@ -985,19 +948,20 @@ export default function App() {
         const num = parseInt(e.key, 10);
         // Only trigger if number is not completed!
         if (!completedNumbers.has(num)) {
-          enterNumber(num, currentTimeString);
+          placeDigit(num);
         }
       } else if (e.key === "Backspace" || e.key === "Delete") {
-        eraseCell();
+        if (!room?.coop) eraseCell();
       } else if ((e.ctrlKey || e.metaKey) && e.key === "z") {
         e.preventDefault();
-        undo();
+        if (!room?.coop) undo();
       } else if ((e.ctrlKey || e.metaKey) && e.key === "y") {
         e.preventDefault();
-        redo();
+        if (!room?.coop) redo();
       } else if (e.key.toLowerCase() === "n") {
         toggleNotesMode();
       } else if (e.key.toLowerCase() === "h") {
+        if (room?.coop) return;
         getHint(currentTimeString);
         // Broadcast hint usage to other room players (keyboard shortcut path)
         if (ws && isConnected && ws.readyState === 1 && room) {
@@ -1031,6 +995,7 @@ export default function App() {
     if (isGamePaused || spectatingPlayerId || isMeSpectator) return;
     const currentTimeString = formatTime(seconds);
 
+    if (room?.coop && action !== "notes") return;
     if (action === "undo") undo();
     else if (action === "redo") redo();
     else if (action === "notes") toggleNotesMode();
@@ -1057,7 +1022,7 @@ export default function App() {
   const isHost = room?.players?.[0]?.id === myPlayerId;
   const activePlayers = room?.players?.filter((p) => !p.isSpectator) || [];
   const spectators = room?.players?.filter((p) => p.isSpectator) || [];
-  const allPlayersReady = activePlayers.length === 1 || activePlayers.every((p) => p.isReady);
+  const allPlayersReady = (!room?.coop || activePlayers.length === 2) && (activePlayers.length === 1 || activePlayers.every((p) => p.isReady && !p.disconnected));
   const myStatusInRoom = room?.players?.find((p) => p.id === myPlayerId);
   const isMultiplayer = room && room.players && room.players.filter((p) => !p.isSpectator).length > 1;
   const bothFinished = isMultiplayer && room.players.filter((p) => !p.isSpectator).every((p) => p.hasFinishedGame);
@@ -1182,7 +1147,7 @@ export default function App() {
             <h2 className="text-lg font-bold text-accent-custom flex items-center gap-1.5">
               <Tv size={18} className="animate-pulse" /> Live Spectator Dashboard
             </h2>
-            <p className="text-xs opacity-60">Room: {room?.code} • Mode: Ranked Match • Difficulty: {room?.difficulty}</p>
+            <p className="text-xs opacity-60">Room: {room?.code} • Mode: {room?.coop ? "Co-op" : "Race"} • Difficulty: {room?.difficulty}</p>
           </div>
 
           <div className="flex gap-4 text-xs flex-1 max-w-lg justify-end w-full sm:w-auto">
@@ -1322,16 +1287,16 @@ export default function App() {
       </div>
 
       {/* Non-Blocking Connection Lost Banner for Disconnected Opponents */}
-      {activeView === "game" && activeOpponent && activeOpponent.disconnected && (
+      {activeView === "game" && deadline && (
         <div className="fixed top-24 left-1/2 transform -translate-x-1/2 bg-amber-500/90 text-slate-950 px-4 py-2 rounded-2xl flex items-center gap-2 z-50 shadow-lg border border-amber-400 font-sans text-xs font-bold animate-pulse">
           <AlertTriangle size={14} className="shrink-0" />
-          <span><strong>{activeOpponent.name}</strong> disconnected. Reconnecting in {disconnectCountdown}s...</span>
+          <span>{localReconnectBy ? "Trying to reconnect" : `${activeOpponent?.name} disconnected`} · {disconnectCountdown}s remaining</span>
         </div>
       )}
 
       {/* Visual Floating Emotes Overlay */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none z-50">
-        {emotes.map((e) => (
+        {!focus && emotes.map((e) => (
           <span
             key={e.id}
             className="emoji-float"
@@ -1826,11 +1791,21 @@ export default function App() {
                 </button>
               </div>
 
+              {room?.coop && <p className="text-sm font-semibold">Co-op · two players, one board · untimed</p>}
+              {room && Object.values(room.playAgainVotes || {}).some(Boolean) && <p role="status">
+                {room.players.filter(p => room.playAgainVotes[p.id]).map(p => p.name).join(", ")} requested a rematch.
+              </p>}
+              {room?.isGameStarted && stayedMatch === room.matchId && activeOpponent && <button onClick={() => {startSpectating(activeOpponent.id); setActiveView("game");}}>Spectate {activeOpponent.name}</button>}
+              {room?.isGameStarted && bothFinished && <button onClick={() => votePlayAgain(true)}>Rematch</button>}
               {/* Lobby Tab */}
               {activeTab === "lobby" && (
                 <div className="space-y-4">
                   {!room ? (
                     <div className="space-y-4">
+                      {challengeId && <button className="w-full glass-card p-3" disabled={!isConnected} onClick={() => {
+                        setSeconds(0); sendRoomCommand('OPEN_CHALLENGE', {id:challengeId});
+                      }}>Play friend’s challenge</button>}
+                      <button className="w-full glass-card p-3" disabled={!isConnected} onClick={() => createRoom(selectedDifficulty, false, true)}>Create two-player co-op room</button>
                       {/* Difficulty Selector */}
                       <div className="space-y-1.5">
                         <label className="text-[10px] uppercase font-bold opacity-60 tracking-wider block">
@@ -2101,7 +2076,7 @@ export default function App() {
                         <div className="flex gap-2">
                           {activePlayers.length > 1 && (
                             <button
-                              onClick={toggleReady}
+                              disabled={room.isGameStarted} onClick={toggleReady}
                               className={`flex-1 py-3 rounded-xl font-bold text-sm shadow-md transition-all active:scale-[0.98] ${myStatusInRoom?.isReady ? "bg-amber-600 hover:bg-amber-500 text-white" : "bg-accent-custom hover:bg-accent-hover text-white"}`}
                             >
                               {myStatusInRoom?.isReady
@@ -2112,7 +2087,7 @@ export default function App() {
                           {isHost && (
                             <button
                               onClick={startGame}
-                              disabled={!allPlayersReady}
+                              disabled={!allPlayersReady || room.isGameStarted}
                               className={`${activePlayers.length === 1 ? "w-full" : "px-6"} py-3 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold rounded-xl text-sm transition-all active:scale-[0.98]`}
                               title="Start Match"
                             >
@@ -2124,7 +2099,7 @@ export default function App() {
                           onClick={() => exitToHome(() => setActiveView("home"))}
                           className="w-full py-2.5 bg-slate-800 hover:bg-slate-700/80 border border-slate-700/50 text-slate-300 font-bold rounded-xl text-xs transition-all active:scale-[0.98] mt-1"
                         >
-                          {isHost ? "Dismiss Room" : "Leave Room"}
+                          {isHost ? "Leave & pass host" : "Leave Room"}
                         </button>
                       </div>
                     </div>
@@ -2427,15 +2402,14 @@ export default function App() {
                     <Pause size={36} className="animate-pulse" />
                   </div>
                   <h3 className="text-xl font-extrabold text-accent-custom">
-                    GAME PAUSED
+                    {isConnected ? "GAME PAUSED" : "RECONNECTING"}
                   </h3>
                   <p className="text-xs opacity-75 text-center mt-1 max-w-[280px]">
-                    All players agreed to pause. Click resume to initiate unpause
-                    request.
+                    {isConnected ? "All players agreed to pause." : "Your board will resume when the room reconnects."}
                   </p>
 
                   <button
-                    onClick={requestPause}
+                    disabled={!isConnected} onClick={requestPause}
                     className="mt-6 px-6 py-2.5 bg-accent-custom hover:bg-accent-hover text-white font-bold rounded-xl active:scale-95 transition-all text-xs flex items-center gap-1.5 shadow-md"
                   >
                     <PlayIcon size={14} fill="white" />
@@ -2463,7 +2437,7 @@ export default function App() {
 
                   <span className="text-[11px] lg:text-xs font-bold px-2 py-1 bg-accent-glow border border-border-custom rounded-lg flex items-center gap-1 min-w-[55px] justify-center tabular-nums">
                     <Timer size={11} className="text-accent-custom shrink-0" />
-                    {formatTime(seconds)}
+                    {room?.coop ? "Untimed" : formatTime(seconds)}
                   </span>
                 </div>
 
@@ -2661,8 +2635,9 @@ export default function App() {
                       ? spectatedPlayerBoardState?.selectedCell || null
                       : selectedCell
                   }
+                  onCellFocus={selectCell}
                   onCellClick={
-                    spectatingPlayerId || isMeSpectator ? () => { } : selectCell
+                    spectatingPlayerId || isMeSpectator ? () => { } : chooseCell
                   }
                   notes={
                     spectatingPlayerId || isMeSpectator
@@ -2822,16 +2797,30 @@ export default function App() {
                   </div>
                 )}
 
+              {!isMeSpectator && !spectatingPlayerId && <div className="flex flex-wrap items-center gap-3 text-sm my-2">
+                <span>{filled} of {total} filled</span>
+                <button aria-pressed={digitFirst} onClick={() => { setDigitFirst(!digitFirst); setLockedDigit(null); }}>
+                  {digitFirst ? lockedDigit ? `Digit ${lockedDigit} locked` : "Choose a digit to lock" : "Digit-first input"}
+                </button>
+                {room?.coop && selectedCell && <button onClick={() => sendRoomCommand('COOP_POINT', {row:selectedCell[0], col:selectedCell[1]})}>Point to cell</button>}
+                {!room && !challenge && <button onClick={() => {
+                  const hint = guidedHint(board, solution);
+                  if (hint) selectCell(hint.row, hint.col);
+                  setHintText(hint?.text || "No single-cell deduction found. Try pencil marks.");
+                }}>Where should I look?</button>}
+              </div>}
+              {hintText && <p role="status" className="text-sm mb-2">{hintText}</p>}
               {/* Keypad selector */}
               <Keypad
                 onNumberClick={
                   spectatingPlayerId || isMeSpectator
                     ? () => { }
-                    : (num) => enterNumber(num, formatTime(seconds))
+                    : (num) => digitFirst ? setLockedDigit(lockedDigit === num ? null : num) : placeDigit(num)
                 }
                 onActionClick={
                   spectatingPlayerId || isMeSpectator ? () => { } : handleAction
                 }
+                onLock={num => {setDigitFirst(true); setLockedDigit(num);}} coop={room?.coop} lockedDigit={digitFirst ? lockedDigit : null}
                 notesMode={notesMode}
                 canUndo={history.length > 0}
                 canRedo={redoStack.length > 0}
@@ -3304,7 +3293,7 @@ export default function App() {
                                 <div className="flex gap-2">
                                   {activePlayers.length > 1 && (
                                     <button
-                                      onClick={toggleReady}
+                                      disabled={room.isGameStarted} onClick={toggleReady}
                                       className={`flex-1 py-3 rounded-xl font-bold text-sm shadow-md transition-all active:scale-[0.98] ${myStatusInRoom?.isReady
                                         ? "bg-amber-600 hover:bg-amber-500 text-white"
                                         : "bg-accent-custom hover:bg-accent-hover text-white"
@@ -3319,7 +3308,7 @@ export default function App() {
                                   {isHost && (
                                     <button
                                       onClick={startGame}
-                                      disabled={!allPlayersReady}
+                                      disabled={!allPlayersReady || room.isGameStarted}
                                       className={`${activePlayers.length === 1 ? "w-full" : "px-6"} py-3 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold rounded-xl text-sm transition-all active:scale-[0.98]`}
                                       title="Start Match"
                                     >
@@ -3331,7 +3320,7 @@ export default function App() {
                                   onClick={() => exitToHome(() => setActiveView("home"))}
                                   className="w-full py-2.5 bg-slate-800 hover:bg-slate-700/80 border border-slate-700/50 text-slate-300 font-bold rounded-xl text-xs transition-all active:scale-[0.98] mt-1"
                                 >
-                                  {isHost ? "Dismiss Room" : "Leave Room"}
+                                  {isHost ? "Leave & pass host" : "Leave Room"}
                                 </button>
                               </div>
                             )}
@@ -3602,7 +3591,7 @@ export default function App() {
       )}
 
       {/* WIN / LOSS DIALOG OVERLAYS WITH POST-GAME SOLVE TIMELINE ANALYSIS */}
-      {gameStatus === "won" && !spectatingPlayerId && (
+      {gameStatus === "won" && !spectatingPlayerId && (!room || stayedMatch !== room.matchId) && (
         <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4 z-50 overflow-y-auto animate-fade-in py-10">
           <div className="glass-card rounded-3xl p-6 md:p-8 max-w-md w-full text-center space-y-5 border-2 border-emerald-500/30 animate-scale-in my-auto">
             <div className="w-16 h-16 rounded-2xl bg-emerald-500/20 text-emerald-500 mx-auto flex items-center justify-center shadow-lg">
@@ -3622,7 +3611,7 @@ export default function App() {
               <div className="text-left">
                 <span className="opacity-60 block">Solve Time:</span>
                 <span className="text-base font-bold text-accent-custom">
-                  {formatTime(seconds)}
+                  {room?.coop ? "Untimed" : formatTime(seconds)}
                 </span>
               </div>
               <div className="text-left border-l border-border-custom pl-3">
@@ -3634,7 +3623,7 @@ export default function App() {
             </div>
 
             <div className="border border-border-custom p-3 rounded-xl bg-accent-glow/5 text-xs text-emerald-500 font-bold flex items-center justify-center gap-1">
-              <Trophy size={14} /> ELO Rating +24 points (Rank: {rank})
+              <Trophy size={14} /> {room?.coop || challenge ? "Unrated" : `Rating: ${elo} · ${rank}`}
             </div>
 
             {/* Post-Game Replay Timeline Analysis */}
@@ -3701,6 +3690,15 @@ export default function App() {
               </button>
             )}
 
+            {!room?.coop && !room?.enableAbilities && <div className="grid gap-2 text-sm">
+              {challengeScore && <p> {challengeScore.name}: {formatTime(challengeScore.seconds)}, {challengeScore.strikes} mistakes, {challengeScore.hintsUsed} hints · You: {formatTime(seconds)}, {strikes} mistakes, {(difficulty === 'expert' ? 1 : difficulty === 'beginner' ? 3 : 2) - hintsRemaining} hints</p>}
+              <button disabled={!isConnected} onClick={shareChallenge}>Challenge a friend</button>
+              {challengeLink && <label>Share link <input readOnly value={challengeLink} onFocus={e => e.target.select()} /></label>}
+            </div>}
+            {room && Object.values(room.playAgainVotes || {}).some(Boolean) && <p role="status">
+              {room.players.filter(p => room.playAgainVotes[p.id]).map(p => p.name).join(", ")} requested a rematch.
+            </p>}
+            {room && <button onClick={() => {setStayedMatch(room.matchId); setActiveView("home");}}>Stay in room</button>}
             {isMultiplayer && bothFinished && (
               <button
                 onClick={() => {
@@ -3712,7 +3710,7 @@ export default function App() {
                 }}
                 className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl active:scale-[0.98] transition-all flex items-center justify-center gap-1.5 shadow-md shadow-emerald-500/20"
               >
-                Vote to Play Again
+                Rematch
               </button>
             )}
 
@@ -3746,7 +3744,7 @@ export default function App() {
         </div>
       )}
 
-      {gameStatus === "lost" && !spectatingPlayerId && (
+      {gameStatus === "lost" && !spectatingPlayerId && (!room || stayedMatch !== room.matchId) && (
         <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4 z-50 overflow-y-auto animate-fade-in py-10">
           <div className="glass-card rounded-3xl p-6 md:p-8 max-w-md w-full text-center space-y-5 border-2 border-rose-500/30 animate-scale-in my-auto">
             <div className="w-16 h-16 rounded-2xl bg-rose-500/20 text-rose-500 mx-auto flex items-center justify-center shadow-lg">
@@ -3778,7 +3776,7 @@ export default function App() {
             </div>
 
             <div className="border border-border-custom/50 p-3 rounded-xl bg-accent-glow/5 text-xs text-rose-500 font-bold flex items-center justify-center gap-1">
-              <ShieldAlert size={14} /> ELO Rating -12 points (Rank: {rank})
+              <ShieldAlert size={14} /> {challenge ? "Unrated" : `Rating: ${elo} · ${rank}`}
             </div>
 
             {/* Post-Game Replay Timeline Analysis */}
@@ -3852,6 +3850,10 @@ export default function App() {
               ✏️ Keep Solving (Practice Mode)
             </button>
 
+            {room && Object.values(room.playAgainVotes || {}).some(Boolean) && <p role="status">
+              {room.players.filter(p => room.playAgainVotes[p.id]).map(p => p.name).join(", ")} requested a rematch.
+            </p>}
+            {room && <button onClick={() => {setStayedMatch(room.matchId); setActiveView("home");}}>Stay in room</button>}
             {isMultiplayer && bothFinished && (
               <button
                 onClick={() => {
@@ -3863,7 +3865,7 @@ export default function App() {
                 }}
                 className="w-full py-3 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl active:scale-[0.98] transition-all flex items-center justify-center gap-1.5 shadow-md shadow-rose-500/20"
               >
-                Vote to Play Again
+                Rematch
               </button>
             )}
 
@@ -3918,7 +3920,7 @@ export default function App() {
               <div className="text-left">
                 <span className="opacity-60 block">Solve Time:</span>
                 <span className="text-base font-bold text-accent-custom">
-                  {formatTime(seconds)}
+                  {room?.coop ? "Untimed" : formatTime(seconds)}
                 </span>
               </div>
               <div className="text-left border-l border-border-custom pl-3">
@@ -4045,6 +4047,9 @@ export default function App() {
             </div>
 
             <div className="space-y-4">
+              <label className="flex items-center gap-3"><input type="checkbox" checked={focus} onChange={e => {
+                setFocus(e.target.checked); localStorage.setItem("sudoku_focus", e.target.checked);
+              }}/>Focus mode · quiet opponents, emotes and streaks</label>
               {/* Keypad Layout Setting */}
               <div className="space-y-2 text-left">
                 <label className="text-[10px] uppercase font-bold opacity-80 tracking-wider">

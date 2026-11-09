@@ -2,7 +2,7 @@
 export default function SudokuGrid({ 
   board, 
   selectedCell, 
-  onCellClick, 
+  onCellClick, onCellFocus,
   notes = {},
   originalCells = new Set(),
   mistakes = {},
@@ -36,7 +36,7 @@ export default function SudokuGrid({
   };
 
   return (
-    <div className="w-full max-w-[460px] aspect-square bg-grid-custom rounded-xl p-1 shadow-inner border border-border-custom">
+    <div data-board className="w-full max-w-[460px] aspect-square bg-grid-custom rounded-xl p-1 shadow-inner border border-border-custom">
       <div className="grid grid-cols-3 grid-rows-3 h-full w-full gap-[3px] bg-border-subgrid rounded-lg overflow-hidden">
         {Array.from({ length: 9 }).map((_, boxIndex) => {
           const boxRow = Math.floor(boxIndex / 3);
@@ -93,7 +93,19 @@ export default function SudokuGrid({
                 }
 
                 return (
-                  <div
+                  <button
+                    type="button"
+                    disabled={isSpectatingMode}
+                    aria-label={`Row ${rowIndex+1}, column ${colIndex+1}, ${val ?? 'empty'}${isOriginal ? ', clue' : ''}${cellNotes.length ? ', notes ' + cellNotes.join(' and ') : ''}${isMistake ? ', incorrect' : ''}`}
+                    onKeyDown={event => {
+                      const offset = {ArrowLeft:[0,-1], ArrowRight:[0,1], ArrowUp:[-1,0], ArrowDown:[1,0]}[event.key];
+                      if (!offset) return;
+                      event.preventDefault();
+                      const key = [rowIndex+offset[0], colIndex+offset[1]].join(',');
+                      event.currentTarget.closest('[data-board]').querySelector('[data-cell="' + key + '"]')?.focus();
+                    }}
+                    onFocus={() => onCellFocus?.(rowIndex, colIndex)}
+                    data-cell={cellKey}
                     key={cellKey}
                     onClick={() => onCellClick(rowIndex, colIndex)}
                     className={`
@@ -103,6 +115,7 @@ export default function SudokuGrid({
                       ${isSpectatingMode ? 'cursor-default' : 'hover:bg-accent-glow/20 cursor-pointer'} transition-all duration-100
                     `}
                   >
+                    {isMistake && <span aria-hidden="true" className="absolute top-0 right-1 text-xs">!</span>}
                     {val !== null ? (
                       <span>{val}</span>
                     ) : (
@@ -112,7 +125,7 @@ export default function SudokuGrid({
                           <span
                             key={num}
                             className={`
-                              text-[9px] leading-[9px] flex items-center justify-center font-normal
+                              text-[clamp(9px,2.5vw,12px)] leading-none flex items-center justify-center font-normal
                               transition-opacity duration-150
                               ${cellNotes.includes(num) ? 'opacity-70' : 'opacity-0'}
                             `}
@@ -122,7 +135,7 @@ export default function SudokuGrid({
                         ))}
                       </div>
                     )}
-                  </div>
+                  </button>
                 );
               })}
             </div>

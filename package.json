@@ -6,6 +6,7 @@
     "server"
   ],
   "scripts": {
+    "test": "node --test server/test/multiplayer.test.js",
     "client:dev": "npm run dev -w client",
     "server:dev": "npm run dev -w server",
     "build": "npm run build -w client",

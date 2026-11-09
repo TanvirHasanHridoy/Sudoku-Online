@@ -723,6 +723,7 @@ export const useAuthStore = create((set, get) => ({
                 playerId: profile.id,
                 name: profile.display_name,
                 elo: profile.elo,
+                accessToken: (await supabase.auth.getSession()).data.session?.access_token,
                 supabaseUserId: user.id,
               },
             }),
