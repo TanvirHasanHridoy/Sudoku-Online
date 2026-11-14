@@ -277,3 +277,38 @@ test('spectator receives player elimination state upon 3 strikes', async () => {
   assert.equal(bobInRoom.result, 'lost');
 });
 
+test('chat messages and presets broadcast with spectator flags and text sanitization', async () => {
+  const host = await client();
+  const guest = await client();
+  const spec = await client();
+
+  host.send('CREATE_ROOM', { playerId: host.id, name: 'Alice' });
+  const { room } = await host.next('ROOM_CREATED');
+
+  guest.send('JOIN_ROOM', { code: room.code, playerId: guest.id, name: 'Bob' });
+  await guest.next('ROOM_JOINED');
+  spec.send('JOIN_ROOM', { code: room.code, playerId: spec.id, name: 'Watcher', isSpectator: true });
+  await spec.next('ROOM_JOINED');
+
+  // Guest sends a text message
+  guest.send('SEND_EMOTE', { text: 'Ready! 🚀' });
+  const msg1 = await host.next('EMOTE_RECEIVED');
+  assert.equal(msg1.name, 'Bob');
+  assert.equal(msg1.text, 'Ready! 🚀');
+  assert.equal(msg1.isSpectator, false);
+  assert.ok(msg1.timestamp);
+
+  // Spectator sends a cheer text
+  spec.send('SEND_EMOTE', { text: 'You got this Bob!' });
+  const specMsg = await guest.next('EMOTE_RECEIVED');
+  assert.equal(specMsg.name, 'Watcher');
+  assert.equal(specMsg.text, 'You got this Bob!');
+  assert.equal(specMsg.isSpectator, true);
+
+  // Overlong message is truncated to 80 chars
+  const longText = 'a'.repeat(120);
+  host.send('SEND_EMOTE', { text: longText });
+  const truncatedMsg = await guest.next('EMOTE_RECEIVED');
+  assert.equal(truncatedMsg.text.length, 80);
+});
+

@@ -49,6 +49,7 @@ export const useLobbyStore = create((set, get) => ({
 
   // Floating emote callbacks
   emoteCallback: null,
+  chatMessages: [],
 
   // Toast Notifications
   toasts: [],
@@ -455,6 +456,7 @@ export const useLobbyStore = create((set, get) => ({
               isConnected: true, localReconnectBy: null, room: payload.room, challenge: null, challengeLink: null,
               myPlayerId: payload.myPlayerId,
               finishers: payload.room.finishers || [],
+              chatMessages: [],
               showPauseVoteModal: false,
               pauseRequester: null,
               spectatingPlayerId: null,
@@ -567,6 +569,15 @@ export const useLobbyStore = create((set, get) => ({
           }
 
           case 'EMOTE_RECEIVED': {
+            const messageItem = {
+              id: Date.now() + Math.random(),
+              playerId: payload.playerId,
+              name: payload.name || 'Player',
+              isSpectator: !!payload.isSpectator,
+              text: payload.emoji || payload.text,
+              timestamp: payload.timestamp || Date.now()
+            };
+            set(state => ({ chatMessages: [...(state.chatMessages || []).slice(-49), messageItem] }));
             const callback = get().emoteCallback;
             if (callback) {
               callback(payload);
@@ -1049,14 +1060,37 @@ export const useLobbyStore = create((set, get) => ({
     }));
   },
 
-  sendEmote: (emoji) => {
-    const { ws, room } = get();
-    if (!ws || ws.readyState !== 1 || !room) return;
+  sendEmote: (text) => {
+    const { ws, room, myPlayerId, myPlayerName } = get();
+    if (!ws || ws.readyState !== 1 || !room || !text) return;
+    const clean = String(text).trim().slice(0, 80);
+    if (!clean) return;
 
     ws.send(JSON.stringify({
       type: 'SEND_EMOTE',
-      payload: { emoji }
+      payload: { emoji: clean, text: clean }
     }));
+
+    const myStatus = room.players?.find(p => p.id === myPlayerId);
+    const selfMessage = {
+      id: Date.now() + Math.random(),
+      playerId: myPlayerId,
+      name: myPlayerName || 'You',
+      isSpectator: !!myStatus?.isSpectator,
+      text: clean,
+      timestamp: Date.now()
+    };
+    set(state => ({ chatMessages: [...(state.chatMessages || []).slice(-49), selfMessage] }));
+    const callback = get().emoteCallback;
+    if (callback) {
+      callback({
+        playerId: myPlayerId,
+        name: myPlayerName || 'You',
+        isSpectator: !!myStatus?.isSpectator,
+        emoji: clean,
+        text: clean
+      });
+    }
   },
 
   requestPause: () => {
@@ -1161,6 +1195,7 @@ export const useLobbyStore = create((set, get) => ({
     // Reset lobby / room state locally
     set({
       room: null,
+      chatMessages: [],
       showPauseVoteModal: false,
       pauseRequester: null,
       showPlayAgainVoteModal: false,

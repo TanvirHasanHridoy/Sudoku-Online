@@ -31,6 +31,8 @@ import {
   Smile,
   Eye,
   Skull,
+  Send,
+  MessageSquare,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import SudokuGrid from "./components/SudokuGrid";
@@ -151,6 +153,7 @@ export default function App() {
     isConnected,
     connectionState,
     finishers,
+    chatMessages,
     reconnectImmediately,
     myPlayerId,
     myPlayerName,
@@ -449,6 +452,16 @@ export default function App() {
   const [activeReactions, setActiveReactions] = useState([]);
   const [showEmoteMenu, setShowEmoteMenu] = useState(false);
   const [activeTab, setActiveTab] = useState("lobby"); // 'lobby' | 'matchmaker'
+  const [lobbyInputText, setLobbyInputText] = useState("");
+  const [inGameChatInput, setInGameChatInput] = useState("");
+  const [spectatorChatInput, setSpectatorChatInput] = useState("");
+  const lobbyChatEndRef = useRef(null);
+
+  useEffect(() => {
+    if (lobbyChatEndRef.current) {
+      lobbyChatEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [chatMessages]);
 
   // Trigger visual reactions in top banner
   function triggerEmoteVisual(data) {
@@ -458,7 +471,7 @@ export default function App() {
 
     setTimeout(() => {
       setActiveReactions((prev) => prev.filter((e) => e.id !== id));
-    }, 3000);
+    }, 3500);
   }
 
   const [selectedSpectatorPlayerId, setSelectedSpectatorPlayerId] = useState(null);
@@ -1326,21 +1339,49 @@ export default function App() {
             </p>
           </div>
 
-          {/* Spectator Quick Reactions Bar */}
-          <div className="flex items-center gap-1 bg-accent-glow/20 px-2.5 py-1.5 rounded-xl border border-border-custom/40">
+          {/* Spectator Quick Reactions Bar & Cheer Input */}
+          <div className="flex flex-wrap items-center gap-2 bg-accent-glow/20 px-3 py-1.5 rounded-xl border border-border-custom/40">
             <span className="text-[10px] font-bold text-accent-custom opacity-70 flex items-center gap-1 shrink-0">
               <Eye size={12} /> React:
             </span>
-            {["🍿", "👀", "👏", "🔥", "🤯", "🏁"].map((emoji) => (
+            <div className="flex items-center gap-1">
+              {["🍿", "👀", "👏", "🔥", "🤯", "🏁"].map((emoji) => (
+                <button
+                  key={emoji}
+                  onClick={() => sendEmote(emoji)}
+                  className="px-1 py-0.5 hover:scale-125 transition-transform text-xs"
+                  title={`React with ${emoji}`}
+                >
+                  {emoji}
+                </button>
+              ))}
+            </div>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (spectatorChatInput.trim()) {
+                  sendEmote(spectatorChatInput.trim());
+                  setSpectatorChatInput("");
+                }
+              }}
+              className="flex items-center gap-1 border-l border-border-custom/40 pl-2"
+            >
+              <input
+                type="text"
+                maxLength={60}
+                value={spectatorChatInput}
+                onChange={(e) => setSpectatorChatInput(e.target.value)}
+                placeholder="Cheer..."
+                className="w-20 sm:w-28 px-2 py-0.5 bg-panel-custom border border-border-custom rounded-lg text-[11px] focus:outline-none focus:border-accent-custom text-text-custom placeholder:opacity-50"
+              />
               <button
-                key={emoji}
-                onClick={() => sendEmote(emoji)}
-                className="px-1 py-0.5 hover:scale-125 transition-transform text-xs"
-                title={`React with ${emoji}`}
+                type="submit"
+                disabled={!spectatorChatInput.trim()}
+                className="p-1 bg-accent-custom hover:bg-accent-hover disabled:opacity-40 text-white rounded-lg transition-all active:scale-95 shrink-0"
               >
-                {emoji}
+                <Send size={10} />
               </button>
-            ))}
+            </form>
           </div>
 
           <button
@@ -1584,7 +1625,7 @@ export default function App() {
           >
             {r.isSpectator && <span title="Spectator Reaction">👁️</span>}
             <span className="opacity-75">{r.name || "Opponent"}:</span>
-            <span className="text-sm font-normal">{r.emoji}</span>
+            <span className="text-xs font-semibold">{r.emoji || r.text}</span>
           </div>
         ))}
       </div>
@@ -2389,6 +2430,77 @@ export default function App() {
                             );
                           })}
                         </div>
+
+                        {/* Lobby Chat & Banter */}
+                        <div className="bg-accent-glow/20 border border-border-custom/50 rounded-xl p-3 space-y-2 mt-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] uppercase font-bold tracking-wider text-accent-custom flex items-center gap-1.5">
+                              <MessageSquare size={12} /> Room Chat & Banter
+                            </span>
+                            <span className="text-[9px] opacity-60">
+                              {chatMessages?.length || 0} messages
+                            </span>
+                          </div>
+
+                          {/* Quick Lobby Presets */}
+                          <div className="flex flex-wrap gap-1.5">
+                            {["Ready! 🚀", "Brain on! 🧠", "No hints? 😏", "Warm-up first! ☕", "GL HF! 🤝", "Rematch! 🔥"].map((preset) => (
+                              <button
+                                key={preset}
+                                type="button"
+                                onClick={() => sendEmote(preset)}
+                                className="px-2 py-1 bg-panel-custom hover:bg-accent-custom hover:text-white border border-border-custom/60 rounded-lg text-[11px] font-bold text-text-custom transition-all active:scale-95 shadow-xs"
+                              >
+                                {preset}
+                              </button>
+                            ))}
+                          </div>
+
+                          {/* Recent Messages Log */}
+                          <div className="max-h-28 overflow-y-auto space-y-1.5 pr-1 scrollbar-thin">
+                            {(!chatMessages || chatMessages.length === 0) ? (
+                              <p className="text-[10px] opacity-50 italic py-1 text-center">No messages yet. Send a quick preset or type below!</p>
+                            ) : (
+                              chatMessages.map((msg) => (
+                                <div key={msg.id} className="text-xs flex items-baseline gap-1.5 bg-panel-custom/60 px-2 py-1 rounded-lg border border-border-custom/30">
+                                  {msg.isSpectator && <span className="text-[10px]" title="Spectator">👁️</span>}
+                                  <span className="font-bold text-accent-custom text-[11px] shrink-0">{msg.name}:</span>
+                                  <span className="text-text-custom font-medium break-words text-[11px]">{msg.text}</span>
+                                </div>
+                              ))
+                            )}
+                            <div ref={lobbyChatEndRef} />
+                          </div>
+
+                          {/* Custom message input form */}
+                          <form
+                            onSubmit={(e) => {
+                              e.preventDefault();
+                              if (lobbyInputText.trim()) {
+                                sendEmote(lobbyInputText.trim());
+                                setLobbyInputText("");
+                              }
+                            }}
+                            className="flex items-center gap-1.5 pt-1"
+                          >
+                            <input
+                              type="text"
+                              maxLength={80}
+                              value={lobbyInputText}
+                              onChange={(e) => setLobbyInputText(e.target.value)}
+                              placeholder="Type a message..."
+                              className="flex-1 px-3 py-1.5 bg-panel-custom border border-border-custom rounded-lg text-xs focus:outline-none focus:border-accent-custom text-text-custom placeholder:opacity-50"
+                            />
+                            <button
+                              type="submit"
+                              disabled={!lobbyInputText.trim()}
+                              className="p-1.5 bg-accent-custom hover:bg-accent-hover disabled:opacity-40 text-white rounded-lg transition-all active:scale-95 shrink-0"
+                              title="Send Message"
+                            >
+                              <Send size={13} />
+                            </button>
+                          </form>
+                        </div>
                       </div>
                       <div className="flex flex-col gap-2 pt-2">
                         <div className="flex gap-2">
@@ -2784,28 +2896,78 @@ export default function App() {
                     <div className="relative">
                       <button
                         onClick={() => setShowEmoteMenu((prev) => !prev)}
-                        className="p-1 rounded-lg bg-accent-glow border border-border-custom hover:border-accent-custom text-text-custom transition-all active:scale-95"
-                        title="Quick Reactions"
+                        className={`p-1 rounded-lg border text-text-custom transition-all active:scale-95 ${
+                          showEmoteMenu
+                            ? "bg-accent-custom text-white border-accent-custom"
+                            : "bg-accent-glow border-border-custom hover:border-accent-custom"
+                        }`}
+                        title="Quick Reactions & Chat"
                       >
-                        <Smile size={11} className="text-accent-custom" />
+                        <Smile size={11} className={showEmoteMenu ? "text-white" : "text-accent-custom"} />
                       </button>
                       {showEmoteMenu && (
-                        <div className="absolute right-0 top-full mt-1.5 z-50 glass-panel p-1.5 rounded-xl border border-border-custom shadow-xl flex flex-wrap gap-1 w-44 select-none">
-                          {(room.coop
-                            ? ["👍", "⚠️", "🔍", "📦 Box 5", "📐 Corners", "🤝 Team!"]
-                            : ["🔥", "👏", "⚡", "💡", "😱", "🫠", "So close!", "GG! 🏁"]
-                          ).map((preset) => (
+                        <div className="absolute right-0 top-full mt-1.5 z-50 glass-panel p-2.5 rounded-2xl border border-border-custom shadow-2xl flex flex-col gap-2 w-64 select-none animate-scale-in">
+                          {/* Top header */}
+                          <div className="flex items-center justify-between text-[10px] font-bold text-accent-custom opacity-80 border-b border-border-custom/40 pb-1">
+                            <span className="flex items-center gap-1">
+                              <MessageSquare size={11} /> {room.coop ? "Co-op Signals" : "Race Reactions"}
+                            </span>
                             <button
-                              key={preset}
-                              onClick={() => {
-                                sendEmote(preset);
-                                setShowEmoteMenu(false);
-                              }}
-                              className="px-2 py-1 bg-accent-glow/40 hover:bg-accent-custom hover:text-white rounded-lg text-xs font-bold transition-all text-text-custom"
+                              onClick={() => setShowEmoteMenu(false)}
+                              className="text-text-custom opacity-60 hover:opacity-100 p-0.5"
                             >
-                              {preset}
+                              ✕
                             </button>
-                          ))}
+                          </div>
+
+                          {/* Quick Emoji / Macro buttons */}
+                          <div className="flex flex-wrap gap-1">
+                            {(room.coop
+                              ? ["👍", "⚠️", "🔍", "📦 Box 5", "📐 Corners", "🤝 Team!"]
+                              : ["🔥", "👏", "⚡", "💡", "😱", "🫠", "So close!", "GG! 🏁"]
+                            ).map((preset) => (
+                              <button
+                                key={preset}
+                                onClick={() => {
+                                  sendEmote(preset);
+                                  setShowEmoteMenu(false);
+                                }}
+                                className="px-2 py-1 bg-accent-glow/40 hover:bg-accent-custom hover:text-white rounded-lg text-xs font-bold transition-all text-text-custom"
+                              >
+                                {preset}
+                              </button>
+                            ))}
+                          </div>
+
+                          {/* Quick message form */}
+                          <form
+                            onSubmit={(e) => {
+                              e.preventDefault();
+                              if (inGameChatInput.trim()) {
+                                sendEmote(inGameChatInput.trim());
+                                setInGameChatInput("");
+                                setShowEmoteMenu(false);
+                              }
+                            }}
+                            className="flex items-center gap-1.5 pt-1 border-t border-border-custom/40"
+                          >
+                            <input
+                              type="text"
+                              maxLength={60}
+                              value={inGameChatInput}
+                              onChange={(e) => setInGameChatInput(e.target.value)}
+                              placeholder="Quick text..."
+                              className="flex-1 px-2.5 py-1 bg-panel-custom border border-border-custom rounded-lg text-xs focus:outline-none focus:border-accent-custom text-text-custom placeholder:opacity-50"
+                              autoFocus
+                            />
+                            <button
+                              type="submit"
+                              disabled={!inGameChatInput.trim()}
+                              className="p-1 bg-accent-custom hover:bg-accent-hover disabled:opacity-40 text-white rounded-lg transition-all active:scale-95 shrink-0"
+                            >
+                              <Send size={12} />
+                            </button>
+                          </form>
                         </div>
                       )}
                     </div>
@@ -3710,6 +3872,57 @@ export default function App() {
                               </details>
                             </div>
                             */}
+                            </div>
+
+                            {/* In-Game Desktop Room Chat Log */}
+                            <div className="border border-border-custom/50 rounded-xl p-3 bg-accent-glow/5 space-y-2 mt-2 mb-4">
+                              <div className="flex items-center justify-between text-xs font-bold">
+                                <span className="flex items-center gap-1.5 text-accent-custom uppercase tracking-wider text-[11px]">
+                                  <MessageSquare size={13} /> Room Chat
+                                </span>
+                                <span className="text-[10px] opacity-60">
+                                  {chatMessages?.length || 0}
+                                </span>
+                              </div>
+                              <div className="max-h-28 overflow-y-auto space-y-1 pr-1 scrollbar-thin text-xs">
+                                {(!chatMessages || chatMessages.length === 0) ? (
+                                  <p className="text-[10px] opacity-50 italic py-2 text-center">No messages yet</p>
+                                ) : (
+                                  chatMessages.slice(-20).map((msg) => (
+                                    <div key={msg.id} className="text-xs flex items-baseline gap-1.5 bg-panel-custom/60 px-2 py-1 rounded-lg border border-border-custom/30">
+                                      {msg.isSpectator && <span className="text-[10px]" title="Spectator">👁️</span>}
+                                      <span className="font-bold text-accent-custom text-[11px] shrink-0">{msg.name}:</span>
+                                      <span className="text-text-custom font-medium break-words text-[11px]">{msg.text}</span>
+                                    </div>
+                                  ))
+                                )}
+                              </div>
+                              <form
+                                onSubmit={(e) => {
+                                  e.preventDefault();
+                                  if (inGameChatInput.trim()) {
+                                    sendEmote(inGameChatInput.trim());
+                                    setInGameChatInput("");
+                                  }
+                                }}
+                                className="flex items-center gap-1.5 pt-1"
+                              >
+                                <input
+                                  type="text"
+                                  maxLength={80}
+                                  value={inGameChatInput}
+                                  onChange={(e) => setInGameChatInput(e.target.value)}
+                                  placeholder="Type message..."
+                                  className="flex-1 px-2.5 py-1.5 bg-panel-custom border border-border-custom rounded-lg text-xs focus:outline-none focus:border-accent-custom text-text-custom placeholder:opacity-50"
+                                />
+                                <button
+                                  type="submit"
+                                  disabled={!inGameChatInput.trim()}
+                                  className="p-1.5 bg-accent-custom hover:bg-accent-hover disabled:opacity-40 text-white rounded-lg transition-all active:scale-95 shrink-0"
+                                >
+                                  <Send size={12} />
+                                </button>
+                              </form>
                             </div>
 
                             {/* READY UP ACTION BUTTON */}

@@ -644,7 +644,8 @@ wss.on('connection', (ws) => {
 
         case 'SEND_EMOTE': {
           if (!currentRoomCode || !currentPlayer) return;
-          const { emoji } = payload;
+          const content = String(payload.emoji || payload.text || '').trim().slice(0, 80);
+          if (!content) return;
 
           broadcastToRoom(currentRoomCode, {
             type: 'EMOTE_RECEIVED',
@@ -652,7 +653,9 @@ wss.on('connection', (ws) => {
               playerId: currentPlayer.id,
               name: currentPlayer.name,
               isSpectator: !!currentPlayer.isSpectator,
-              emoji
+              emoji: content,
+              text: content,
+              timestamp: Date.now()
             }
           }, currentPlayer.id); // Don't bounce it back to the sender
           break;

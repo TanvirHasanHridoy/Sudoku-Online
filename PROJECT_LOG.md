@@ -119,4 +119,31 @@ On branch `feature/multiplayer-ux-and-connection`:
 * **Remaining limitations:**
   - Free-tier server sleep delays remain subject to cloud provider cold-start timers when spinning up from zero instances.
 
+## 2026-11-14 · Phase 5: Preset Reactions & Room Chat System
+
+On branch `feature/multiplayer-ux-and-connection`:
+* **Pre-Game Lobby Presets & Live Chat:**
+  - Added dedicated `Room Chat & Banter` section in the private room lobby view before match start.
+  - Provided 1-tap quick presets: `["Ready! 🚀", "Brain on! 🧠", "No hints? 😏", "Warm-up first! ☕", "GL HF! 🤝", "Rematch! 🔥"]`.
+  - Added interactive message log with auto-scroll and quick text input field (`"Type a message..."`, max 80 chars) for real-time lobby banter.
+* **In-Game Reaction Popover & Zero Grid Interference:**
+  - Upgraded toolbar `Smile` button to a full Quick Reaction & Chat dropdown anchored at the top of the board controls.
+  - Mode-specific presets:
+    - Race: `["🔥", "👏", "⚡", "💡", "😱", "🫠", "So close!", "GG! 🏁"]`
+    - Co-op: `["👍", "⚠️", "🔍", "📦 Box 5", "📐 Corners", "🤝 Team!"]`
+  - Inline quick text input (`"Quick text..."`, max 60 chars) with Send button.
+  - Maintained zero occlusion of the 9x9 grid and keypad; transient banner toasts display for 3.5s in the top-right corner.
+  - Desktop right sidebar includes live Room Chat feed and quick-message input box.
+* **Spectator Cheering & Audience Identification:**
+  - Spectators in live view have an integrated cheering input (`Cheer...`) beside their quick reactions (`["🍿", "👀", "👏", "🔥", "🤯", "🏁"]`).
+  - Spectator messages carry `isSpectator: true` and are displayed with an unmistakable `👁️` eye badge across all clients.
+* **Server Protocol & Client Store:**
+  - `SEND_EMOTE` accepts both `emoji` and `text`, sanitizes length up to 80 characters, and broadcasts with `timestamp`.
+  - `useLobbyStore` tracks `chatMessages` (last 50 messages) and immediately reflects self-sent messages.
+* **Verification:**
+  - Added automated test in `server/test/multiplayer.test.js`: `chat messages and presets broadcast with spectator flags and text sanitization` (15/15 tests passing in `npm test`).
+  - Client production build succeeded cleanly (`npm run build --prefix client`).
+* **Remaining limitations:**
+  - Voice channels require WebRTC support and microphone permissions on supported browsers.
+
 
