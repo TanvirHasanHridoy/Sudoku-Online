@@ -1,6 +1,7 @@
 import { generateSudoku } from '../utils/generator';
 import { raceProgress } from '../utils/play';
 import { solveSudoku } from '../utils/solver';
+import { playSound } from '../utils/audio';
 import { create } from 'zustand';
 import { useGameStore } from './useGameStore';
 
@@ -29,6 +30,8 @@ export const useLobbyStore = create((set, get) => ({
   coopPointedCell: null,
   ws: null,
   isConnected: false,
+  connectionState: 'connecting', // 'connecting' | 'connected' | 'disconnected'
+  finishers: [], // Array of { playerId, name, place, result, formattedTime }
   myPlayerId: defaultId,
   myPlayerName: defaultName,
   selectedAvatar: defaultAvatar,
@@ -168,12 +171,16 @@ export const useLobbyStore = create((set, get) => ({
     const activeWs = get().ws;
     if (activeWs && activeWs.readyState <= 1) return; // Already connecting or connected
 
+    set({ connectionState: 'connecting' });
     const wsUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:3001';
     const socket = new WebSocket(wsUrl);
     set({ ws: socket }); // Store immediately to prevent duplicate connections!
 
     socket.onopen = async () => {
-      set({ isConnected: !localStorage.getItem("sudoku_active_room_code") });
+      set({ 
+        isConnected: !localStorage.getItem("sudoku_active_room_code"),
+        connectionState: 'connected'
+      });
       get().addToast('Connected to competitive lobby server!', 'success');
 
       // Register player with the server (use dynamic import to avoid circular dependency)
@@ -201,7 +208,7 @@ export const useLobbyStore = create((set, get) => ({
       if (activeRoomCode) {
         console.log(`[Auto Reconnect] Restoring multiplayer session for Room: ${activeRoomCode}`);
         get().joinRoom(activeRoomCode);
-      } else set({isConnected:true, localReconnectBy:null});
+      } else set({isConnected:true, localReconnectBy:null, connectionState: 'connected'});
     };
 
     socket.onmessage = (event) => {
@@ -447,6 +454,7 @@ export const useLobbyStore = create((set, get) => ({
             set({ 
               isConnected: true, localReconnectBy: null, room: payload.room, challenge: null, challengeLink: null,
               myPlayerId: payload.myPlayerId,
+              finishers: payload.room.finishers || [],
               showPauseVoteModal: false,
               pauseRequester: null,
               spectatingPlayerId: null,
@@ -516,6 +524,7 @@ export const useLobbyStore = create((set, get) => ({
           case 'GAME_STARTED': {
             set({ 
               room: payload.room,
+              finishers: [],
               showPauseVoteModal: false,
               pauseRequester: null,
               spectatingPlayerId: null,
@@ -545,7 +554,9 @@ export const useLobbyStore = create((set, get) => ({
                       progress: payload.progress, 
                       strikes: payload.strikes, 
                       mana: payload.mana || 0,
-                      hasFinishedGame: !!payload.hasFinishedGame
+                      hasFinishedGame: !!payload.hasFinishedGame,
+                      cellsLeft: payload.cellsLeft,
+                      total: payload.total
                     } 
                   : p
               );
@@ -555,10 +566,9 @@ export const useLobbyStore = create((set, get) => ({
           }
 
           case 'EMOTE_RECEIVED': {
-            const { emoji } = payload;
             const callback = get().emoteCallback;
             if (callback) {
-              callback(emoji);
+              callback(payload);
             }
             break;
           }
@@ -625,7 +635,15 @@ export const useLobbyStore = create((set, get) => ({
 
           case 'PLAYER_FINISHED': {
             // A different player just won or was eliminated
-            const { name, result } = payload;
+            const { name, result, playerId, place } = payload;
+            if (result === 'won' && playerId) {
+              const currentFinishers = get().finishers || [];
+              if (!currentFinishers.some(f => f.playerId === playerId)) {
+                const assignedPlace = place || (currentFinishers.length + 1);
+                set({ finishers: [...currentFinishers, { ...payload, place: assignedPlace }] });
+                try { playSound.opponentFinished(true); } catch {}
+              }
+            }
             const emoji = result === 'won' ? '🏆' : '💀';
             const verb  = result === 'won' ? 'solved the board!' : 'was eliminated!';
             get().addToast(`${emoji} ${name} ${verb}`, result === 'won' ? 'success' : 'error');
@@ -927,15 +945,30 @@ export const useLobbyStore = create((set, get) => ({
     socket.onclose = () => {
       if (get().ws !== socket) return;
       get().leaveVoice(); // Safely clean up local tracks & connections
+      const attempts = retryAttempt++;
       set({ 
         ws: null, 
-        isConnected: false, localReconnectBy: get().localReconnectBy || (get().room ? Date.now() + (get().room.isGameStarted ? 30000 : 8000) : null)
+        isConnected: false,
+        connectionState: attempts > 4 ? 'disconnected' : 'connecting',
+        localReconnectBy: get().localReconnectBy || (get().room ? Date.now() + (get().room.isGameStarted ? 15000 : 8000) : null)
       });
       get().addToast('Disconnected from competitive lobby server. Retrying...', 'error');
       
-      const delay = Math.min(8000, 1000 * 2 ** Math.min(retryAttempt++, 3)) + Math.random() * 400;
+      const delay = Math.min(8000, 1000 * 2 ** Math.min(attempts, 3)) + Math.random() * 400;
       retryTimer = setTimeout(get().connectWebSocket, delay);
     };
+  },
+
+  reconnectImmediately: () => {
+    clearTimeout(retryTimer);
+    retryAttempt = 0;
+    const { ws } = get();
+    if (ws && ws.readyState === 1) return;
+    if (ws) {
+      try { ws.close(); } catch {}
+    }
+    set({ ws: null, connectionState: 'connecting' });
+    get().connectWebSocket();
   },
 
   createRoom: (difficulty = 'medium', enableAbilities = true, coop = false) => {
@@ -983,14 +1016,22 @@ export const useLobbyStore = create((set, get) => ({
     }));
   },
 
-  sendProgress: (progress, strikes, mana) => {
+  sendProgress: (progress, strikes, mana, cellsLeft, total, formattedTime) => {
     const { ws, room, myMana } = get();
     if (!ws || ws.readyState !== 1 || !room) return;
 
     ws.send(JSON.stringify({
       type: 'UPDATE_PROGRESS',
-      payload: { progress, strikes, matchId: room.matchId,
-        hintsUsed: (room.difficulty === 'expert' ? 1 : room.difficulty === 'beginner' ? 3 : 2) - useGameStore.getState().hintsRemaining, mana: mana !== undefined ? mana : myMana }
+      payload: { 
+        progress, 
+        strikes, 
+        matchId: room.matchId,
+        cellsLeft,
+        total,
+        formattedTime,
+        hintsUsed: (room.difficulty === 'expert' ? 1 : room.difficulty === 'beginner' ? 3 : 2) - useGameStore.getState().hintsRemaining, 
+        mana: mana !== undefined ? mana : myMana 
+      }
     }));
   },
 

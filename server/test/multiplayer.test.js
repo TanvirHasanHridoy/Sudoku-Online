@@ -202,3 +202,35 @@ test('room code trims whitespace and allows join', async () => {
   assert.equal(joined.room.code, room.code);
 });
 
+test('cellsLeft broadcast, sequential finish placements, and spectator emote tag', async () => {
+  const host = await client(), guest = await client(), spec = await client();
+  host.send('CREATE_ROOM', {playerId: host.id});
+  const { room } = await host.next('ROOM_CREATED');
+  guest.send('JOIN_ROOM', { code: room.code, playerId: guest.id });
+  await guest.next('ROOM_JOINED');
+  spec.send('JOIN_ROOM', { code: room.code, playerId: spec.id, isSpectator: true });
+  await spec.next('ROOM_JOINED');
+
+  guest.send('TOGGLE_READY');
+  host.send('TOGGLE_READY');
+  host.send('START_GAME', { board: puzzle, solution });
+  const { room: started } = await host.next('GAME_STARTED');
+
+  // Verify progress update broadcasts cellsLeft and total
+  host.send('UPDATE_PROGRESS', { matchId: started.matchId, progress: 50, strikes: 0, cellsLeft: 16, total: 32 });
+  const prog = await guest.next('PROGRESS_UPDATED');
+  assert.equal(prog.cellsLeft, 16);
+  assert.equal(prog.total, 32);
+
+  // Verify spectator emote carries isSpectator: true
+  spec.send('SEND_EMOTE', { emoji: '🍿' });
+  const emote = await host.next('EMOTE_RECEIVED');
+  assert.equal(emote.emoji, '🍿');
+  assert.equal(emote.isSpectator, true);
+
+  // Host finishes first
+  host.send('UPDATE_PROGRESS', { matchId: started.matchId, progress: 100, strikes: 0, formattedTime: '01:23' });
+  const finished = await guest.next('PLAYER_FINISHED');
+  assert.equal(finished.place, 1);
+});
+

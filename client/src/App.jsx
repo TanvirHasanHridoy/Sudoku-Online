@@ -26,6 +26,10 @@ import {
   LogIn,
   LogOut,
   Settings,
+  Link2,
+  Share2,
+  Smile,
+  Eye,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import SudokuGrid from "./components/SudokuGrid";
@@ -144,6 +148,9 @@ export default function App() {
   const {
     ws,
     isConnected,
+    connectionState,
+    finishers,
+    reconnectImmediately,
     myPlayerId,
     myPlayerName,
     room,
@@ -158,6 +165,7 @@ export default function App() {
     toggleReady,
     startGame,
     sendProgress,
+    sendEmote,
     requestPause,
     votePause,
     votePlayAgain,
@@ -413,21 +421,23 @@ export default function App() {
     }
   }, [remoteAudioStream]);
 
-  // Floating Emotes
-  const [emotes, setEmotes] = useState([]);
+  // Active Reactions & Presets (Displayed in top banner with ZERO grid obstruction)
+  const [activeReactions, setActiveReactions] = useState([]);
+  const [showEmoteMenu, setShowEmoteMenu] = useState(false);
   const [activeTab, setActiveTab] = useState("lobby"); // 'lobby' | 'matchmaker'
 
-  // Trigger floating visual emotes on screen
-  function triggerEmoteVisual(emoji) {
+  // Trigger visual reactions in top banner
+  function triggerEmoteVisual(data) {
+    const payload = typeof data === "string" ? { emoji: data, name: "Player" } : data;
     const id = Date.now() + Math.random();
-    const left = Math.floor(Math.random() * 60) + 20;
-    setEmotes((prev) => [...prev, { id, emoji, left }]);
+    setActiveReactions((prev) => [...prev.slice(-3), { id, ...payload }]);
 
     setTimeout(() => {
-      setEmotes((prev) => prev.filter((e) => e.id !== id));
-    }, 1500);
+      setActiveReactions((prev) => prev.filter((e) => e.id !== id));
+    }, 3000);
   }
 
+  const [selectedSpectatorPlayerId, setSelectedSpectatorPlayerId] = useState(null);
   const hasRestoredRef = useRef(false);
   const isMeSpectator = !!room?.players?.find((p) => p.id === myPlayerId)
     ?.isSpectator;
@@ -444,9 +454,9 @@ export default function App() {
       connectWebSocket();
       initSocial();
 
-      // Emote float visual callback
-      setEmoteCallback((emoji) => {
-        triggerEmoteVisual(emoji);
+      // Reaction visual callback
+      setEmoteCallback((data) => {
+        triggerEmoteVisual(data);
       });
 
       // Attempt to restore a solo game in progress from localStorage
@@ -562,18 +572,19 @@ export default function App() {
 
   // Sync ELO progress update to socket whenever my board progress changes
   const { percent: myProgress, filled, total } = raceProgress(board, solution, originalCells);
+  const myCellsLeft = Math.max(0, total - filled);
   useEffect(() => {
     if (isConnected && room?.isGameStarted && !isMeSpectator && gameStatus !== "idle") {
       if (
         lastSentProgressRef.current !== myProgress ||
         lastSentStrikesRef.current !== strikes
       ) {
-        sendProgress(myProgress, strikes);
+        sendProgress(myProgress, strikes, undefined, myCellsLeft, total, formatTime(seconds));
         lastSentProgressRef.current = myProgress;
         lastSentStrikesRef.current = strikes;
       }
     }
-  }, [myProgress, strikes, isConnected, gameStatus, sendProgress, room]);
+  }, [myProgress, strikes, isConnected, gameStatus, sendProgress, room, myCellsLeft, total, seconds]);
 
   // Sync live gameplay state to server for spectators
   useEffect(() => {
@@ -1049,6 +1060,27 @@ export default function App() {
     }
   };
 
+  // Fast Wakeup on mobile/tab restore
+  useEffect(() => {
+    const handleOnline = () => {
+      useLobbyStore.getState().reconnectImmediately?.();
+    };
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        const { ws, isConnected } = useLobbyStore.getState();
+        if (!ws || !isConnected || ws.readyState > 1) {
+          useLobbyStore.getState().reconnectImmediately?.();
+        }
+      }
+    };
+    window.addEventListener("online", handleOnline);
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
+  }, []);
+
   // Clipboard copy helper
   const copyRoomCode = () => {
     if (!room) return;
@@ -1056,6 +1088,28 @@ export default function App() {
     setIsCopied(true);
     addToast("Room Code copied to clipboard!", "success");
     setTimeout(() => setIsCopied(false), 2000);
+  };
+
+  const [isLinkCopied, setIsLinkCopied] = useState(false);
+  const shareInviteLink = async () => {
+    if (!room) return;
+    const url = getJoinUrl();
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: "Sudoku-Online",
+          text: `Join my Sudoku ${room.coop ? "Co-op" : "Race"} room! Code: ${room.code}`,
+          url,
+        });
+        return;
+      } catch (err) {
+        if (err.name !== "AbortError") console.warn("Share error", err);
+      }
+    }
+    navigator.clipboard.writeText(url);
+    setIsLinkCopied(true);
+    addToast("1-Click invite link copied!", "success");
+    setTimeout(() => setIsLinkCopied(false), 2000);
   };
 
   // Room details helpers
@@ -1148,12 +1202,30 @@ export default function App() {
 
   console.log("App.jsx toasts list:", toasts);
 
-  // Render dual-board spectator dashboard (Responsive Layout)
+  // Render spectator dashboard (Unified Co-op single board & Multi-racer responsive switcher)
   const renderSpectatorView = () => {
     const activePlayersInRoom = room?.players?.filter(p => !p.isSpectator) || [];
+    const isSinglePlayer = activePlayersInRoom.length === 1;
     const playerA = activePlayersInRoom[0];
     const playerB = activePlayersInRoom[1];
-    const isSinglePlayer = activePlayersInRoom.length === 1;
+
+    if (activePlayersInRoom.length === 0) {
+      return (
+        <div className="max-w-md mx-auto my-16 p-8 glass-panel rounded-2xl border border-border-custom text-center space-y-4">
+          <div className="w-12 h-12 rounded-full bg-rose-500/10 text-rose-500 mx-auto flex items-center justify-center">
+            <X size={24} />
+          </div>
+          <h3 className="text-base font-bold text-text-custom">All players have left the room</h3>
+          <p className="text-xs opacity-60">The match has ended or the room was vacated.</p>
+          <button
+            onClick={() => exitToHome(() => { setActiveView("home"); setSeconds(0); })}
+            className="px-4 py-2 bg-accent-custom hover:bg-accent-hover text-white font-bold rounded-xl text-xs transition-all active:scale-95"
+          >
+            Return to Home
+          </button>
+        </div>
+      );
+    }
 
     const renderBoardOnly = (boardState, playerObj) => {
       const hasLeft = !playerObj || playerObj.disconnected;
@@ -1180,48 +1252,33 @@ export default function App() {
     };
 
     return (
-      <div className="max-w-6xl mx-auto px-2 sm:px-4 py-6 md:py-10 space-y-6">
+      <div className="max-w-6xl mx-auto px-2 sm:px-4 py-4 md:py-8 space-y-5">
         {/* Top Summary Header */}
         <div className="glass-panel p-4 rounded-2xl border border-border-custom/50 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div>
             <h2 className="text-lg font-bold text-accent-custom flex items-center gap-1.5">
               <Tv size={18} className="animate-pulse" /> Live Spectator Dashboard
             </h2>
-            <p className="text-xs opacity-60">Room: {room?.code} • Mode: {room?.coop ? "Co-op" : "Race"} • Difficulty: {room?.difficulty}</p>
+            <p className="text-xs opacity-60">
+              Room: {room?.code} • Mode: {room?.coop ? "Co-op" : "Race"} • Difficulty: {room?.difficulty}
+            </p>
           </div>
 
-          <div className="flex gap-4 text-xs flex-1 max-w-lg justify-end w-full sm:w-auto">
-            {/* Player A Progress Card */}
-            <div className="flex-1 bg-accent-glow/5 border border-border-custom/50 rounded-xl p-2.5">
-              <div className="flex justify-between font-bold mb-1">
-                <span className="truncate max-w-[100px]">{playerA ? playerA.name : "Waiting..."}</span>
-                <span>{playerA ? playerA.progress : 0}%</span>
-              </div>
-              <div className="w-full bg-accent-glow/30 h-1.5 rounded-full overflow-hidden mb-1.5">
-                <div className="bg-accent-custom h-full rounded-full" style={{ width: `${playerA ? playerA.progress : 0}%` }} />
-              </div>
-              <div className="flex justify-between text-[9px] opacity-65 font-bold">
-                <span>Lives: {playerA ? (3 - playerA.strikes) : 0}/3</span>
-                <span>{playerA?.disconnected ? "❌ Offline" : "🟢 Online"}</span>
-              </div>
-            </div>
-
-            {/* Player B Progress Card */}
-            {!isSinglePlayer && (
-              <div className="flex-1 bg-accent-glow/5 border border-border-custom/50 rounded-xl p-2.5">
-                <div className="flex justify-between font-bold mb-1">
-                  <span className="truncate max-w-[100px]">{playerB ? playerB.name : "Waiting..."}</span>
-                  <span>{playerB ? playerB.progress : 0}%</span>
-                </div>
-                <div className="w-full bg-accent-glow/30 h-1.5 rounded-full overflow-hidden mb-1.5">
-                  <div className="bg-accent-custom h-full rounded-full" style={{ width: `${playerB ? playerB.progress : 0}%` }} />
-                </div>
-                <div className="flex justify-between text-[9px] opacity-65 font-bold">
-                  <span>Lives: {playerB ? (3 - playerB.strikes) : 0}/3</span>
-                  <span>{playerB?.disconnected ? "❌ Offline" : "🟢 Online"}</span>
-                </div>
-              </div>
-            )}
+          {/* Spectator Quick Reactions Bar */}
+          <div className="flex items-center gap-1 bg-accent-glow/20 px-2.5 py-1.5 rounded-xl border border-border-custom/40">
+            <span className="text-[10px] font-bold text-accent-custom opacity-70 flex items-center gap-1 shrink-0">
+              <Eye size={12} /> React:
+            </span>
+            {["🍿", "👀", "👏", "🔥", "🤯", "🏁"].map((emoji) => (
+              <button
+                key={emoji}
+                onClick={() => sendEmote(emoji)}
+                className="px-1 py-0.5 hover:scale-125 transition-transform text-xs"
+                title={`React with ${emoji}`}
+              >
+                {emoji}
+              </button>
+            ))}
           </div>
 
           <button
@@ -1235,68 +1292,120 @@ export default function App() {
           </button>
         </div>
 
-        {/* Mobile View Switcher (< 1024px) */}
-        <div className="block lg:hidden space-y-4">
-          {!isSinglePlayer && (
-            <div className="flex bg-accent-glow/30 rounded-xl p-1 border border-border-custom/40">
-              <button
-                onClick={() => setMobileSpectatorTab("playerA")}
-                className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${mobileSpectatorTab === "playerA" ? "bg-panel-custom text-text-custom shadow-xs" : "opacity-60"}`}
-              >
-                👁️ View {playerA ? playerA.name : "Player A"}
-              </button>
-              <button
-                onClick={() => setMobileSpectatorTab("playerB")}
-                className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${mobileSpectatorTab === "playerB" ? "bg-panel-custom text-text-custom shadow-xs" : "opacity-60"}`}
-              >
-                👁️ View {playerB ? playerB.name : "Player B"}
-              </button>
+        {/* Live Podium summary if any players finished */}
+        {finishers && finishers.length > 0 && !room?.coop && (
+          <div className="glass-panel p-4 rounded-2xl border border-accent-custom/30 text-center space-y-2 max-w-lg mx-auto">
+            <h3 className="text-xs font-extrabold uppercase tracking-widest text-accent-custom flex items-center justify-center gap-1">
+              🏆 Final Standings
+            </h3>
+            <div className="flex flex-col gap-1.5">
+              {finishers.map((f, i) => (
+                <div key={f.playerId || i} className="flex items-center justify-between px-3 py-1.5 bg-accent-glow/20 rounded-xl border border-border-custom/40 text-xs font-bold">
+                  <span className="flex items-center gap-1.5">
+                    <span>{f.place === 1 ? '🥇' : f.place === 2 ? '🥈' : f.place === 3 ? '🥉' : `#${f.place}`}</span>
+                    <span className="text-text-custom">{f.name}</span>
+                  </span>
+                  {f.formattedTime && <span className="opacity-70 font-mono text-[11px]">{f.formattedTime}</span>}
+                </div>
+              ))}
             </div>
-          )}
-
-          <div className="flex justify-center">
-            {isSinglePlayer || mobileSpectatorTab === "playerA" ? (
-              <div className="flex flex-col items-center gap-2 w-full">
-                <p className="text-xs font-bold uppercase tracking-wider text-accent-custom">{playerA ? playerA.name : "Player A"}'s Board</p>
-                {renderBoardOnly(spectatedPlayerABoard, playerA)}
-              </div>
-            ) : (
-              <div className="flex flex-col items-center gap-2 w-full">
-                <p className="text-xs font-bold uppercase tracking-wider text-accent-custom">{playerB ? playerB.name : "Player B"}'s Board</p>
-                {renderBoardOnly(spectatedPlayerBBoard, playerB)}
-              </div>
-            )}
           </div>
-        </div>
+        )}
 
-        {/* Desktop View Side-by-Side (>= 1024px) */}
-        {isSinglePlayer ? (
-          <div className="flex flex-col items-center gap-3 max-w-[420px] mx-auto">
-            <div className="text-center">
-              <h3 className="text-sm font-extrabold uppercase tracking-widest text-accent-custom">{playerA ? playerA.name : "Player A"}</h3>
-              <p className="text-[10px] opacity-60">Progress: {playerA ? playerA.progress : 0}% • Lives: {playerA ? (3 - playerA.strikes) : 0}/3</p>
+        {/* CO-OP SPECTATOR VIEW: Single Unified Shared Board */}
+        {room?.coop ? (
+          <div className="flex flex-col items-center gap-4 max-w-[440px] mx-auto">
+            <div className="w-full flex items-center justify-between px-4 py-2 bg-accent-glow/20 border border-border-custom/50 rounded-xl text-xs font-bold">
+              <span className="text-accent-custom flex items-center gap-1.5">
+                🤝 Two-Player Co-op Shared Board
+              </span>
+              <span className="text-[11px] opacity-75">
+                Lives: {playerA ? 3 - playerA.strikes : 3}/3
+              </span>
             </div>
-            {renderBoardOnly(spectatedPlayerABoard, playerA)}
+            <div className="relative w-full p-1 rounded-2xl ring-2 ring-border-custom bg-panel-custom/30 shadow-inner">
+              <SudokuGrid
+                board={room.sharedBoard || room.board || Array(9).fill(null).map(() => Array(9).fill(null))}
+                selectedCell={null}
+                onCellClick={() => { }}
+                notes={{}}
+                originalCells={new Set()}
+                mistakes={[]}
+                shakingCell={null}
+                isSpectatingMode={true}
+                coopPointedCell={coopPointedCell}
+              />
+            </div>
           </div>
         ) : (
-          <div className="hidden lg:grid grid-cols-2 gap-8 items-start">
-            {/* Player A Board */}
-            <div className="flex flex-col items-center gap-3">
-              <div className="text-center">
-                <h3 className="text-sm font-extrabold uppercase tracking-widest text-accent-custom">{playerA ? playerA.name : "Player A"}</h3>
-                <p className="text-[10px] opacity-60">Progress: {playerA ? playerA.progress : 0}% • Lives: {playerA ? (3 - playerA.strikes) : 0}/3</p>
-              </div>
-              {renderBoardOnly(spectatedPlayerABoard, playerA)}
+          /* COMPETITIVE RACE SPECTATOR VIEW */
+          <div className="space-y-4">
+            {/* Racer Tab Switcher */}
+            <div className="flex bg-accent-glow/20 rounded-xl p-1 border border-border-custom/40 overflow-x-auto gap-1">
+              {activePlayersInRoom.map((p) => {
+                const isSelected = (selectedSpectatorPlayerId || playerA?.id) === p.id;
+                return (
+                  <button
+                    key={p.id}
+                    onClick={() => {
+                      setSelectedSpectatorPlayerId(p.id);
+                      startSpectating(p.id);
+                    }}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all shrink-0 flex items-center gap-1.5 ${
+                      isSelected
+                        ? "bg-panel-custom text-accent-custom shadow-xs border border-border-custom"
+                        : "opacity-60 hover:opacity-100"
+                    }`}
+                  >
+                    <span>👁️ {p.name}</span>
+                    <span className="text-[10px] opacity-75 tabular-nums">
+                      ({p.progress}% • {p.cellsLeft !== undefined ? `${p.cellsLeft}` : `${Math.max(0, (p.total || 32) - Math.round(((p.total || 32) * p.progress) / 100))}`} left)
+                    </span>
+                  </button>
+                );
+              })}
             </div>
 
-            {/* Player B Board */}
-            <div className="flex flex-col items-center gap-3">
-              <div className="text-center">
-                <h3 className="text-sm font-extrabold uppercase tracking-widest text-accent-custom">{playerB ? playerB.name : "Player B"}</h3>
-                <p className="text-[10px] opacity-60">Progress: {playerB ? playerB.progress : 0}% • Lives: {playerB ? (3 - playerB.strikes) : 0}/3</p>
+            {/* Desktop Side-by-Side View for 2 players */}
+            {!isSinglePlayer && activePlayersInRoom.length === 2 && !selectedSpectatorPlayerId ? (
+              <div className="hidden lg:grid grid-cols-2 gap-8 items-start">
+                <div className="flex flex-col items-center gap-3">
+                  <div className="text-center">
+                    <h3 className="text-sm font-extrabold uppercase tracking-widest text-accent-custom">{playerA ? playerA.name : "Player A"}</h3>
+                    <p className="text-[10px] opacity-60">Progress: {playerA ? playerA.progress : 0}% • Lives: {playerA ? (3 - playerA.strikes) : 0}/3</p>
+                  </div>
+                  {renderBoardOnly(spectatedPlayerABoard, playerA)}
+                </div>
+                <div className="flex flex-col items-center gap-3">
+                  <div className="text-center">
+                    <h3 className="text-sm font-extrabold uppercase tracking-widest text-accent-custom">{playerB ? playerB.name : "Player B"}</h3>
+                    <p className="text-[10px] opacity-60">Progress: {playerB ? playerB.progress : 0}% • Lives: {playerB ? (3 - playerB.strikes) : 0}/3</p>
+                  </div>
+                  {renderBoardOnly(spectatedPlayerBBoard, playerB)}
+                </div>
               </div>
-              {renderBoardOnly(spectatedPlayerBBoard, playerB)}
-            </div>
+            ) : null}
+
+            {/* Single Board or Selected Racer View */}
+            {(isSinglePlayer || selectedSpectatorPlayerId || activePlayersInRoom.length > 2) && (
+              <div className="flex flex-col items-center gap-3 max-w-[420px] mx-auto">
+                {(() => {
+                  const currentP = activePlayersInRoom.find(p => p.id === (selectedSpectatorPlayerId || playerA?.id)) || playerA;
+                  const currentBoard = currentP?.id === playerB?.id ? spectatedPlayerBBoard : spectatedPlayerABoard;
+                  return (
+                    <>
+                      <div className="text-center">
+                        <h3 className="text-sm font-extrabold uppercase tracking-widest text-accent-custom">{currentP?.name}</h3>
+                        <p className="text-[10px] opacity-60 font-mono">
+                          {currentP?.progress}% • {currentP?.cellsLeft !== undefined ? `${currentP?.cellsLeft}/${currentP?.total || 32} left` : ''} • Lives: {currentP ? (3 - currentP.strikes) : 0}/3
+                        </p>
+                      </div>
+                      {renderBoardOnly(currentBoard, currentP)}
+                    </>
+                  );
+                })()}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -1334,16 +1443,21 @@ export default function App() {
         </div>
       )}
 
-      {/* Visual Floating Emotes Overlay */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none z-50">
-        {!focus && emotes.map((e) => (
-          <span
-            key={e.id}
-            className="emoji-float"
-            style={{ left: `${e.left}%`, bottom: "20%" }}
+      {/* Non-intrusive Quick Reaction Toast Banner (Guaranteed ZERO board occlusion) */}
+      <div className="fixed top-16 right-4 z-50 flex flex-col gap-1.5 pointer-events-none max-w-xs select-none">
+        {!focus && activeReactions.map((r) => (
+          <div
+            key={r.id}
+            className={`px-3 py-1.5 rounded-full text-xs font-bold shadow-lg backdrop-blur-md border animate-scale-in flex items-center gap-1.5 ${
+              r.isSpectator
+                ? "bg-slate-900/95 text-emerald-400 border-emerald-500/40"
+                : "bg-slate-900/95 text-accent-custom border-accent-custom/40"
+            }`}
           >
-            {e.emoji}
-          </span>
+            {r.isSpectator && <span title="Spectator Reaction">👁️</span>}
+            <span className="opacity-75">{r.name || "Opponent"}:</span>
+            <span className="text-sm font-normal">{r.emoji}</span>
+          </div>
         ))}
       </div>
 
@@ -1502,10 +1616,20 @@ export default function App() {
               />
               <div className="flex items-center gap-1.5">
                 <div
-                  className={`w-1.5 h-1.5 rounded-full ${isConnected ? "bg-emerald-500 animate-pulse" : "bg-rose-500"}`}
+                  className={`w-1.5 h-1.5 rounded-full ${
+                    connectionState === "connected" || isConnected
+                      ? "bg-emerald-500 animate-pulse"
+                      : connectionState === "connecting"
+                      ? "bg-amber-500 animate-pulse"
+                      : "bg-rose-500"
+                  }`}
                 ></div>
                 <span className="text-[9px] font-semibold opacity-65">
-                  {isConnected ? `Online (${elo} ELO)` : "Offline"}
+                  {connectionState === "connected" || isConnected
+                    ? `Online (${elo} ELO)`
+                    : connectionState === "connecting"
+                    ? "Connecting..."
+                    : "Offline"}
                 </span>
                 {isSavingUsername && (
                   <RefreshCw size={10} className="animate-spin text-accent-custom ml-1 shrink-0" />
@@ -1875,7 +1999,8 @@ export default function App() {
                           className="w-full py-3 bg-accent-custom hover:bg-accent-hover text-white font-bold text-xs rounded-xl active:scale-[0.98] transition-all flex items-center justify-center gap-1.5 shadow-md shadow-accent-custom/10 cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
                         >
                           <PlayCircle size={14} fill="white" />
-                          Play Solo Game
+                          <span>Play Solo Game</span>
+                          <span className="text-[9px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded font-normal ml-1">Offline Ready</span>
                         </button>
                       </div>
 
@@ -1884,6 +2009,18 @@ export default function App() {
                         <span className="flex-shrink mx-4 text-[9px] uppercase tracking-wider opacity-45 font-bold">Or Host Room</span>
                         <div className="flex-grow border-t border-border-custom/25"></div>
                       </div>
+
+                      {/* Server Connection Status Alert */}
+                      {!isConnected && (
+                        <div className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-500 text-[10px] font-semibold">
+                          <RefreshCw size={11} className="animate-spin shrink-0" />
+                          <span>
+                            {connectionState === "connecting"
+                              ? "Connecting to server (cold-start takes ~20s)..."
+                              : "Server offline. Retrying connection..."}
+                          </span>
+                        </div>
+                      )}
 
                       {/* Create Room section */}
                       <div className="space-y-3">
@@ -1970,7 +2107,7 @@ export default function App() {
                             <button
                               onClick={copyRoomCode}
                               className="text-text-custom opacity-50 hover:opacity-100 transition-all p-1"
-                              title="Copy Code"
+                              title="Copy 6-digit Code"
                             >
                               {isCopied ? (
                                 <Check size={14} className="text-emerald-500" />
@@ -1979,6 +2116,14 @@ export default function App() {
                               )}
                             </button>
                           </div>
+                          <button
+                            onClick={shareInviteLink}
+                            className="mt-2 py-1 px-2.5 bg-accent-glow hover:bg-accent-glow/70 border border-border-custom rounded-lg text-[11px] font-bold flex items-center gap-1.5 transition-all text-accent-custom active:scale-95"
+                            title="Share 1-Click Invite Link"
+                          >
+                            {isLinkCopied ? <Check size={12} className="text-emerald-500" /> : <Link2 size={12} />}
+                            <span>{isLinkCopied ? "Link Copied!" : "Share Invite Link"}</span>
+                          </button>
                         </div>
                         <div
                           className="bg-white p-1.5 rounded-lg border border-border-custom shadow-xs"
@@ -2507,6 +2652,37 @@ export default function App() {
 
                 {/* Right Group: Action Buttons (Pause & Exit) */}
                 <div className="flex items-center gap-1.5">
+                  {room && (
+                    <div className="relative">
+                      <button
+                        onClick={() => setShowEmoteMenu((prev) => !prev)}
+                        className="p-1 rounded-lg bg-accent-glow border border-border-custom hover:border-accent-custom text-text-custom transition-all active:scale-95"
+                        title="Quick Reactions"
+                      >
+                        <Smile size={11} className="text-accent-custom" />
+                      </button>
+                      {showEmoteMenu && (
+                        <div className="absolute right-0 top-full mt-1.5 z-50 glass-panel p-1.5 rounded-xl border border-border-custom shadow-xl flex flex-wrap gap-1 w-44 select-none">
+                          {(room.coop
+                            ? ["👍", "⚠️", "🔍", "📦 Box 5", "📐 Corners", "🤝 Team!"]
+                            : ["🔥", "👏", "⚡", "💡", "😱", "🫠", "So close!", "GG! 🏁"]
+                          ).map((preset) => (
+                            <button
+                              key={preset}
+                              onClick={() => {
+                                sendEmote(preset);
+                                setShowEmoteMenu(false);
+                              }}
+                              className="px-2 py-1 bg-accent-glow/40 hover:bg-accent-custom hover:text-white rounded-lg text-xs font-bold transition-all text-text-custom"
+                            >
+                              {preset}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {room && room.isGameStarted && (
                     <button
                       onClick={requestPause}
@@ -2583,12 +2759,21 @@ export default function App() {
                   <div className="flex-1 flex items-center gap-2 min-w-0 px-1">
                     <div className="flex-1 bg-accent-glow/50 h-2 rounded-full overflow-hidden relative">
                       <div
-                        className="bg-accent-custom h-full rounded-full transition-all duration-300"
+                        className={`h-full rounded-full transition-all duration-300 ${
+                          activeOpponent.progress >= 85
+                            ? "bg-rose-500 animate-pulse shadow-[0_0_10px_rgba(244,63,94,0.8)]"
+                            : activeOpponent.progress >= 60
+                            ? "bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]"
+                            : "bg-accent-custom"
+                        }`}
                         style={{ width: `${activeOpponent.progress}%` }}
                       />
                     </div>
                     <span className="font-bold text-[10px] text-accent-custom shrink-0 tabular-nums">
-                      {activeOpponent.progress}%
+                      {activeOpponent.progress}% •{" "}
+                      {activeOpponent.cellsLeft !== undefined
+                        ? `${activeOpponent.cellsLeft}/${activeOpponent.total || 32} left`
+                        : `${Math.max(0, (activeOpponent.total || 32) - Math.round(((activeOpponent.total || 32) * activeOpponent.progress) / 100))}/${activeOpponent.total || 32} left`}
                     </span>
                   </div>
 
@@ -2647,16 +2832,58 @@ export default function App() {
                 </div>
               )}
 
+              {/* Leaderboard Ticker Ribbon (Single compact ribbon for multi-player races) */}
+              {finishers && finishers.length > 0 && !room?.coop && (
+                <div className="w-full max-w-[460px] mb-2 px-3 py-1.5 bg-accent-glow/40 border border-accent-custom/30 rounded-xl text-xs font-bold flex items-center justify-between gap-2 shadow-xs select-none">
+                  <div className="flex items-center gap-3 overflow-x-auto truncate">
+                    {finishers.map((f, idx) => (
+                      <span key={f.playerId || idx} className="flex items-center gap-1 shrink-0 text-text-custom">
+                        <span>{f.place === 1 ? '🥇' : f.place === 2 ? '🥈' : f.place === 3 ? '🥉' : `#${f.place}`}</span>
+                        <span className="text-accent-custom font-bold">{f.name}</span>
+                        {f.formattedTime && <span className="opacity-60 text-[10px]">({f.formattedTime})</span>}
+                      </span>
+                    ))}
+                  </div>
+                  <span className="text-[10px] text-accent-custom opacity-75 shrink-0 font-medium">
+                    {Math.max(0, (room?.players?.filter(p => !p.isSpectator).length || 2) - finishers.length)} spot(s) left!
+                  </span>
+                </div>
+              )}
+
+              {/* End-Game Urgency Badge */}
+              {Boolean(
+                activeOpponent &&
+                !room?.coop &&
+                activeOpponent.cellsLeft !== undefined &&
+                activeOpponent.cellsLeft <= 5 &&
+                activeOpponent.cellsLeft > 0 &&
+                !activeOpponent.hasFinishedGame
+              ) && (
+                <div className="w-full max-w-[460px] mb-2 py-1 px-3 bg-rose-500/15 border border-rose-500/40 text-rose-500 text-xs font-bold rounded-lg flex items-center justify-center gap-1.5 animate-pulse select-none">
+                  <span>⚠️ Opponent is close — only {activeOpponent.cellsLeft} cells left!</span>
+                </div>
+              )}
+
               {/* Sudoku Board Grid Wrapper with active spectator outline and spectator eye count badge */}
               <div
-                className={`relative w-full max-w-[460px] p-1 rounded-2xl transition-all duration-500 ${spectatingPlayerId
-                  ? hasSpectatedPlayerLeft
-                    ? "ring-4 ring-zinc-500/20 bg-zinc-500/5"
-                    : "ring-4 ring-rose-500/30 bg-rose-500/5"
-                  : (myActiveSpectators || []).length > 0
+                className={`relative w-full max-w-[460px] p-1 rounded-2xl transition-all duration-500 ${
+                  Boolean(
+                    activeOpponent &&
+                    !room?.coop &&
+                    activeOpponent.cellsLeft !== undefined &&
+                    activeOpponent.cellsLeft <= 5 &&
+                    activeOpponent.cellsLeft > 0 &&
+                    !activeOpponent.hasFinishedGame
+                  )
+                    ? "ring-4 ring-rose-500/60 shadow-[0_0_20px_rgba(244,63,94,0.3)] animate-pulse"
+                    : spectatingPlayerId
+                    ? hasSpectatedPlayerLeft
+                      ? "ring-4 ring-zinc-500/20 bg-zinc-500/5"
+                      : "ring-4 ring-rose-500/30 bg-rose-500/5"
+                    : (myActiveSpectators || []).length > 0
                     ? "ring-4 ring-emerald-500/30 bg-emerald-500/5"
                     : ""
-                  }`}
+                }`}
               >
                 {/* Active Spectator Eye Badge inside corner of the grid */}
                 {(myActiveSpectators || []).length > 0 && !spectatingPlayerId && (
@@ -3036,7 +3263,7 @@ export default function App() {
                                   <button
                                     onClick={copyRoomCode}
                                     className="text-text-custom opacity-50 hover:opacity-100 transition-all p-1"
-                                    title="Copy Code"
+                                    title="Copy 6-digit Code"
                                   >
                                     {isCopied ? (
                                       <Check size={14} className="text-emerald-500" />
@@ -3045,6 +3272,14 @@ export default function App() {
                                     )}
                                   </button>
                                 </div>
+                                <button
+                                  onClick={shareInviteLink}
+                                  className="mt-2 py-1 px-2.5 bg-accent-glow hover:bg-accent-glow/70 border border-border-custom rounded-lg text-[11px] font-bold flex items-center gap-1.5 transition-all text-accent-custom active:scale-95"
+                                  title="Share 1-Click Invite Link"
+                                >
+                                  {isLinkCopied ? <Check size={12} className="text-emerald-500" /> : <Link2 size={12} />}
+                                  <span>{isLinkCopied ? "Link Copied!" : "Share Invite Link"}</span>
+                                </button>
                               </div>
 
                               {/* Share QR Code Vector */}
@@ -3182,22 +3417,47 @@ export default function App() {
 
                                       {/* Live completion progress */}
                                       {room.isGameStarted && (
-                                        <>
-                                          <div className="flex items-center justify-between text-[10px] mb-1 font-semibold opacity-85">
-                                            <span>Board Progress</span>
-                                            <span>
-                                              {isMe ? myProgress : p.progress}%
-                                            </span>
-                                          </div>
-                                          <div className="w-full bg-accent-glow/50 h-1.5 rounded-full overflow-hidden">
-                                            <div
-                                              className="bg-accent-custom h-full rounded-full transition-all duration-300"
-                                              style={{
-                                                width: `${isMe ? myProgress : p.progress}%`,
-                                              }}
-                                            />
-                                          </div>
-                                        </>
+                                        (() => {
+                                          const pFinisher = (finishers || []).find((f) => f.playerId === p.id);
+                                          if (pFinisher) {
+                                            return (
+                                              <div className="flex items-center justify-between text-[11px] font-bold text-accent-custom py-1 bg-accent-glow/20 px-2 rounded-lg border border-accent-custom/20">
+                                                <span>{pFinisher.place === 1 ? '🥇 1st Place' : pFinisher.place === 2 ? '🥈 2nd Place' : pFinisher.place === 3 ? '🥉 3rd Place' : `#${pFinisher.place}`}</span>
+                                                {pFinisher.formattedTime && <span className="text-[10px] opacity-75 font-mono">{pFinisher.formattedTime}</span>}
+                                              </div>
+                                            );
+                                          }
+                                          const prog = isMe ? myProgress : p.progress;
+                                          const cellsDisplay = isMe
+                                            ? `${myCellsLeft}/${total || 32} left`
+                                            : p.cellsLeft !== undefined
+                                            ? `${p.cellsLeft}/${p.total || 32} left`
+                                            : `${Math.max(0, (p.total || 32) - Math.round(((p.total || 32) * p.progress) / 100))}/${p.total || 32} left`;
+                                          return (
+                                            <>
+                                              <div className="flex items-center justify-between text-[10px] mb-1 font-semibold opacity-85">
+                                                <span>Board Progress</span>
+                                                <span className="tabular-nums font-mono text-[9px]">
+                                                  {prog}% • {cellsDisplay}
+                                                </span>
+                                              </div>
+                                              <div className="w-full bg-accent-glow/50 h-1.5 rounded-full overflow-hidden">
+                                                <div
+                                                  className={`h-full rounded-full transition-all duration-300 ${
+                                                    prog >= 85
+                                                      ? "bg-rose-500 animate-pulse shadow-[0_0_8px_rgba(244,63,94,0.7)]"
+                                                      : prog >= 60
+                                                      ? "bg-amber-500"
+                                                      : "bg-accent-custom"
+                                                  }`}
+                                                  style={{
+                                                    width: `${prog}%`,
+                                                  }}
+                                                />
+                                              </div>
+                                            </>
+                                          );
+                                        })()
                                       )}
                                     </div>
                                   );

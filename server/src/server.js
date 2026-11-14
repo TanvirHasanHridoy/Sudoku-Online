@@ -42,7 +42,7 @@ const connectedClients = new Map();     // Map<playerId, { id, socket, name, elo
 const matchmakingQueue = [];            // Array of { playerId, name, elo, difficulty, socket, queuedAt }
 
 // Competitive disconnect tracking registries
-const graceMs = Number(process.env.SUDOKU_GRACE_MS || 30000);
+const graceMs = Number(process.env.SUDOKU_GRACE_MS || 15000); // 15 seconds grace period
 const lobbyGraceMs = Number(process.env.SUDOKU_LOBBY_GRACE_MS || (process.env.SUDOKU_GRACE_MS ? process.env.SUDOKU_GRACE_MS : 180000)); // 3 minutes for lobby so app switching doesn't kill room
 const heartbeat = setInterval(() => {
   for (const socket of wss.clients) {
@@ -252,15 +252,19 @@ function getSanitizedRoom(room) {
     board: room.board,
     isGameStarted: room.isGameStarted,
     isPaused: room.isPaused,
+    autoPausedFor: room.autoPausedFor || null,
     pauseVotes: room.pauseVotes,
     playAgainVotes: room.playAgainVotes,
     isMatchmakingRoom: !!room.isMatchmakingRoom,
+    finishers: room.finishers || [],
     players: room.players.map(p => ({
       id: p.id,
       name: p.name,
       avatar: p.avatar || 'apex',
       isReady: p.isReady,
       progress: p.progress,
+      cellsLeft: p.cellsLeft,
+      total: p.total,
       strikes: p.strikes,
       mana: p.mana || 0,
       isSpectator: p.isSpectator,
@@ -319,6 +323,8 @@ wss.on('connection', (ws) => {
             solution: null,
             isGameStarted: false,
             isPaused: false,
+            autoPausedFor: null,
+            finishers: [],
             pauseVotes: {},
             pauseRequesterId: null,        // tracks who asked for the current pause vote
             lastPauseRequestTime: 0,       // unix ms — enforces 20s server-side cooldown
@@ -403,6 +409,10 @@ wss.on('connection', (ws) => {
             }
             clearTimeout(seat.disconnectTimer);
             seat.reconnectBy = null;
+            if (room.autoPausedFor === playerId) {
+              room.autoPausedFor = null;
+              room.isPaused = false;
+            }
             Object.assign(seat, { socket: ws, disconnected: false, isVoiceJoined: false, isVoiceMuted: false });
             currentPlayer = seat;
             connectedClients.set(playerId, registration);
@@ -507,9 +517,11 @@ wss.on('connection', (ws) => {
           room.solution = solution;
           room.isGameStarted = true;
           room.isPaused = false;
+          room.autoPausedFor = null;
+          room.finishers = [];
           room.pauseVotes = {};
           room.playAgainVotes = {};
-          room.players.forEach(p => { p.progress = 0; p.strikes = 0; p.mana = 0; p.hasFinishedGame = false; });
+          room.players.forEach(p => { p.progress = 0; p.cellsLeft = undefined; p.total = undefined; p.strikes = 0; p.mana = 0; p.hasFinishedGame = false; });
 
           broadcastToRoom(currentRoomCode, {
             type: 'GAME_STARTED',
@@ -533,13 +545,15 @@ wss.on('connection', (ws) => {
           if (!room || !currentPlayer) return;
 
           if (payload.matchId !== room.matchId || currentPlayer.isSpectator || currentPlayer.hasFinishedGame || room.coop) return;
-          const { progress, strikes, mana } = payload;
+          const { progress, strikes, mana, cellsLeft, total } = payload;
           if (!Number.isFinite(progress) || progress < 0 || progress > 100 || !Number.isInteger(strikes) || strikes < 0) return;
           const wasEliminated = currentPlayer.strikes < 3 && strikes >= 3;
           const wasFinished = currentPlayer.progress < 100 && progress >= 100;
 
           currentPlayer.progress = progress;
           currentPlayer.strikes = strikes;
+          if (cellsLeft !== undefined) currentPlayer.cellsLeft = cellsLeft;
+          if (total !== undefined) currentPlayer.total = total;
           if (mana !== undefined) {
             currentPlayer.mana = mana;
           }
@@ -552,6 +566,20 @@ wss.on('connection', (ws) => {
             settle(room, currentPlayer, wasEliminated ? 'lost' : 'won', delta);
           }
 
+          let finisherInfo = null;
+          if (wasFinished) {
+            room.finishers = room.finishers || [];
+            const place = room.finishers.length + 1;
+            finisherInfo = {
+              playerId: currentPlayer.id,
+              name: currentPlayer.name,
+              place,
+              result: 'won',
+              formattedTime: payload.formattedTime || null
+            };
+            room.finishers.push(finisherInfo);
+          }
+
           broadcastToRoom(currentRoomCode, {
             type: 'PROGRESS_UPDATED',
             payload: {
@@ -559,7 +587,9 @@ wss.on('connection', (ws) => {
               progress,
               strikes,
               mana: currentPlayer.mana || 0,
-              hasFinishedGame: !!currentPlayer.hasFinishedGame
+              hasFinishedGame: !!currentPlayer.hasFinishedGame,
+              cellsLeft: currentPlayer.cellsLeft,
+              total: currentPlayer.total
             }
           });
 
@@ -572,14 +602,10 @@ wss.on('connection', (ws) => {
                 result: 'lost'
               }
             }, currentPlayer.id);
-          } else if (wasFinished) {
+          } else if (wasFinished && finisherInfo) {
             broadcastToRoom(currentRoomCode, {
               type: 'PLAYER_FINISHED',
-              payload: {
-                playerId: currentPlayer.id,
-                name: currentPlayer.name,
-                result: 'won'
-              }
+              payload: finisherInfo
             }, currentPlayer.id);
           }
           break;
@@ -622,6 +648,7 @@ wss.on('connection', (ws) => {
             payload: {
               playerId: currentPlayer.id,
               name: currentPlayer.name,
+              isSpectator: !!currentPlayer.isSpectator,
               emoji
             }
           }, currentPlayer.id); // Don't bounce it back to the sender
@@ -1621,6 +1648,10 @@ wss.on('connection', (ws) => {
     currentPlayer.isVoiceMuted = false;
     broadcastToRoom(room.code, {type:'VOICE_STATE_UPDATED', payload:{playerId:currentPlayer.id, isJoined:false, isMuted:false}});
     currentPlayer.disconnected = true;
+    if (room.isGameStarted && !currentPlayer.isSpectator && !room.isPaused && room.players.filter(p => !p.isSpectator).length === 2) {
+      room.isPaused = true;
+      room.autoPausedFor = currentPlayer.id;
+    }
     const delay = room.isGameStarted && !currentPlayer.isSpectator ? graceMs : lobbyGraceMs;
     currentPlayer.reconnectBy = Date.now() + delay;
     broadcastToRoom(room.code, { type: 'PLAYER_DISCONNECTED', payload: {

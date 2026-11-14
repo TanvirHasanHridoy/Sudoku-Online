@@ -62,3 +62,33 @@ On branch `fix/coop-and-challenge-mode`:
 * **Verification:** Full regression test suite passed (12/12 tests, including expired challenge validation and whitespace-trimmed room joins). Client production build succeeded cleanly (`npm run build`).
 * **Remaining limitations:** Live multiplayer sessions still rely on active WebSocket connection to the game server. Challenged players must solve the identical puzzle on the client. Both players must be connected to the same server deployment (e.g. both on local or both on production).
 
+## 2026-11-14 · Multiplayer UX Enhancements, 15s Grace, Live Progress, and Spectator Suite
+
+On branch `feature/multiplayer-ux-and-connection`:
+* **Backend Connection Guarding & Room Sharing:**
+  - Solo mode is badged as "Offline Ready" and remains instantly accessible.
+  - Multiplayer and Co-op options show an animated connecting state (`connectionState: 'connecting'`) and a friendly cold-start notice during server spin-ups.
+  - Added a dedicated 1-Click Invite Link button (`Share Invite Link`) beside the 6-digit room code, integrating native `navigator.share` on mobile and clipboard copying on desktop.
+* **Live Progress (`84% • 5/32 cells left`) & End-Game Urgency:**
+  - `UPDATE_PROGRESS` and `PROGRESS_UPDATED` payloads now transmit `cellsLeft` and `total` empty cells.
+  - Opponent progress bars dynamically scale colors: standard theme accent (< 60%), electric amber (60%–84%), and pulsing hot crimson (>= 85%).
+  - Added peripheral warning aura (`ring-4 ring-rose-500/60 shadow animate-pulse`) and status pill when an opponent reaches $\le 5$ cells remaining.
+* **Single Leaderboard Ticker Ribbon & Opponent Finish Audio:**
+  - Replaced stacking modal banners with a compact, fixed-height ribbon above the board displaying real-time placements (`🥇 Alex (03:42) • 🥈 Jordan (04:15) — 1 spot left!`). Finished players in the player list switch to medal pills.
+  - Added a retro 3-tone chiptune alert (`playSound.opponentFinished()`) when any competitor solves the board.
+* **15-Second Disconnect Grace & Instant Wakeup:**
+  - Disconnect grace period adjusted to 15 seconds (`graceMs = 15000`).
+  - Added automatic match pausing in 1v1 friendly and co-op matches when a player disconnects.
+  - Added instant tab wakeup listeners (`visibilitychange` and `online`) to reconnect immediately without waiting for backoff timers.
+* **Enhanced Spectator Dashboard & Zero-Interference Reactions:**
+  - Co-op rooms render a single unified board with partner cell pointers (`coopPointedCell`).
+  - Competitive race rooms provide a multi-racer tab switcher allowing spectators to toggle between any active competitor.
+  - Spectator dashboard includes a quick reaction bar (`🍿, 👀, 👏, 🔥, 🤯, 🏁`) and final standings podium.
+  - All in-game quick presets and spectator reactions display in a top non-blocking notification banner tagged with an `👁️` eye icon when sent by spectators, guaranteeing 0% grid or keypad occlusion on mobile screens.
+* **Verification:**
+  - Node test suite passed all 13 tests (`npm test`), verifying `cellsLeft` broadcast, sequential finish placements, and spectator emote tags.
+  - Client production build succeeded cleanly (`npm run build --prefix client`).
+* **Remaining limitations:**
+  - Live multiplayer rooms are held in memory on the active server process; server restarts reset active lobbies. Free hosting spin-up delays remain subject to cloud provider cold-start timers.
+
+

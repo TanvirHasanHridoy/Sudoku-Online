@@ -248,29 +248,49 @@ export const playSound = {
     try {
       const ctx = getAudioContext();
       const now = ctx.currentTime;
-      
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
-      
       osc.type = 'triangle';
-      osc.frequency.setValueAtTime(1046.50, now); // C6 high blip
-      
+      osc.frequency.setValueAtTime(1046.50, now);
       osc.connect(gain);
       gain.connect(ctx.destination);
-      
-      // Extremely quiet (0.035) so it doesn't disturb player
       gain.gain.setValueAtTime(0, now);
-      gain.gain.linearRampToValueAtTime(0.035, now + 0.005);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.06);
-      
+      gain.gain.linearRampToValueAtTime(0.06, now + 0.005);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.07);
       osc.start(now);
-      osc.stop(now + 0.065);
+      osc.stop(now + 0.08);
     } catch (e) {
-      console.warn('[Audio Synth] Failed to play opponent correct cue', e);
+      console.warn('[Audio Synth] Failed to play opponent correct pop', e);
     }
   },
 
-  // 8. Opponent Strike: Distant muffled alarm alert (detuned square wave, low volume)
+  // 8. Opponent Finished: Crisp, urgent 3-tone retro alert (G5 -> E5 -> C5)
+  opponentFinished: (enabled = true) => {
+    if (!enabled) return;
+    try {
+      const ctx = getAudioContext();
+      const now = ctx.currentTime;
+      const notes = [783.99, 659.25, 523.25]; // G5, E5, C5
+      notes.forEach((freq, idx) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(freq, now + idx * 0.08);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        const noteStart = now + idx * 0.08;
+        gain.gain.setValueAtTime(0, noteStart);
+        gain.gain.linearRampToValueAtTime(0.12, noteStart + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.0001, noteStart + 0.18);
+        osc.start(noteStart);
+        osc.stop(noteStart + 0.19);
+      });
+    } catch (e) {
+      console.warn('[Audio Synth] Failed to play opponent finish alert', e);
+    }
+  },
+
+  // 9. Opponent Strike: Distant muffled alarm alert (detuned square wave, low volume)
   opponentStrike: (enabled = true) => {
     if (!enabled) return;
     try {
