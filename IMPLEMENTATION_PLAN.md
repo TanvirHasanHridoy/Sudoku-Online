@@ -206,13 +206,13 @@ Instead of stacking banners, use a **Single Fixed-Height Leaderboard Ribbon** do
 
 ## 4. Phased Implementation Roadmap
 
-| Phase | Scope | Deliverables |
-| :--- | :--- | :--- |
-| **Phase 1** | **Connection Guarding & Room Sharing** | Server status indicators (Connecting/Online), disabled states with friendly cold-start notices, dual-action Room Code copying vs 1-Click Link (`/?room=`) + Web Share. |
-| **Phase 2** | **Live Progress & Dynamic Urgency** | `cellsLeft` tracking (`84% • 5/32 cells left`), dynamic progress bar color stages, peripheral urgency aura. |
-| **Phase 3** | **Finish Alerts & 15s Resilience** | Single non-stacking Leaderboard Ticker Ribbon for 2–4+ player races, chiptune finish alert, 15s disconnect grace period, auto-pause on disconnect, and instant tab wakeup. |
-| **Phase 4** | **Spectator Suite** | Single-board Co-op spectator view, multi-racer carousel for competitive spectator mode, spectator game-over podium & rematch follow. |
-| **Phase 5** | **Preset Reactions & Chat** | Header-anchored quick-reaction preset menu (lobby & in-game), zero grid interference on mobile, optional spectator/lobby text drawer. |
+| Phase | Scope | Deliverables | Status |
+| :--- | :--- | :--- | :--- |
+| **Phase 1** | **Connection Guarding & Room Sharing** | Server status indicators (Connecting/Online), disabled states with friendly cold-start notices, dual-action Room Code copying vs 1-Click Link (`/?room=`) + Web Share. | **Completed** ✅ |
+| **Phase 2** | **Live Progress & Dynamic Urgency** | `cellsLeft` tracking (`84% • 5/32 cells left`), dynamic progress bar color stages, peripheral urgency aura. | **Completed** ✅ |
+| **Phase 3** | **Finish Alerts & 15s Resilience** | Single non-stacking Leaderboard Ticker Ribbon for 2–4+ player races, chiptune finish alert, 15s disconnect grace period, auto-pause on disconnect, and instant tab wakeup. | **Completed** ✅ |
+| **Phase 4** | **Spectator Suite** | Single-board Co-op spectator view, multi-racer carousel for competitive spectator mode, spectator game-over podium & rematch follow. Eliminated player overlay & header sync. | **Completed** ✅ |
+| **Phase 5** | **Preset Reactions & Chat** | Header-anchored quick-reaction preset menu (lobby & in-game), zero grid interference on mobile, spectator cheering bar, lobby banter feed & quick message drawers. | **Completed** ✅ |
 
 ---
 
