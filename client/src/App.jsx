@@ -337,6 +337,15 @@ export default function App() {
     return (p.progress >= 85 || (oppLeft <= 5 && oppLeft > 0));
   });
 
+  const anyOpponentWarning = !anyOpponentClose && room?.players?.find((p) => {
+    if (p.id === myPlayerId || p.isSpectator || p.hasFinishedGame || p.strikes >= 3 || p.result === 'lost') return false;
+    const oppTotal = p.total || 32;
+    const oppLeft = p.cellsLeft !== undefined
+      ? p.cellsLeft
+      : Math.max(0, oppTotal - Math.round((oppTotal * (p.progress || 0)) / 100));
+    return (p.progress >= 60 || (oppLeft <= 10 && oppLeft > 0));
+  });
+
   const opponentCellsRemaining = anyOpponentClose
     ? (anyOpponentClose.cellsLeft !== undefined
         ? anyOpponentClose.cellsLeft
@@ -346,9 +355,18 @@ export default function App() {
   const isOpponentClose = Boolean(
     anyOpponentClose &&
     !room?.coop &&
-    activeView === "game" &&
+    activeView !== "home" &&
     gameStatus === "playing"
   );
+
+  const isOpponentWarning = Boolean(
+    anyOpponentWarning &&
+    !room?.coop &&
+    activeView !== "home" &&
+    gameStatus === "playing"
+  );
+
+  const boardUrgency = isOpponentClose ? 'critical' : isOpponentWarning ? 'warning' : null;
 
   const deadline = localReconnectBy || activeOpponent?.reconnectBy;
   useEffect(() => {
@@ -3150,12 +3168,21 @@ export default function App() {
                   </span>
                 </div>
               )}
+              {isOpponentWarning && anyOpponentWarning && (
+                <div className="w-full max-w-[460px] mb-2 py-1 px-3 bg-amber-500/10 border border-amber-500/30 text-amber-500 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 select-none shadow-xs">
+                  <span>
+                    ⚡ {anyOpponentWarning.name} is picking up speed ({anyOpponentWarning.progress}% completed)
+                  </span>
+                </div>
+              )}
 
               {/* Sudoku Board Grid Wrapper with active spectator outline and spectator eye count badge */}
               <div
                 className={`relative w-full max-w-[460px] p-1 rounded-2xl transition-all duration-500 ${
                   isOpponentClose
-                    ? "ring-4 ring-rose-500/80 shadow-[0_0_30px_rgba(244,63,94,0.35)] animate-pulse"
+                    ? "ring-4 ring-rose-500 shadow-[0_0_35px_rgba(244,63,94,0.5)] animate-pulse"
+                    : isOpponentWarning
+                    ? "ring-4 ring-amber-500/70 shadow-[0_0_20px_rgba(245,158,11,0.3)]"
                     : spectatingPlayerId
                     ? hasSpectatedPlayerLeft
                       ? "ring-4 ring-zinc-500/20 bg-zinc-500/5"
@@ -3212,6 +3239,7 @@ export default function App() {
                   }
                   isSpectatingMode={!!(spectatingPlayerId || isMeSpectator)}
                   coopPointedCell={room?.coop ? coopPointedCell : null}
+                  urgency={boardUrgency}
                 />
                 {hasSpectatedPlayerLeft && (
                   <div className="absolute inset-0 bg-zinc-950/80 backdrop-blur-sm rounded-xl flex flex-col items-center justify-center text-center p-6 z-20 animate-fade-in border border-border-custom">

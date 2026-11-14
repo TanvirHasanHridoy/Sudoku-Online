@@ -8,7 +8,8 @@ export default function SudokuGrid({
   mistakes = {},
   shakingCell = null,
   isSpectatingMode = false,
-  coopPointedCell = null
+  coopPointedCell = null,
+  urgency = null
 }) {
   // Check if a cell is highlighted (same row, col, or 3x3 subgrid)
   const isCellHighlighted = (row, col) => {
@@ -36,9 +37,21 @@ export default function SudokuGrid({
     return selVal === cellValue && !(selRow === row && selCol === col);
   };
 
+  const borderClasses = urgency === 'critical'
+    ? "border-2 border-rose-500 shadow-[0_0_20px_rgba(244,63,94,0.55)] animate-pulse"
+    : urgency === 'warning'
+    ? "border-2 border-amber-500/80 shadow-[0_0_12px_rgba(245,158,11,0.35)]"
+    : "border border-border-custom";
+
+  const subgridDividerClasses = urgency === 'critical'
+    ? "bg-rose-500/60"
+    : urgency === 'warning'
+    ? "bg-amber-500/50"
+    : "bg-border-subgrid";
+
   return (
-    <div data-board className="w-full max-w-[460px] aspect-square bg-grid-custom rounded-xl p-1 shadow-inner border border-border-custom">
-      <div className="grid grid-cols-3 grid-rows-3 h-full w-full gap-[3px] bg-border-subgrid rounded-lg overflow-hidden">
+    <div data-board className={`w-full max-w-[460px] aspect-square bg-grid-custom rounded-xl p-1 shadow-inner transition-all duration-500 ${borderClasses}`}>
+      <div className={`grid grid-cols-3 grid-rows-3 h-full w-full gap-[3px] rounded-lg overflow-hidden transition-colors duration-500 ${subgridDividerClasses}`}>
         {Array.from({ length: 9 }).map((_, boxIndex) => {
           const boxRow = Math.floor(boxIndex / 3);
           const boxCol = boxIndex % 3;

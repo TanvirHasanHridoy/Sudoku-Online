@@ -146,4 +146,29 @@ On branch `feature/multiplayer-ux-and-connection`:
 * **Remaining limitations:**
   - Voice channels require WebRTC support and microphone permissions on supported browsers.
 
+## 2026-11-14 · Multi-Stage Board Border Visual Indications & Intensity Escalation
+
+On branch `feature/multiplayer-ux-and-connection`:
+* **Sudoku Board Border Visual Escalation:**
+  - Updated `client/src/components/SudokuGrid.jsx` with an `urgency` prop accepting `null | 'warning' | 'critical'`.
+  - **Warning Stage (Opponent $\ge 60\%$ or $\le 10$ cells remaining):**
+    - Board border transitions from neutral theme border to glowing amber (`border-2 border-amber-500/80 shadow-[0_0_12px_rgba(245,158,11,0.35)]`).
+    - 3x3 subgrid divider lines warm to amber (`bg-amber-500/50`).
+    - Outer wrapper ring reflects amber (`ring-4 ring-amber-500/70 shadow-[0_0_20px_rgba(245,158,11,0.3)]`).
+    - Top status pill warns: `⚡ {name} is picking up speed ({progress}% completed)`.
+  - **Critical End-Game Stage (Opponent $\ge 85\%$ or $\le 5$ cells remaining):**
+    - Board border switches to electric crimson with pulsing glow (`border-2 border-rose-500 shadow-[0_0_20px_rgba(244,63,94,0.55)] animate-pulse`).
+    - 3x3 subgrid divider lines pulse in rose (`bg-rose-500/60`).
+    - Outer wrapper ring intensifies into red neon pulse (`ring-4 ring-rose-500 shadow-[0_0_35px_rgba(244,63,94,0.5)] animate-pulse`).
+    - Full viewport perimeter aura engages with pulsing crimson vignette (`shadow-[inset_0_0_80px_rgba(244,63,94,0.45)...]`).
+    - High-urgency alert ribbon prompts: `⚠️ {name} is close — only X cells left!`.
+* **Zero Mobile Play Interference:**
+  - All visual aura indicators and board wrappers use smooth CSS transitions (`duration-500`) without repositioning any board elements, shifting layout, or blocking taps on grid cells or digit keypads.
+* **Verification:**
+  - Automated test suite passed 15/15 checks (`npm test`).
+  - Production build compiled successfully in 1.12s (`npm run build --prefix client`).
+* **Remaining limitations:**
+  - Visual intensity cues rely on real-time WebSocket progress broadcasts from opponents.
+
+
 
