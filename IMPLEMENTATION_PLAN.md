@@ -87,30 +87,41 @@ On mobile screens, every square millimeter of the 9x9 grid and keypad is essenti
 #### Sensible & Fun Presets Catalog:
 
 ```markdown
-### Pre-Game Lobby Presets
-• "Ready when you are! 🚀"
-• "Warm up that brain! 🧠"
-• "No hints challenge? 😏"
-• "One warm-up match first! ☕"
-• "Good luck, have fun! 🤝"
-• "Take your time, no rush! ⏳"
-• "Rematch is on! 🔥"
+### Pre-Game Lobby Presets (Banter & Readiness)
+• "Ready! 🚀"
+• "Brain on! 🧠"
+• "No hints? 😏"
+• "Warm-up first! ☕"
+• "GL HF! 🤝"
+• "Rematch! 🔥"
 
-### In-Game Competitive Race Presets
-• "Found the bottleneck! 💡"
-• "So close! ⚡"
-• "Brain melting... 🫠"
-• "Nice speed! 👏"
-• "Wait, which row was that?! 😱"
+### In-Game Competitive Race Presets (Micro & Fast)
+• 🔥 (On fire)
+• 👏 (Nice move)
+• ⚡ (Speeding)
+• 💡 (Found it)
+• 😱 (Shocked)
+• 🫠 (Melting)
+• "So close!"
 • "GG! 🏁"
 
-### In-Game Co-op Presets (Tactical & Helpful)
-• "Check Box 5 📦"
-• "I'll do the corners! 📐"
-• "Stuck on row 7 🔍"
-• "Nice placement! 👍"
-• "Double check col 3! ⚠️"
-• "Great teamwork! 🤝"
+### In-Game Co-op Presets (Compact & Tactical)
+• 👍 (Nice!)
+• ⚠️ (Check that)
+• 🔍 (Looking)
+• 📦 "Box 5"
+• 📐 "Corners"
+• 🤝 "Teamwork!"
+
+### Spectator Reaction Presets (Marked with 👁️ Eye Indicator)
+Spectators can react without playing; their emotes always display with an `👁️` badge so racers know it's from the audience:
+• 🍿 (Watching / popcorn)
+• 👀 (I see that)
+• 👏 (Applause)
+• 🔥 (Hype)
+• 🤯 (Mind blown)
+• 🏁 "GG!"
+Display format on screen: `👁️ [SpectatorName]: 🍿`
 ```
 
 ---
