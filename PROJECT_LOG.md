@@ -91,4 +91,32 @@ On branch `feature/multiplayer-ux-and-connection`:
 * **Remaining limitations:**
   - Live multiplayer rooms are held in memory on the active server process; server restarts reset active lobbies. Free hosting spin-up delays remain subject to cloud provider cold-start timers.
 
+## 2026-11-14 · Fix Spectator Elimination Board State and Climax Peripheral Aura
+
+On branch `feature/multiplayer-ux-and-connection`:
+* **Spectator Player Elimination Overlay & Dashboard Sync:**
+  - In `server/src/server.js`:
+    - Updated `getSanitizedRoom(room)` to include `result: p.gameResult || (p.strikes >= 3 ? 'lost' : p.hasFinishedGame ? 'won' : null)` and `hasFinishedGame: !!p.hasFinishedGame || p.strikes >= 3`, ensuring spectators joining or polling room state immediately see if a player is eliminated or has finished.
+    - Updated `UPDATE_PROGRESS` to broadcast `result: currentPlayer.gameResult || (strikes >= 3 ? 'lost' : (currentPlayer.hasFinishedGame ? 'won' : null))` and `hasFinishedGame: !!currentPlayer.hasFinishedGame || strikes >= 3` in `PROGRESS_UPDATED`.
+    - Cleaned up match start logic in `START_GAME` to reset `p.gameResult = null`.
+  - In `client/src/store/useLobbyStore.js`:
+    - In `case 'PROGRESS_UPDATED'`, updated player state in `room.players` to sync `result: payload.result || (payload.strikes >= 3 ? 'lost' : p.result)` and `hasFinishedGame: !!payload.hasFinishedGame || payload.strikes >= 3`.
+    - In `case 'PLAYER_FINISHED'`, updated player state in `room.players` to ensure `hasFinishedGame = true` and `result: result || p.result || (p.strikes >= 3 ? 'lost' : 'won')` are persisted.
+  - In `client/src/App.jsx`:
+    - Added dramatic `ELIMINATED` overlay over the board in spectator mode (`renderBoardOnly`) with an animated `Skull` icon, rose-bordered container, backdrop blur, and strike count when a player reaches 3 strikes or has `result === 'lost'`.
+    - Added `SOLVED!` overlay when a player finishes/wins the board.
+    - Updated racer switcher tabs to show `💀 [ELIMINATED]` in red styling for eliminated players and `🏆 [Solved!]` in amber styling for winners.
+    - Updated board headers in side-by-side and single-racer spectator views to explicitly display `💀 {name} (ELIMINATED)` and `Eliminated by 3 Strikes`.
+* **Climax Peripheral Aura Fix:**
+  - Resolved root cause where strict `activeOpponent.cellsLeft !== undefined` check prevented the urgency aura from triggering if `cellsLeft` was not yet populated or if multiple opponents were competing.
+  - Implemented multi-opponent completion detection (`anyOpponentClose`) with fallback cell estimation from `progress` and `total`.
+  - Added a full-viewport peripheral edge vignette (`fixed inset-0 pointer-events-none z-30 shadow-[inset_0_0_80px_rgba(244,63,94,0.45),inset_0_0_150px_rgba(244,63,94,0.22)] animate-pulse border-2 border-rose-500/40`) that glows around the screen perimeter as opponents enter the end-game ($\le 5$ cells remaining or $\ge 85\%$ progress).
+  - Maintained strict mobile screen safety: the aura is entirely `pointer-events-none`, with zero touch occlusion or interference on the Sudoku grid and keypad.
+* **Verification:**
+  - Added automated test in `server/test/multiplayer.test.js`: `spectator receives player elimination state upon 3 strikes` verifying that `PROGRESS_UPDATED`, `PLAYER_FINISHED`, and `ROOM_JOINED` for late spectators all carry `result: 'lost'` and `strikes: 3`.
+  - `npm test` passed 14/14 tests.
+  - Client production build succeeded cleanly (`npm run build --prefix client`).
+* **Remaining limitations:**
+  - Free-tier server sleep delays remain subject to cloud provider cold-start timers when spinning up from zero instances.
+
 

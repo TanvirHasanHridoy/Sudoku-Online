@@ -234,3 +234,46 @@ test('cellsLeft broadcast, sequential finish placements, and spectator emote tag
   assert.equal(finished.place, 1);
 });
 
+test('spectator receives player elimination state upon 3 strikes', async () => {
+  const host = await client();
+  const guest = await client();
+  const spec = await client();
+
+  host.send('CREATE_ROOM', { playerId: host.id, name: 'Alice' });
+  const { room } = await host.next('ROOM_CREATED');
+
+  guest.send('JOIN_ROOM', { code: room.code, playerId: guest.id, name: 'Bob' });
+  await guest.next('ROOM_JOINED');
+  spec.send('JOIN_ROOM', { code: room.code, playerId: spec.id, name: 'Watcher', isSpectator: true });
+  await spec.next('ROOM_JOINED');
+
+  guest.send('TOGGLE_READY');
+  host.send('TOGGLE_READY');
+  host.send('START_GAME', { board: puzzle, solution });
+  const { room: started } = await host.next('GAME_STARTED');
+
+  // Bob gets 3 strikes and is eliminated
+  guest.send('UPDATE_PROGRESS', { matchId: started.matchId, progress: 40, strikes: 3, cellsLeft: 18, total: 32 });
+
+  // Verify PROGRESS_UPDATED broadcast to spectator includes result: 'lost' and hasFinishedGame: true
+  const prog = await spec.next('PROGRESS_UPDATED');
+  assert.equal(prog.playerId, guest.id);
+  assert.equal(prog.strikes, 3);
+  assert.equal(prog.hasFinishedGame, true);
+  assert.equal(prog.result, 'lost');
+
+  // Verify PLAYER_FINISHED broadcast to spectator has result: 'lost'
+  const finished = await spec.next('PLAYER_FINISHED');
+  assert.equal(finished.playerId, guest.id);
+  assert.equal(finished.result, 'lost');
+
+  // Late-joining spectator also sees Bob as eliminated in room.players
+  const lateSpec = await client();
+  lateSpec.send('JOIN_ROOM', { code: room.code, playerId: lateSpec.id, name: 'LateWatcher', isSpectator: true });
+  const lateJoined = await lateSpec.next('ROOM_JOINED');
+  const bobInRoom = lateJoined.room.players.find(p => p.id === guest.id);
+  assert.equal(bobInRoom.strikes, 3);
+  assert.equal(bobInRoom.hasFinishedGame, true);
+  assert.equal(bobInRoom.result, 'lost');
+});
+

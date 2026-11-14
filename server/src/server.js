@@ -272,7 +272,8 @@ function getSanitizedRoom(room) {
       isVoiceMuted: !!p.isVoiceMuted,
       elo: p.elo || 1450,
       disconnected: !!p.disconnected, reconnectBy: p.reconnectBy,
-      hasFinishedGame: !!p.hasFinishedGame
+      hasFinishedGame: !!p.hasFinishedGame || p.strikes >= 3,
+      result: p.gameResult || (p.strikes >= 3 ? 'lost' : p.hasFinishedGame ? 'won' : null)
     }))
   };
 }
@@ -509,7 +510,7 @@ wss.on('connection', (ws) => {
           room.rated = !room.coop && activePlayers.length > 1;
           room.sharedBoard = room.coop ? structuredClone(board) : null;
           for (const p of room.players) {
-            p.snapshot = null; p.result = null; p.forfeitBonus = false;
+            p.snapshot = null; p.result = null; p.gameResult = null; p.forfeitBonus = false;
             p.verifiedAccount = connectedClients.get(p.id)?.verifiedAccount;
             p.elo = connectedClients.get(p.id)?.elo ?? p.elo;
           }
@@ -521,7 +522,7 @@ wss.on('connection', (ws) => {
           room.finishers = [];
           room.pauseVotes = {};
           room.playAgainVotes = {};
-          room.players.forEach(p => { p.progress = 0; p.cellsLeft = undefined; p.total = undefined; p.strikes = 0; p.mana = 0; p.hasFinishedGame = false; });
+          room.players.forEach(p => { p.progress = 0; p.cellsLeft = undefined; p.total = undefined; p.strikes = 0; p.mana = 0; p.hasFinishedGame = false; p.gameResult = null; });
 
           broadcastToRoom(currentRoomCode, {
             type: 'GAME_STARTED',
@@ -560,6 +561,7 @@ wss.on('connection', (ws) => {
 
           if (wasEliminated || wasFinished) {
             currentPlayer.hasFinishedGame = true;
+            currentPlayer.gameResult = wasEliminated ? 'lost' : 'won';
             const base = ({ beginner: 12, easy: 18, medium: 24, hard: 30, expert: 36 })[room.difficulty] || 24;
             const delta = wasEliminated ? (currentPlayer.forfeitBonus ? 0 : Math.max(-30, -base / 2 - strikes * 2))
               : currentPlayer.forfeitBonus ? 15 : Math.max(5, base - strikes * 3 - Math.max(0, Number(payload.hintsUsed) || 0) * 4);
@@ -587,7 +589,8 @@ wss.on('connection', (ws) => {
               progress,
               strikes,
               mana: currentPlayer.mana || 0,
-              hasFinishedGame: !!currentPlayer.hasFinishedGame,
+              hasFinishedGame: !!currentPlayer.hasFinishedGame || strikes >= 3,
+              result: currentPlayer.gameResult || (strikes >= 3 ? 'lost' : (currentPlayer.hasFinishedGame ? 'won' : null)),
               cellsLeft: currentPlayer.cellsLeft,
               total: currentPlayer.total
             }

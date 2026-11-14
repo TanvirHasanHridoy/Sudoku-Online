@@ -30,6 +30,7 @@ import {
   Share2,
   Smile,
   Eye,
+  Skull,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import SudokuGrid from "./components/SudokuGrid";
@@ -321,6 +322,29 @@ export default function App() {
       !p.isSpectator &&
       p.progress < 100 &&
       p.strikes < 3,
+  );
+
+  // Opponent nearing completion triggers Climax Peripheral Aura and end-game urgency
+  const anyOpponentClose = room?.players?.find((p) => {
+    if (p.id === myPlayerId || p.isSpectator || p.hasFinishedGame || p.strikes >= 3 || p.result === 'lost') return false;
+    const oppTotal = p.total || 32;
+    const oppLeft = p.cellsLeft !== undefined
+      ? p.cellsLeft
+      : Math.max(0, oppTotal - Math.round((oppTotal * (p.progress || 0)) / 100));
+    return (p.progress >= 85 || (oppLeft <= 5 && oppLeft > 0));
+  });
+
+  const opponentCellsRemaining = anyOpponentClose
+    ? (anyOpponentClose.cellsLeft !== undefined
+        ? anyOpponentClose.cellsLeft
+        : Math.max(0, (anyOpponentClose.total || 32) - Math.round(((anyOpponentClose.total || 32) * (anyOpponentClose.progress || 0)) / 100)))
+    : null;
+
+  const isOpponentClose = Boolean(
+    anyOpponentClose &&
+    !room?.coop &&
+    activeView === "game" &&
+    gameStatus === "playing"
   );
 
   const deadline = localReconnectBy || activeOpponent?.reconnectBy;
@@ -1229,8 +1253,17 @@ export default function App() {
 
     const renderBoardOnly = (boardState, playerObj) => {
       const hasLeft = !playerObj || playerObj.disconnected;
+      const isEliminated = !hasLeft && (playerObj?.strikes >= 3 || playerObj?.result === 'lost');
+      const hasWon = !hasLeft && !isEliminated && (playerObj?.result === 'won' || (playerObj?.hasFinishedGame && playerObj?.strikes < 3) || playerObj?.progress >= 100);
+
       return (
-        <div className="relative w-full max-w-[420px] p-1 rounded-2xl ring-2 ring-border-custom bg-panel-custom/30 shadow-inner">
+        <div className={`relative w-full max-w-[420px] p-1 rounded-2xl ring-2 transition-all duration-300 ${
+          isEliminated
+            ? "ring-rose-500/80 shadow-[0_0_25px_rgba(244,63,94,0.35)] bg-rose-950/20"
+            : hasWon
+            ? "ring-amber-500/80 shadow-[0_0_25px_rgba(245,158,11,0.3)] bg-amber-950/20"
+            : "ring-border-custom bg-panel-custom/30 shadow-inner"
+        }`}>
           <SudokuGrid
             board={boardState?.board || Array(9).fill(null).map(() => Array(9).fill(null))}
             selectedCell={boardState?.selectedCell || null}
@@ -1245,6 +1278,35 @@ export default function App() {
             <div className="absolute inset-0 bg-zinc-950/80 backdrop-blur-sm rounded-xl flex flex-col items-center justify-center text-center p-6 z-20 border border-border-custom">
               <X size={36} className="text-rose-500 mx-auto animate-pulse" />
               <h3 className="text-sm font-bold text-rose-500 mt-1">Player Disconnected</h3>
+            </div>
+          )}
+          {isEliminated && (
+            <div className="absolute inset-0 bg-slate-950/85 backdrop-blur-sm rounded-xl flex flex-col items-center justify-center text-center p-6 z-20 border-2 border-rose-500/80 shadow-[inset_0_0_30px_rgba(244,63,94,0.3)] animate-fade-in">
+              <div className="w-14 h-14 rounded-2xl bg-rose-500/20 border border-rose-500/40 flex items-center justify-center mb-2 shadow-lg">
+                <Skull size={32} className="text-rose-500 animate-bounce" />
+              </div>
+              <span className="text-xs uppercase tracking-widest font-black text-rose-500 px-3 py-1 rounded-full bg-rose-500/10 border border-rose-500/30">
+                ELIMINATED
+              </span>
+              <p className="text-xs font-semibold text-rose-200 mt-2">
+                3 Strikes Reached
+              </p>
+              <p className="text-[11px] opacity-60 text-slate-300 mt-0.5">
+                {playerObj?.name} is out of this match
+              </p>
+            </div>
+          )}
+          {hasWon && (
+            <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm rounded-xl flex flex-col items-center justify-center text-center p-6 z-20 border-2 border-amber-500/80 shadow-[inset_0_0_30px_rgba(245,158,11,0.25)] animate-fade-in">
+              <div className="w-14 h-14 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center mb-2 shadow-lg">
+                <Trophy size={32} className="text-amber-400 animate-pulse" />
+              </div>
+              <span className="text-xs uppercase tracking-widest font-black text-amber-400 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/30">
+                SOLVED!
+              </span>
+              <p className="text-xs font-semibold text-amber-200 mt-2">
+                {playerObj?.name} finished the board!
+              </p>
             </div>
           )}
         </div>
@@ -1344,6 +1406,8 @@ export default function App() {
             <div className="flex bg-accent-glow/20 rounded-xl p-1 border border-border-custom/40 overflow-x-auto gap-1">
               {activePlayersInRoom.map((p) => {
                 const isSelected = (selectedSpectatorPlayerId || playerA?.id) === p.id;
+                const isEliminated = p.strikes >= 3 || p.result === 'lost';
+                const hasWon = p.result === 'won' || (p.hasFinishedGame && p.strikes < 3) || p.progress >= 100;
                 return (
                   <button
                     key={p.id}
@@ -1353,13 +1417,27 @@ export default function App() {
                     }}
                     className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all shrink-0 flex items-center gap-1.5 ${
                       isSelected
-                        ? "bg-panel-custom text-accent-custom shadow-xs border border-border-custom"
+                        ? isEliminated
+                          ? "bg-rose-950/60 text-rose-400 border border-rose-500/60 shadow-xs"
+                          : hasWon
+                          ? "bg-amber-950/60 text-amber-400 border border-amber-500/60 shadow-xs"
+                          : "bg-panel-custom text-accent-custom shadow-xs border border-border-custom"
+                        : isEliminated
+                        ? "text-rose-400 opacity-70 hover:opacity-100"
+                        : hasWon
+                        ? "text-amber-400 opacity-70 hover:opacity-100"
                         : "opacity-60 hover:opacity-100"
                     }`}
                   >
-                    <span>👁️ {p.name}</span>
+                    <span>{isEliminated ? '💀' : hasWon ? '🏆' : '👁️'} {p.name}</span>
                     <span className="text-[10px] opacity-75 tabular-nums">
-                      ({p.progress}% • {p.cellsLeft !== undefined ? `${p.cellsLeft}` : `${Math.max(0, (p.total || 32) - Math.round(((p.total || 32) * p.progress) / 100))}`} left)
+                      {isEliminated ? (
+                        "(Eliminated)"
+                      ) : hasWon ? (
+                        "(Solved!)"
+                      ) : (
+                        `(${p.progress}% • ${p.cellsLeft !== undefined ? `${p.cellsLeft}` : `${Math.max(0, (p.total || 32) - Math.round(((p.total || 32) * p.progress) / 100))}`} left)`
+                      )}
                     </span>
                   </button>
                 );
@@ -1371,15 +1449,43 @@ export default function App() {
               <div className="hidden lg:grid grid-cols-2 gap-8 items-start">
                 <div className="flex flex-col items-center gap-3">
                   <div className="text-center">
-                    <h3 className="text-sm font-extrabold uppercase tracking-widest text-accent-custom">{playerA ? playerA.name : "Player A"}</h3>
-                    <p className="text-[10px] opacity-60">Progress: {playerA ? playerA.progress : 0}% • Lives: {playerA ? (3 - playerA.strikes) : 0}/3</p>
+                    <h3 className="text-sm font-extrabold uppercase tracking-widest text-accent-custom flex items-center justify-center gap-1">
+                      {playerA?.strikes >= 3 || playerA?.result === 'lost' ? (
+                        <span className="text-rose-500 flex items-center gap-1"><Skull size={14} /> {playerA?.name} (ELIMINATED)</span>
+                      ) : playerA?.result === 'won' || playerA?.progress >= 100 ? (
+                        <span className="text-amber-400 flex items-center gap-1"><Trophy size={14} /> {playerA?.name} (SOLVED)</span>
+                      ) : (
+                        playerA ? playerA.name : "Player A"
+                      )}
+                    </h3>
+                    <p className={`text-[10px] ${playerA?.strikes >= 3 || playerA?.result === 'lost' ? "text-rose-400 font-bold" : "opacity-60"}`}>
+                      {playerA?.strikes >= 3 || playerA?.result === 'lost'
+                        ? "Eliminated by 3 Strikes"
+                        : playerA?.result === 'won' || playerA?.progress >= 100
+                        ? "Completed Board!"
+                        : `Progress: ${playerA ? playerA.progress : 0}% • Lives: ${playerA ? (3 - playerA.strikes) : 0}/3`}
+                    </p>
                   </div>
                   {renderBoardOnly(spectatedPlayerABoard, playerA)}
                 </div>
                 <div className="flex flex-col items-center gap-3">
                   <div className="text-center">
-                    <h3 className="text-sm font-extrabold uppercase tracking-widest text-accent-custom">{playerB ? playerB.name : "Player B"}</h3>
-                    <p className="text-[10px] opacity-60">Progress: {playerB ? playerB.progress : 0}% • Lives: {playerB ? (3 - playerB.strikes) : 0}/3</p>
+                    <h3 className="text-sm font-extrabold uppercase tracking-widest text-accent-custom flex items-center justify-center gap-1">
+                      {playerB?.strikes >= 3 || playerB?.result === 'lost' ? (
+                        <span className="text-rose-500 flex items-center gap-1"><Skull size={14} /> {playerB?.name} (ELIMINATED)</span>
+                      ) : playerB?.result === 'won' || playerB?.progress >= 100 ? (
+                        <span className="text-amber-400 flex items-center gap-1"><Trophy size={14} /> {playerB?.name} (SOLVED)</span>
+                      ) : (
+                        playerB ? playerB.name : "Player B"
+                      )}
+                    </h3>
+                    <p className={`text-[10px] ${playerB?.strikes >= 3 || playerB?.result === 'lost' ? "text-rose-400 font-bold" : "opacity-60"}`}>
+                      {playerB?.strikes >= 3 || playerB?.result === 'lost'
+                        ? "Eliminated by 3 Strikes"
+                        : playerB?.result === 'won' || playerB?.progress >= 100
+                        ? "Completed Board!"
+                        : `Progress: ${playerB ? playerB.progress : 0}% • Lives: ${playerB ? (3 - playerB.strikes) : 0}/3`}
+                    </p>
                   </div>
                   {renderBoardOnly(spectatedPlayerBBoard, playerB)}
                 </div>
@@ -1392,12 +1498,26 @@ export default function App() {
                 {(() => {
                   const currentP = activePlayersInRoom.find(p => p.id === (selectedSpectatorPlayerId || playerA?.id)) || playerA;
                   const currentBoard = currentP?.id === playerB?.id ? spectatedPlayerBBoard : spectatedPlayerABoard;
+                  const isEliminated = currentP?.strikes >= 3 || currentP?.result === 'lost';
+                  const hasWon = currentP?.result === 'won' || currentP?.progress >= 100;
                   return (
                     <>
                       <div className="text-center">
-                        <h3 className="text-sm font-extrabold uppercase tracking-widest text-accent-custom">{currentP?.name}</h3>
-                        <p className="text-[10px] opacity-60 font-mono">
-                          {currentP?.progress}% • {currentP?.cellsLeft !== undefined ? `${currentP?.cellsLeft}/${currentP?.total || 32} left` : ''} • Lives: {currentP ? (3 - currentP.strikes) : 0}/3
+                        <h3 className="text-sm font-extrabold uppercase tracking-widest text-accent-custom flex items-center justify-center gap-1">
+                          {isEliminated ? (
+                            <span className="text-rose-500 flex items-center gap-1"><Skull size={14} /> {currentP?.name} (ELIMINATED)</span>
+                          ) : hasWon ? (
+                            <span className="text-amber-400 flex items-center gap-1"><Trophy size={14} /> {currentP?.name} (SOLVED)</span>
+                          ) : (
+                            currentP?.name
+                          )}
+                        </h3>
+                        <p className={`text-[10px] ${isEliminated ? "text-rose-400 font-bold" : "opacity-60 font-mono"}`}>
+                          {isEliminated
+                            ? "Eliminated by 3 Strikes"
+                            : hasWon
+                            ? "Completed Board!"
+                            : `${currentP?.progress}% • ${currentP?.cellsLeft !== undefined ? `${currentP?.cellsLeft}/${currentP?.total || 32} left` : ''} • Lives: ${currentP ? (3 - currentP.strikes) : 0}/3`}
                         </p>
                       </div>
                       {renderBoardOnly(currentBoard, currentP)}
@@ -1414,6 +1534,14 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-bg-custom text-text-custom font-sans transition-colors duration-300 relative pb-10">
+      {/* Full-Viewport Climax Peripheral Warning Aura */}
+      {isOpponentClose && (
+        <div
+          className="fixed inset-0 pointer-events-none z-30 shadow-[inset_0_0_80px_rgba(244,63,94,0.45),inset_0_0_150px_rgba(244,63,94,0.22)] animate-pulse border-2 border-rose-500/40 transition-opacity duration-500"
+          aria-hidden="true"
+        />
+      )}
+
       {/* Toast Notifications Stack */}
       <div className="fixed top-20 right-4 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none">
         {toasts.map((t) => (
@@ -2851,31 +2979,21 @@ export default function App() {
               )}
 
               {/* End-Game Urgency Badge */}
-              {Boolean(
-                activeOpponent &&
-                !room?.coop &&
-                activeOpponent.cellsLeft !== undefined &&
-                activeOpponent.cellsLeft <= 5 &&
-                activeOpponent.cellsLeft > 0 &&
-                !activeOpponent.hasFinishedGame
-              ) && (
-                <div className="w-full max-w-[460px] mb-2 py-1 px-3 bg-rose-500/15 border border-rose-500/40 text-rose-500 text-xs font-bold rounded-lg flex items-center justify-center gap-1.5 animate-pulse select-none">
-                  <span>⚠️ Opponent is close — only {activeOpponent.cellsLeft} cells left!</span>
+              {isOpponentClose && anyOpponentClose && (
+                <div className="w-full max-w-[460px] mb-2 py-1.5 px-3 bg-rose-500/15 border border-rose-500/40 text-rose-500 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 animate-pulse select-none shadow-sm">
+                  <AlertTriangle size={14} className="shrink-0" />
+                  <span>
+                    ⚠️ {anyOpponentClose.name} is close — only{" "}
+                    {opponentCellsRemaining !== null ? `${opponentCellsRemaining} cells left!` : `${anyOpponentClose.progress}% done!`}
+                  </span>
                 </div>
               )}
 
               {/* Sudoku Board Grid Wrapper with active spectator outline and spectator eye count badge */}
               <div
                 className={`relative w-full max-w-[460px] p-1 rounded-2xl transition-all duration-500 ${
-                  Boolean(
-                    activeOpponent &&
-                    !room?.coop &&
-                    activeOpponent.cellsLeft !== undefined &&
-                    activeOpponent.cellsLeft <= 5 &&
-                    activeOpponent.cellsLeft > 0 &&
-                    !activeOpponent.hasFinishedGame
-                  )
-                    ? "ring-4 ring-rose-500/60 shadow-[0_0_20px_rgba(244,63,94,0.3)] animate-pulse"
+                  isOpponentClose
+                    ? "ring-4 ring-rose-500/80 shadow-[0_0_30px_rgba(244,63,94,0.35)] animate-pulse"
                     : spectatingPlayerId
                     ? hasSpectatedPlayerLeft
                       ? "ring-4 ring-zinc-500/20 bg-zinc-500/5"

@@ -554,7 +554,8 @@ export const useLobbyStore = create((set, get) => ({
                       progress: payload.progress, 
                       strikes: payload.strikes, 
                       mana: payload.mana || 0,
-                      hasFinishedGame: !!payload.hasFinishedGame,
+                      hasFinishedGame: !!payload.hasFinishedGame || payload.strikes >= 3,
+                      result: payload.result || (payload.strikes >= 3 ? 'lost' : p.result),
                       cellsLeft: payload.cellsLeft,
                       total: payload.total
                     } 
@@ -636,6 +637,19 @@ export const useLobbyStore = create((set, get) => ({
           case 'PLAYER_FINISHED': {
             // A different player just won or was eliminated
             const { name, result, playerId, place } = payload;
+            set((state) => {
+              if (!state.room) return {};
+              const updatedPlayers = state.room.players.map(p => 
+                p.id === playerId
+                  ? {
+                      ...p,
+                      hasFinishedGame: true,
+                      result: result || p.result || (p.strikes >= 3 ? 'lost' : 'won')
+                    }
+                  : p
+              );
+              return { room: { ...state.room, players: updatedPlayers } };
+            });
             if (result === 'won' && playerId) {
               const currentFinishers = get().finishers || [];
               if (!currentFinishers.some(f => f.playerId === playerId)) {
