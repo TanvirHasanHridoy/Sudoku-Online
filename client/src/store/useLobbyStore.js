@@ -549,16 +549,17 @@ export const useLobbyStore = create((set, get) => ({
           case 'PROGRESS_UPDATED': {
             set((state) => {
               if (!state.room) return {};
+              const isWon = payload.result === 'won' || payload.progress >= 100;
               const updatedPlayers = state.room.players.map(p => 
                 p.id === payload.playerId 
                   ? { 
                       ...p, 
-                      progress: payload.progress, 
+                      progress: isWon ? 100 : payload.progress, 
                       strikes: payload.strikes, 
                       mana: payload.mana || 0,
-                      hasFinishedGame: !!payload.hasFinishedGame || payload.strikes >= 3,
-                      result: payload.result || (payload.strikes >= 3 ? 'lost' : p.result),
-                      cellsLeft: payload.cellsLeft,
+                      hasFinishedGame: !!payload.hasFinishedGame || payload.strikes >= 3 || isWon,
+                      result: payload.result || (payload.strikes >= 3 ? 'lost' : isWon ? 'won' : p.result),
+                      cellsLeft: isWon ? 0 : payload.cellsLeft,
                       total: payload.total
                     } 
                   : p
@@ -648,6 +649,7 @@ export const useLobbyStore = create((set, get) => ({
           case 'PLAYER_FINISHED': {
             // A different player just won or was eliminated
             const { name, result, playerId, place } = payload;
+            const isWon = result === 'won';
             set((state) => {
               if (!state.room) return {};
               const updatedPlayers = state.room.players.map(p => 
@@ -655,7 +657,9 @@ export const useLobbyStore = create((set, get) => ({
                   ? {
                       ...p,
                       hasFinishedGame: true,
-                      result: result || p.result || (p.strikes >= 3 ? 'lost' : 'won')
+                      result: result || p.result || (p.strikes >= 3 ? 'lost' : 'won'),
+                      progress: isWon ? 100 : p.progress,
+                      cellsLeft: isWon ? 0 : p.cellsLeft
                     }
                   : p
               );
@@ -665,7 +669,7 @@ export const useLobbyStore = create((set, get) => ({
               const currentFinishers = get().finishers || [];
               if (!currentFinishers.some(f => f.playerId === playerId)) {
                 const assignedPlace = place || (currentFinishers.length + 1);
-                set({ finishers: [...currentFinishers, { ...payload, place: assignedPlace }] });
+                set({ finishers: [...currentFinishers, { ...payload, place: assignedPlace, progress: 100, cellsLeft: 0 }] });
                 try { playSound.opponentFinished(true); } catch {}
               }
             }

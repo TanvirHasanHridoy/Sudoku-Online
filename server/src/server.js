@@ -262,8 +262,8 @@ function getSanitizedRoom(room) {
       name: p.name,
       avatar: p.avatar || 'apex',
       isReady: p.isReady,
-      progress: p.progress,
-      cellsLeft: p.cellsLeft,
+      progress: (p.gameResult === 'won' || p.hasFinishedGame) && p.strikes < 3 ? 100 : p.progress,
+      cellsLeft: (p.gameResult === 'won' || p.hasFinishedGame) && p.strikes < 3 ? 0 : p.cellsLeft,
       total: p.total,
       strikes: p.strikes,
       mana: p.mana || 0,
@@ -562,6 +562,10 @@ wss.on('connection', (ws) => {
           if (wasEliminated || wasFinished) {
             currentPlayer.hasFinishedGame = true;
             currentPlayer.gameResult = wasEliminated ? 'lost' : 'won';
+            if (wasFinished) {
+              currentPlayer.progress = 100;
+              currentPlayer.cellsLeft = 0;
+            }
             const base = ({ beginner: 12, easy: 18, medium: 24, hard: 30, expert: 36 })[room.difficulty] || 24;
             const delta = wasEliminated ? (currentPlayer.forfeitBonus ? 0 : Math.max(-30, -base / 2 - strikes * 2))
               : currentPlayer.forfeitBonus ? 15 : Math.max(5, base - strikes * 3 - Math.max(0, Number(payload.hintsUsed) || 0) * 4);
@@ -577,7 +581,9 @@ wss.on('connection', (ws) => {
               name: currentPlayer.name,
               place,
               result: 'won',
-              formattedTime: payload.formattedTime || null
+              formattedTime: payload.formattedTime || null,
+              progress: 100,
+              cellsLeft: 0
             };
             room.finishers.push(finisherInfo);
           }
@@ -586,12 +592,12 @@ wss.on('connection', (ws) => {
             type: 'PROGRESS_UPDATED',
             payload: {
               playerId: currentPlayer.id,
-              progress,
+              progress: wasFinished ? 100 : progress,
               strikes,
               mana: currentPlayer.mana || 0,
               hasFinishedGame: !!currentPlayer.hasFinishedGame || strikes >= 3,
               result: currentPlayer.gameResult || (strikes >= 3 ? 'lost' : (currentPlayer.hasFinishedGame ? 'won' : null)),
-              cellsLeft: currentPlayer.cellsLeft,
+              cellsLeft: wasFinished ? 0 : currentPlayer.cellsLeft,
               total: currentPlayer.total
             }
           });

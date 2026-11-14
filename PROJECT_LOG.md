@@ -170,5 +170,29 @@ On branch `feature/multiplayer-ux-and-connection`:
 * **Remaining limitations:**
   - Visual intensity cues rely on real-time WebSocket progress broadcasts from opponents.
 
+## 2026-11-14 · Fix Winner "1 Spot Left" Display and Opponent HUD Completion State
+
+On branch `feature/multiplayer-ux-and-connection`:
+* **Winner Cell / Spot Left Cleanup & Finished Player Exclusion:**
+  - In `server/src/server.js`:
+    - Updated `getSanitizedRoom` to guarantee that finished/winning players report `progress: 100` and `cellsLeft: 0`.
+    - In `UPDATE_PROGRESS`, when `progress >= 100` (`wasFinished`), immediately set `currentPlayer.progress = 100` and `currentPlayer.cellsLeft = 0`, and broadcast `cellsLeft: 0` in both `PROGRESS_UPDATED` and `PLAYER_FINISHED` payloads.
+  - In `client/src/store/useLobbyStore.js`:
+    - In `PROGRESS_UPDATED` and `PLAYER_FINISHED`, when a player completes the board (`result === 'won'` or `progress >= 100`), ensure `progress: 100` and `cellsLeft: 0` are recorded immediately in `room.players` and `finishers`.
+  - In `client/src/App.jsx`:
+    - Created unified `isPlayerDone(p)` predicate that checks `hasFinishedGame`, `result === 'won'`, `result === 'lost'`, `progress >= 100`, `strikes >= 3`, and presence in `finishers`.
+    - `activeOpponent`, `anyOpponentClose`, and `anyOpponentWarning` now filter with `!isPlayerDone(p)`. When Player A wins:
+      - The urgent finish warning (`⚠️ Player A is close — only 1 cells left!`) and speed warning immediately disappear.
+      - The mobile opponent HUD for Player A (`97% • 1/32 left`) immediately disappears.
+      - Peripheral aura and crimson neon board border triggers immediately clear.
+    - Updated the desktop opponent list so finished opponents render the placement badge (`🥇 1st Place`) and never fall back to rendering incomplete cells or `Board Progress`.
+    - In Leaderboard Ticker Ribbon: replaced the confusing `1 spot(s) left!` text. In 1v1 matches, it now displays `Keep solving! ⏱️` instead of `1 spot(s) left!`. In matches with 3+ racers, it cleanly displays `{remainingRacers} racers solving`, entirely removing ambiguous "spot(s) left" phrasing.
+* **Verification:**
+  - Updated unit test in `server/test/multiplayer.test.js` to assert `finished.cellsLeft === 0`, `finished.progress === 100`, and `progFinished.cellsLeft === 0` (15/15 tests passing in `npm test`).
+  - Production build compiled cleanly with PWA compliance in 1.53s (`npm run build --prefix client`).
+* **Remaining limitations:**
+  - Latency jitter under poor network connectivity could briefly delay the WebSocket receipt of the opponent's winning move.
+
+
 
 

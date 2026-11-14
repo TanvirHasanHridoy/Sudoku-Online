@@ -318,18 +318,21 @@ export default function App() {
   const localUsernameError = getUsernameValidationError(inputName);
   const usernameError = localUsernameError || dbUsernameError;
 
+  // Helper to check if an opponent is already finished, won, or eliminated
+  const isPlayerDone = (p) => {
+    if (!p) return true;
+    if (p.id === myPlayerId || p.isSpectator) return true;
+    if (p.hasFinishedGame || p.result === 'won' || p.result === 'lost' || p.progress >= 100 || p.strikes >= 3) return true;
+    if ((finishers || []).some((f) => f.playerId === p.id)) return true;
+    return false;
+  };
+
   // Derived opponent state — must be declared before any useEffect that references it
-  const activeOpponent = room?.players?.find(
-    (p) =>
-      p.id !== myPlayerId &&
-      !p.isSpectator &&
-      p.progress < 100 &&
-      p.strikes < 3,
-  );
+  const activeOpponent = room?.players?.find((p) => !isPlayerDone(p));
 
   // Opponent nearing completion triggers Climax Peripheral Aura and end-game urgency
   const anyOpponentClose = room?.players?.find((p) => {
-    if (p.id === myPlayerId || p.isSpectator || p.hasFinishedGame || p.strikes >= 3 || p.result === 'lost') return false;
+    if (isPlayerDone(p)) return false;
     const oppTotal = p.total || 32;
     const oppLeft = p.cellsLeft !== undefined
       ? p.cellsLeft
@@ -338,7 +341,7 @@ export default function App() {
   });
 
   const anyOpponentWarning = !anyOpponentClose && room?.players?.find((p) => {
-    if (p.id === myPlayerId || p.isSpectator || p.hasFinishedGame || p.strikes >= 3 || p.result === 'lost') return false;
+    if (isPlayerDone(p)) return false;
     const oppTotal = p.total || 32;
     const oppLeft = p.cellsLeft !== undefined
       ? p.cellsLeft
@@ -3152,9 +3155,25 @@ export default function App() {
                       </span>
                     ))}
                   </div>
-                  <span className="text-[10px] text-accent-custom opacity-75 shrink-0 font-medium">
-                    {Math.max(0, (room?.players?.filter(p => !p.isSpectator).length || 2) - finishers.length)} spot(s) left!
-                  </span>
+                  {(() => {
+                    const activeRacers = (room?.players?.filter(p => !p.isSpectator) || []).length;
+                    const remainingRacers = Math.max(0, activeRacers - finishers.length);
+                    if (activeRacers > 2 && remainingRacers > 1) {
+                      return (
+                        <span className="text-[10px] text-accent-custom opacity-75 shrink-0 font-medium">
+                          {remainingRacers} racers solving
+                        </span>
+                      );
+                    }
+                    if (remainingRacers <= 1) {
+                      return (
+                        <span className="text-[10px] text-accent-custom opacity-75 shrink-0 font-medium">
+                          Keep solving! ⏱️
+                        </span>
+                      );
+                    }
+                    return null;
+                  })()}
                 </div>
               )}
 
@@ -3727,11 +3746,13 @@ export default function App() {
                                       {room.isGameStarted && (
                                         (() => {
                                           const pFinisher = (finishers || []).find((f) => f.playerId === p.id);
-                                          if (pFinisher) {
+                                          const isFinished = !isMe && (!!pFinisher || p.hasFinishedGame || p.result === 'won' || p.progress >= 100);
+                                          if (isFinished) {
+                                            const place = pFinisher?.place || (p.result === 'won' ? 1 : null);
                                             return (
                                               <div className="flex items-center justify-between text-[11px] font-bold text-accent-custom py-1 bg-accent-glow/20 px-2 rounded-lg border border-accent-custom/20">
-                                                <span>{pFinisher.place === 1 ? '🥇 1st Place' : pFinisher.place === 2 ? '🥈 2nd Place' : pFinisher.place === 3 ? '🥉 3rd Place' : `#${pFinisher.place}`}</span>
-                                                {pFinisher.formattedTime && <span className="text-[10px] opacity-75 font-mono">{pFinisher.formattedTime}</span>}
+                                                <span>{place === 1 ? '🥇 1st Place' : place === 2 ? '🥈 2nd Place' : place === 3 ? '🥉 3rd Place' : place ? `#${place}` : '🏆 Solved!'}</span>
+                                                {pFinisher?.formattedTime && <span className="text-[10px] opacity-75 font-mono">{pFinisher.formattedTime}</span>}
                                               </div>
                                             );
                                           }

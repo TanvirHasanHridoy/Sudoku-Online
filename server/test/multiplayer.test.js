@@ -232,6 +232,13 @@ test('cellsLeft broadcast, sequential finish placements, and spectator emote tag
   host.send('UPDATE_PROGRESS', { matchId: started.matchId, progress: 100, strikes: 0, formattedTime: '01:23' });
   const finished = await guest.next('PLAYER_FINISHED');
   assert.equal(finished.place, 1);
+  assert.equal(finished.progress, 100);
+  assert.equal(finished.cellsLeft, 0);
+
+  const progFinished = await guest.next('PROGRESS_UPDATED');
+  assert.equal(progFinished.progress, 100);
+  assert.equal(progFinished.cellsLeft, 0);
+  assert.equal(progFinished.result, 'won');
 });
 
 test('spectator receives player elimination state upon 3 strikes', async () => {
