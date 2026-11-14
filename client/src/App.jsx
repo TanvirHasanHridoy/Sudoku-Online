@@ -33,11 +33,21 @@ import {
   Skull,
   Send,
   MessageSquare,
+  Calendar,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import SudokuGrid from "./components/SudokuGrid";
 import Keypad from "./components/Keypad";
 import SabotageOverlay from "./components/SabotageOverlay";
+import DailyCalendarModal from "./components/DailyCalendarModal";
+import {
+  generateDailySudoku,
+  formatDateKey,
+  formatReadableDate,
+  getSolvedDailyDates,
+  markDailyDateSolved,
+  getSeededBenchmarkScores,
+} from "./utils/dailyChallenge";
 import { playSound } from "./utils/audio";
 import { useGameStore } from "./store/useGameStore";
 import { useLobbyStore } from "./store/useLobbyStore";
@@ -209,6 +219,7 @@ export default function App() {
     triggerAbility,
     wipeInkSplatter,
     challenge, challengeScore, challengeLink, localReconnectBy, coopPointedCell,
+    dailyLeaderboards, fetchDailyLeaderboard, submitDailyScore,
   } = useLobbyStore();
 
   // Zustand Store - Social State
@@ -261,6 +272,12 @@ export default function App() {
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
   const [disconnectCountdown, setDisconnectCountdown] = useState(30);
   const [mobileSpectatorTab, setMobileSpectatorTab] = useState("playerA");
+
+  // Daily Challenge states
+  const [isCalendarOpen, setIsCalendarOpen] = useState(false);
+  const [selectedCalendarDate, setSelectedCalendarDate] = useState(() => formatDateKey(new Date()));
+  const [dailyDate, setDailyDate] = useState(null);
+  const [solvedDailyDates, setSolvedDailyDates] = useState(() => getSolvedDailyDates());
 
   // Real-time username checking & validation states
   const [dbUsernameError, setDbUsernameError] = useState("");
@@ -976,11 +993,46 @@ export default function App() {
   const startNewGame = (diff) => {
     sessionStorage.removeItem("sudoku_challenge");
     useLobbyStore.setState({challenge: null, challengeScore: null, challengeLink: null});
+    setDailyDate(null);
     setLockedDigit(null);
     setSeconds(0);
     initGame(diff || difficulty);
     setActiveView("game");
   };
+
+  const startDailyGame = (targetDate = null) => {
+    const dateStr = targetDate || selectedCalendarDate || formatDateKey(new Date());
+    sessionStorage.removeItem("sudoku_challenge");
+    useLobbyStore.setState({ challenge: null, challengeScore: null, challengeLink: null });
+    const { puzzle, solution } = generateDailySudoku(dateStr);
+    setDailyDate(dateStr);
+    setLockedDigit(null);
+    setSeconds(0);
+    fetchDailyLeaderboard(dateStr);
+    initGame("medium", puzzle, solution);
+    setActiveView("game");
+  };
+
+  const topFiveDailyLeaderboard = useMemo(() => {
+    const targetDate = dailyDate || selectedCalendarDate;
+    if (!targetDate) return [];
+    const serverList = dailyLeaderboards[targetDate] || [];
+    if (serverList.length >= 5) {
+      return serverList.slice(0, 5);
+    }
+    const benchmarks = getSeededBenchmarkScores(targetDate);
+    const combined = [...serverList];
+    for (const bench of benchmarks) {
+      if (combined.length >= 5) break;
+      if (!combined.some((p) => p.name === bench.name)) {
+        combined.push(bench);
+      }
+    }
+    return combined.sort((a, b) => a.timeSeconds - b.timeSeconds).slice(0, 5).map((e, idx) => ({
+      ...e,
+      rank: idx + 1,
+    }));
+  }, [dailyLeaderboards, dailyDate, selectedCalendarDate]);
 
   // Calculate solved counts for keypad numbers 1-9 (correctly placed + clue numbers)
   const getNumberCounts = () => {
@@ -1039,6 +1091,30 @@ export default function App() {
     if (challenge && gameStatus === "won" && ws?.readyState === 1)
       ws.send(JSON.stringify({type: "COMPARE_CHALLENGE", payload: {id: challenge.id}}));
   }, [challenge, gameStatus, isConnected, ws]);
+  useEffect(() => {
+    if (dailyDate && gameStatus === "won") {
+      markDailyDateSolved(dailyDate);
+      setSolvedDailyDates(getSolvedDailyDates());
+      submitDailyScore({
+        date: dailyDate,
+        timeSeconds: seconds,
+        formattedTime: formatTime(seconds),
+        strikes,
+      });
+      fetchDailyLeaderboard(dailyDate);
+      useLobbyStore.getState().addToast(`🎉 Daily Challenge for ${formatReadableDate(dailyDate)} Solved!`, "success");
+    }
+  }, [dailyDate, gameStatus]);
+  useEffect(() => {
+    if (dailyDate) {
+      fetchDailyLeaderboard(dailyDate);
+    }
+  }, [dailyDate]);
+  useEffect(() => {
+    if (selectedCalendarDate) {
+      fetchDailyLeaderboard(selectedCalendarDate);
+    }
+  }, [selectedCalendarDate]);
   // Keyboard support for playing convenience
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -2161,24 +2237,70 @@ export default function App() {
                           ⚔️ Loading friend’s challenge...
                         </div>
                       )}
+                      {/* Daily Challenge Card */}
+                      <div className="p-3.5 sm:p-4 rounded-2xl bg-gradient-to-br from-accent-glow/40 to-amber-500/10 border border-amber-500/30 shadow-md space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2.5">
+                            <div className="p-2 bg-amber-500/20 text-amber-400 rounded-xl">
+                              <Calendar size={18} />
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-1.5">
+                                <h3 className="text-xs font-black uppercase tracking-wider text-amber-400">
+                                  Daily Challenge
+                                </h3>
+                                {solvedDailyDates.has(formatDateKey(new Date())) && (
+                                  <span className="text-[9px] bg-emerald-500/20 text-emerald-400 font-extrabold px-1.5 py-0.5 rounded-full border border-emerald-500/30 flex items-center gap-0.5">
+                                    <Check size={9} className="stroke-[3]" /> Solved
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-[11px] opacity-75 font-semibold">
+                                {formatReadableDate(formatDateKey(new Date()))}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            onClick={() => startDailyGame(formatDateKey(new Date()))}
+                            className="py-2.5 px-3 bg-accent-custom hover:bg-accent-hover text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 shadow-md active:scale-95 transition-all cursor-pointer"
+                          >
+                            <PlayIcon size={13} fill="white" />
+                            <span>Today's Board</span>
+                          </button>
+                          <button
+                            onClick={() => setIsCalendarOpen(true)}
+                            className="py-2.5 px-3 bg-panel-custom hover:bg-accent-glow border border-border-custom text-text-custom font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 active:scale-95 transition-all cursor-pointer"
+                          >
+                            <Calendar size={13} className="text-accent-custom" />
+                            <span>Calendar Picker</span>
+                          </button>
+                        </div>
+                      </div>
+
                       {/* Difficulty Selector */}
                       <div className="space-y-1.5">
                         <label className="text-[10px] uppercase font-bold opacity-60 tracking-wider block">
                           Select Difficulty
                         </label>
-                        <select
-                          value={selectedDifficulty}
-                          onChange={(e) =>
-                            setSelectedDifficulty(e.target.value)
-                          }
-                          className="w-full px-3 py-2 bg-accent-glow border border-border-custom rounded-xl font-bold text-xs focus:outline-none cursor-pointer text-text-custom"
-                        >
-                          <option value="beginner">Beginner</option>
-                          <option value="easy">Easy</option>
-                          <option value="medium">Medium</option>
-                          <option value="hard">Hard</option>
-                          <option value="expert">Expert</option>
-                        </select>
+                        <div className="grid grid-cols-5 gap-1">
+                          {["beginner", "easy", "medium", "hard", "expert"].map((diff) => (
+                            <button
+                              key={diff}
+                              type="button"
+                              onClick={() => setSelectedDifficulty(diff)}
+                              className={`py-2 px-1 text-[11px] font-bold rounded-xl capitalize transition-all active:scale-95 cursor-pointer ${
+                                selectedDifficulty === diff
+                                  ? "bg-accent-custom text-white shadow-xs"
+                                  : "bg-accent-glow hover:bg-accent-glow/70 text-text-custom border border-border-custom/50"
+                              }`}
+                            >
+                              {diff}
+                            </button>
+                          ))}
+                        </div>
                       </div>
 
                       {/* Play Solo Button */}
@@ -2452,97 +2574,102 @@ export default function App() {
                           })}
                         </div>
 
-                        {/* Lobby Chat & Banter */}
-                        <div className="bg-accent-glow/20 border border-border-custom/50 rounded-xl p-3 space-y-2 mt-2">
-                          <div className="flex items-center justify-between">
-                            <span className="text-[10px] uppercase font-bold tracking-wider text-accent-custom flex items-center gap-1.5">
-                              <MessageSquare size={12} /> Room Chat & Banter
-                            </span>
-                            <span className="text-[9px] opacity-60">
-                              {chatMessages?.length || 0} messages
-                            </span>
-                          </div>
+                        {/* Lobby Chat & Banter - only visible when more than one player in lobby */}
+                        {activePlayers.length > 1 && (
+                          <div className="bg-accent-glow/20 border border-border-custom/50 rounded-xl p-3 space-y-2 mt-2">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px] uppercase font-bold tracking-wider text-accent-custom flex items-center gap-1.5">
+                                <MessageSquare size={12} /> Room Chat & Banter
+                              </span>
+                              <span className="text-[9px] opacity-60">
+                                {chatMessages?.length || 0} messages
+                              </span>
+                            </div>
 
-                          {/* Quick Lobby Presets */}
-                          <div className="flex flex-wrap gap-1.5">
-                            {["Ready! 🚀", "Brain on! 🧠", "No hints? 😏", "Warm-up first! ☕", "GL HF! 🤝", "Rematch! 🔥"].map((preset) => (
-                              <button
-                                key={preset}
-                                type="button"
-                                onClick={() => sendEmote(preset)}
-                                className="px-2 py-1 bg-panel-custom hover:bg-accent-custom hover:text-white border border-border-custom/60 rounded-lg text-[11px] font-bold text-text-custom transition-all active:scale-95 shadow-xs"
-                              >
-                                {preset}
-                              </button>
-                            ))}
-                          </div>
+                            {/* Quick Lobby Presets */}
+                            <div className="flex flex-wrap gap-1.5">
+                              {["Ready! 🚀", "Brain on! 🧠", "No hints? 😏", "Warm-up first! ☕", "GL HF! 🤝", "Rematch! 🔥"].map((preset) => (
+                                <button
+                                  key={preset}
+                                  type="button"
+                                  onClick={() => sendEmote(preset)}
+                                  className="px-2 py-1 bg-panel-custom hover:bg-accent-custom hover:text-white border border-border-custom/60 rounded-lg text-[11px] font-bold text-text-custom transition-all active:scale-95 shadow-xs"
+                                >
+                                  {preset}
+                                </button>
+                              ))}
+                            </div>
 
-                          {/* Recent Messages Log */}
-                          <div className="max-h-28 overflow-y-auto space-y-1.5 pr-1 scrollbar-thin">
-                            {(!chatMessages || chatMessages.length === 0) ? (
-                              <p className="text-[10px] opacity-50 italic py-1 text-center">No messages yet. Send a quick preset or type below!</p>
-                            ) : (
-                              chatMessages.map((msg) => (
-                                <div key={msg.id} className="text-xs flex items-baseline gap-1.5 bg-panel-custom/60 px-2 py-1 rounded-lg border border-border-custom/30">
-                                  {msg.isSpectator && <span className="text-[10px]" title="Spectator">👁️</span>}
-                                  <span className="font-bold text-accent-custom text-[11px] shrink-0">{msg.name}:</span>
-                                  <span className="text-text-custom font-medium break-words text-[11px]">{msg.text}</span>
-                                </div>
-                              ))
-                            )}
-                            <div ref={lobbyChatEndRef} />
-                          </div>
+                            {/* Recent Messages Log - Fixed height scrollable container */}
+                            <div className="h-28 overflow-y-auto space-y-1.5 pr-1 scrollbar-thin">
+                              {(!chatMessages || chatMessages.length === 0) ? (
+                                <p className="text-[10px] opacity-50 italic py-1 text-center">No messages yet. Send a quick preset or type below!</p>
+                              ) : (
+                                chatMessages.map((msg) => (
+                                  <div key={msg.id} className="text-xs flex items-baseline gap-1.5 bg-panel-custom/60 px-2 py-1 rounded-lg border border-border-custom/30">
+                                    {msg.isSpectator && <span className="text-[10px]" title="Spectator">👁️</span>}
+                                    <span className="font-bold text-accent-custom text-[11px] shrink-0">{msg.name}:</span>
+                                    <span className="text-text-custom font-medium break-words text-[11px]">{msg.text}</span>
+                                  </div>
+                                ))
+                              )}
+                              <div ref={lobbyChatEndRef} />
+                            </div>
 
-                          {/* Custom message input form */}
-                          <form
-                            onSubmit={(e) => {
-                              e.preventDefault();
-                              if (lobbyInputText.trim()) {
-                                sendEmote(lobbyInputText.trim());
-                                setLobbyInputText("");
-                              }
-                            }}
-                            className="flex items-center gap-1.5 pt-1"
-                          >
-                            <input
-                              type="text"
-                              maxLength={80}
-                              value={lobbyInputText}
-                              onChange={(e) => setLobbyInputText(e.target.value)}
-                              placeholder="Type a message..."
-                              className="flex-1 px-3 py-1.5 bg-panel-custom border border-border-custom rounded-lg text-xs focus:outline-none focus:border-accent-custom text-text-custom placeholder:opacity-50"
-                            />
-                            <button
-                              type="submit"
-                              disabled={!lobbyInputText.trim()}
-                              className="p-1.5 bg-accent-custom hover:bg-accent-hover disabled:opacity-40 text-white rounded-lg transition-all active:scale-95 shrink-0"
-                              title="Send Message"
+                            {/* Custom message input form */}
+                            <form
+                              onSubmit={(e) => {
+                                e.preventDefault();
+                                if (lobbyInputText.trim()) {
+                                  sendEmote(lobbyInputText.trim());
+                                  setLobbyInputText("");
+                                }
+                              }}
+                              className="flex items-center gap-1.5 pt-1"
                             >
-                              <Send size={13} />
-                            </button>
-                          </form>
-                        </div>
+                              <input
+                                type="text"
+                                maxLength={80}
+                                value={lobbyInputText}
+                                onChange={(e) => setLobbyInputText(e.target.value)}
+                                placeholder="Type a message..."
+                                className="flex-1 px-3 py-1.5 bg-panel-custom border border-border-custom rounded-lg text-xs focus:outline-none focus:border-accent-custom text-text-custom placeholder:opacity-50"
+                              />
+                              <button
+                                type="submit"
+                                disabled={!lobbyInputText.trim()}
+                                className="p-1.5 bg-accent-custom hover:bg-accent-hover disabled:opacity-40 text-white rounded-lg transition-all active:scale-95 shrink-0"
+                                title="Send Message"
+                              >
+                                <Send size={13} />
+                              </button>
+                            </form>
+                          </div>
+                        )}
                       </div>
                       <div className="flex flex-col gap-2 pt-2">
                         <div className="flex gap-2">
-                          {activePlayers.length > 1 && (
+                          {!isHost && activePlayers.length > 1 && (
                             <button
-                              disabled={room.isGameStarted} onClick={toggleReady}
-                              className={`flex-1 py-3 rounded-xl font-bold text-sm shadow-md transition-all active:scale-[0.98] ${myStatusInRoom?.isReady ? "bg-amber-600 hover:bg-amber-500 text-white" : "bg-accent-custom hover:bg-accent-hover text-white"}`}
+                              disabled={room.isGameStarted}
+                              onClick={toggleReady}
+                              className={`w-full py-3 rounded-xl font-bold text-sm shadow-md transition-all active:scale-[0.98] ${
+                                myStatusInRoom?.isReady
+                                  ? "bg-amber-600 hover:bg-amber-500 text-white"
+                                  : "bg-accent-custom hover:bg-accent-hover text-white"
+                              }`}
                             >
-                              {myStatusInRoom?.isReady
-                                ? "Unready Lobby"
-                                : "Ready to Start"}
+                              {myStatusInRoom?.isReady ? "Unready" : "Ready"}
                             </button>
                           )}
                           {isHost && (
                             <button
                               onClick={startGame}
                               disabled={!allPlayersReady || room.isGameStarted}
-                              className={`${activePlayers.length === 1 ? "w-full" : "px-6"} py-3 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold rounded-xl text-sm transition-all active:scale-[0.98]`}
+                              className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold rounded-xl text-sm transition-all active:scale-[0.98]"
                               title="Start Match"
                             >
-                              Start Game
+                              Start the Match
                             </button>
                           )}
                         </div>
@@ -2873,18 +3000,33 @@ export default function App() {
               <div className="w-full max-w-[460px] flex items-center justify-between gap-2 mb-2 lg:mb-4 px-2">
                 {/* Left Group: Info (Diff, Timer) */}
                 <div className="flex items-center gap-1.5">
-                  <select
-                    value={room ? room.difficulty : difficulty}
-                    disabled={!!room}
-                    onChange={(e) => startNewGame(e.target.value)}
-                    className="text-[11px] lg:text-xs font-bold px-2 py-1 bg-accent-glow border border-border-custom rounded-lg focus:outline-none cursor-pointer text-text-custom disabled:opacity-75 disabled:cursor-not-allowed transition-all"
-                  >
-                    <option value="beginner">Beginner</option>
-                    <option value="easy">Easy</option>
-                    <option value="medium">Medium</option>
-                    <option value="hard">Hard</option>
-                    <option value="expert">Expert</option>
-                  </select>
+                  {dailyDate ? (
+                    <button
+                      onClick={() => setIsCalendarOpen(true)}
+                      className="text-[11px] lg:text-xs font-bold px-2 py-1 bg-amber-500/15 border border-amber-500/30 text-amber-400 rounded-lg flex items-center gap-1.5 hover:bg-amber-500/25 transition-all cursor-pointer"
+                      title="Change Daily Challenge Date"
+                    >
+                      <Calendar size={12} />
+                      <span className="hidden sm:inline">{formatReadableDate(dailyDate)}</span>
+                      <span className="sm:hidden">{dailyDate}</span>
+                      {solvedDailyDates.has(dailyDate) && (
+                        <span className="text-emerald-400 font-black text-[10px]">✓</span>
+                      )}
+                    </button>
+                  ) : (
+                    <select
+                      value={room ? room.difficulty : difficulty}
+                      disabled={!!room}
+                      onChange={(e) => startNewGame(e.target.value)}
+                      className="text-[11px] lg:text-xs font-bold px-2 py-1 bg-accent-glow border border-border-custom rounded-lg focus:outline-none cursor-pointer text-text-custom disabled:opacity-75 disabled:cursor-not-allowed transition-all"
+                    >
+                      <option value="beginner">Beginner</option>
+                      <option value="easy">Easy</option>
+                      <option value="medium">Medium</option>
+                      <option value="hard">Hard</option>
+                      <option value="expert">Expert</option>
+                    </select>
+                  )}
 
                   <span className="text-[11px] lg:text-xs font-bold px-2 py-1 bg-accent-glow border border-border-custom rounded-lg flex items-center gap-1 min-w-[55px] justify-center tabular-nums">
                     <Timer size={11} className="text-accent-custom shrink-0" />
@@ -3528,18 +3670,22 @@ export default function App() {
                               <label className="text-[10px] uppercase font-bold opacity-60 tracking-wider">
                                 Difficulty for New Room
                               </label>
-                              <select
-                                value={selectedDifficulty}
-                                onChange={(e) =>
-                                  setSelectedDifficulty(e.target.value)
-                                }
-                                className="w-full px-3 py-2 bg-accent-glow border border-border-custom rounded-xl font-bold text-xs focus:outline-none cursor-pointer"
-                              >
-                                <option value="easy">Easy</option>
-                                <option value="medium">Medium</option>
-                                <option value="hard">Hard</option>
-                                <option value="expert">Expert</option>
-                              </select>
+                              <div className="grid grid-cols-4 gap-1">
+                                {["easy", "medium", "hard", "expert"].map((diff) => (
+                                  <button
+                                    key={diff}
+                                    type="button"
+                                    onClick={() => setSelectedDifficulty(diff)}
+                                    className={`py-2 px-1 text-[11px] font-bold rounded-xl capitalize transition-all active:scale-95 cursor-pointer ${
+                                      selectedDifficulty === diff
+                                        ? "bg-accent-custom text-white shadow-xs"
+                                        : "bg-accent-glow hover:bg-accent-glow/70 text-text-custom border border-border-custom/50"
+                                    }`}
+                                  >
+                                    {diff}
+                                  </button>
+                                ))}
+                              </div>
                             </div>
 
                             {showManaOptionSetting && (
@@ -3923,72 +4069,74 @@ export default function App() {
                             */}
                             </div>
 
-                            {/* In-Game Desktop Room Chat Log */}
-                            <div className="border border-border-custom/50 rounded-xl p-3 bg-accent-glow/5 space-y-2 mt-2 mb-4">
-                              <div className="flex items-center justify-between text-xs font-bold">
-                                <span className="flex items-center gap-1.5 text-accent-custom uppercase tracking-wider text-[11px]">
-                                  <MessageSquare size={13} /> Room Chat
-                                </span>
-                                <span className="text-[10px] opacity-60">
-                                  {chatMessages?.length || 0}
-                                </span>
-                              </div>
-                              <div className="max-h-28 overflow-y-auto space-y-1 pr-1 scrollbar-thin text-xs">
-                                {(!chatMessages || chatMessages.length === 0) ? (
-                                  <p className="text-[10px] opacity-50 italic py-2 text-center">No messages yet</p>
-                                ) : (
-                                  chatMessages.slice(-20).map((msg) => (
-                                    <div key={msg.id} className="text-xs flex items-baseline gap-1.5 bg-panel-custom/60 px-2 py-1 rounded-lg border border-border-custom/30">
-                                      {msg.isSpectator && <span className="text-[10px]" title="Spectator">👁️</span>}
-                                      <span className="font-bold text-accent-custom text-[11px] shrink-0">{msg.name}:</span>
-                                      <span className="text-text-custom font-medium break-words text-[11px]">{msg.text}</span>
-                                    </div>
-                                  ))
-                                )}
-                              </div>
-                              <form
-                                onSubmit={(e) => {
-                                  e.preventDefault();
-                                  if (inGameChatInput.trim()) {
-                                    sendEmote(inGameChatInput.trim());
-                                    setInGameChatInput("");
-                                  }
-                                }}
-                                className="flex items-center gap-1.5 pt-1"
-                              >
-                                <input
-                                  type="text"
-                                  maxLength={80}
-                                  value={inGameChatInput}
-                                  onChange={(e) => setInGameChatInput(e.target.value)}
-                                  placeholder="Type message..."
-                                  className="flex-1 px-2.5 py-1.5 bg-panel-custom border border-border-custom rounded-lg text-xs focus:outline-none focus:border-accent-custom text-text-custom placeholder:opacity-50"
-                                />
-                                <button
-                                  type="submit"
-                                  disabled={!inGameChatInput.trim()}
-                                  className="p-1.5 bg-accent-custom hover:bg-accent-hover disabled:opacity-40 text-white rounded-lg transition-all active:scale-95 shrink-0"
+                            {/* In-Game Desktop Room Chat Log - only visible when more than one player in lobby */}
+                            {activePlayers.length > 1 && (
+                              <div className="border border-border-custom/50 rounded-xl p-3 bg-accent-glow/5 space-y-2 mt-2 mb-4">
+                                <div className="flex items-center justify-between text-xs font-bold">
+                                  <span className="flex items-center gap-1.5 text-accent-custom uppercase tracking-wider text-[11px]">
+                                    <MessageSquare size={13} /> Room Chat
+                                  </span>
+                                  <span className="text-[10px] opacity-60">
+                                    {chatMessages?.length || 0}
+                                  </span>
+                                </div>
+                                <div className="h-28 overflow-y-auto space-y-1 pr-1 scrollbar-thin text-xs">
+                                  {(!chatMessages || chatMessages.length === 0) ? (
+                                    <p className="text-[10px] opacity-50 italic py-2 text-center">No messages yet</p>
+                                  ) : (
+                                    chatMessages.slice(-20).map((msg) => (
+                                      <div key={msg.id} className="text-xs flex items-baseline gap-1.5 bg-panel-custom/60 px-2 py-1 rounded-lg border border-border-custom/30">
+                                        {msg.isSpectator && <span className="text-[10px]" title="Spectator">👁️</span>}
+                                        <span className="font-bold text-accent-custom text-[11px] shrink-0">{msg.name}:</span>
+                                        <span className="text-text-custom font-medium break-words text-[11px]">{msg.text}</span>
+                                      </div>
+                                    ))
+                                  )}
+                                </div>
+                                <form
+                                  onSubmit={(e) => {
+                                    e.preventDefault();
+                                    if (inGameChatInput.trim()) {
+                                      sendEmote(inGameChatInput.trim());
+                                      setInGameChatInput("");
+                                    }
+                                  }}
+                                  className="flex items-center gap-1.5 pt-1"
                                 >
-                                  <Send size={12} />
-                                </button>
-                              </form>
-                            </div>
+                                  <input
+                                    type="text"
+                                    maxLength={80}
+                                    value={inGameChatInput}
+                                    onChange={(e) => setInGameChatInput(e.target.value)}
+                                    placeholder="Type message..."
+                                    className="flex-1 px-2.5 py-1.5 bg-panel-custom border border-border-custom rounded-lg text-xs focus:outline-none focus:border-accent-custom text-text-custom placeholder:opacity-50"
+                                  />
+                                  <button
+                                    type="submit"
+                                    disabled={!inGameChatInput.trim()}
+                                    className="p-1.5 bg-accent-custom hover:bg-accent-hover disabled:opacity-40 text-white rounded-lg transition-all active:scale-95 shrink-0"
+                                  >
+                                    <Send size={12} />
+                                  </button>
+                                </form>
+                              </div>
+                            )}
 
                             {/* READY UP ACTION BUTTON */}
                             {!room.isGameStarted && (
                               <div className="flex flex-col gap-2 pt-2">
                                 <div className="flex gap-2">
-                                  {activePlayers.length > 1 && (
+                                  {!isHost && activePlayers.length > 1 && (
                                     <button
-                                      disabled={room.isGameStarted} onClick={toggleReady}
-                                      className={`flex-1 py-3 rounded-xl font-bold text-sm shadow-md transition-all active:scale-[0.98] ${myStatusInRoom?.isReady
-                                        ? "bg-amber-600 hover:bg-amber-500 text-white"
-                                        : "bg-accent-custom hover:bg-accent-hover text-white"
-                                        }`}
+                                      disabled={room.isGameStarted}
+                                      onClick={toggleReady}
+                                      className={`w-full py-3 rounded-xl font-bold text-sm shadow-md transition-all active:scale-[0.98] ${
+                                        myStatusInRoom?.isReady
+                                          ? "bg-amber-600 hover:bg-amber-500 text-white"
+                                          : "bg-accent-custom hover:bg-accent-hover text-white"
+                                      }`}
                                     >
-                                      {myStatusInRoom?.isReady
-                                        ? "Unready Lobby"
-                                        : "Ready to Start"}
+                                      {myStatusInRoom?.isReady ? "Unready" : "Ready"}
                                     </button>
                                   )}
 
@@ -3996,10 +4144,10 @@ export default function App() {
                                     <button
                                       onClick={startGame}
                                       disabled={!allPlayersReady || room.isGameStarted}
-                                      className={`${activePlayers.length === 1 ? "w-full" : "px-6"} py-3 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold rounded-xl text-sm transition-all active:scale-[0.98]`}
+                                      className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold rounded-xl text-sm transition-all active:scale-[0.98]"
                                       title="Start Match"
                                     >
-                                      Start Game
+                                      Start the Match
                                     </button>
                                   )}
                                 </div>
@@ -4246,28 +4394,98 @@ export default function App() {
                   </div>
                 </>
               ) : (
-                /* Solo Stats Card — visible beside the board on desktop, below on mobile */
-                <div className="glass-card rounded-2xl p-5 border border-border-custom/30 shadow-md flex flex-col gap-4 animate-scale-in">
-                  <div>
-                    <h3 className="text-xs font-extrabold uppercase tracking-wider text-accent-custom">Career Stats</h3>
-                    <p className="text-[9px] opacity-45 font-bold uppercase tracking-wider mt-0.5">Synced from database</p>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="glass-panel p-3 rounded-xl border border-border-custom/30 flex flex-col gap-0.5">
-                      <span className="opacity-55 text-[8.5px] uppercase font-bold tracking-wider">Played</span>
-                      <span className="text-xl font-black text-text-custom tabular-nums">{personalStats.gamesPlayed}</span>
+                <div className="flex flex-col gap-5 w-full">
+                  {dailyDate && (
+                    <div className="glass-card rounded-2xl p-4 sm:p-5 border border-amber-500/30 shadow-lg flex flex-col gap-3 animate-scale-in">
+                      <div className="flex items-center justify-between border-b border-border-custom/50 pb-2.5">
+                        <div className="flex items-center gap-2">
+                          <div className="p-1.5 bg-amber-500/20 text-amber-400 rounded-lg">
+                            <Trophy size={16} />
+                          </div>
+                          <div>
+                            <h3 className="text-xs font-black uppercase tracking-wider text-amber-400">
+                              Top 5 Daily Solvers
+                            </h3>
+                            <p className="text-[10px] opacity-70 font-semibold">{formatReadableDate(dailyDate)}</p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => setIsCalendarOpen(true)}
+                          className="px-2.5 py-1 rounded-lg border border-border-custom hover:bg-accent-glow text-[10px] font-bold text-accent-custom flex items-center gap-1 cursor-pointer transition-all active:scale-95"
+                          title="Open Calendar Picker"
+                        >
+                          <Calendar size={11} />
+                          <span>Calendar</span>
+                        </button>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        {topFiveDailyLeaderboard.map((item) => {
+                          const isMe = item.playerId === myPlayerId || item.name === myPlayerName;
+                          return (
+                            <div
+                              key={item.id || item.rank}
+                              className={`flex items-center justify-between py-2 px-3 rounded-xl text-xs transition-all ${
+                                isMe
+                                  ? "bg-accent-custom/20 border border-accent-custom/50 font-bold"
+                                  : "bg-panel-custom/60 border border-border-custom/30"
+                              }`}
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="w-5 text-center font-black shrink-0">
+                                  {item.rank === 1 ? "🥇" : item.rank === 2 ? "🥈" : item.rank === 3 ? "🥉" : `#${item.rank}`}
+                                </span>
+                                <span className="font-bold truncate text-text-custom">
+                                  {item.name} {isMe && <span className="text-[9px] text-accent-custom font-extrabold">(You)</span>}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2 font-mono font-bold text-xs shrink-0">
+                                <span className="text-accent-custom">{item.formattedTime}</span>
+                                <span className="text-[9px] opacity-50 font-normal">
+                                  {item.strikes === 0 ? "0 strikes" : `${item.strikes} strike${item.strikes > 1 ? "s" : ""}`}
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {solvedDailyDates.has(dailyDate) ? (
+                        <div className="p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 text-xs font-bold flex items-center justify-center gap-1.5">
+                          <Check size={13} className="stroke-[3]" />
+                          <span>You solved this day's challenge!</span>
+                        </div>
+                      ) : (
+                        <p className="text-[10px] opacity-50 text-center italic">
+                          Solve today's puzzle to rank on the global leaderboard!
+                        </p>
+                      )}
                     </div>
-                    <div className="glass-panel p-3 rounded-xl border border-border-custom/30 flex flex-col gap-0.5">
-                      <span className="opacity-55 text-[8.5px] uppercase font-bold tracking-wider text-emerald-500">Won</span>
-                      <span className="text-xl font-black text-emerald-500 tabular-nums">{personalStats.gamesCompleted}</span>
+                  )}
+
+                  {/* Career Stats Card */}
+                  <div className="glass-card rounded-2xl p-5 border border-border-custom/30 shadow-md flex flex-col gap-4 animate-scale-in">
+                    <div>
+                      <h3 className="text-xs font-extrabold uppercase tracking-wider text-accent-custom">Career Stats</h3>
+                      <p className="text-[9px] opacity-45 font-bold uppercase tracking-wider mt-0.5">Synced from database</p>
                     </div>
-                    <div className="glass-panel p-3 rounded-xl border border-border-custom/30 flex flex-col gap-0.5">
-                      <span className="opacity-55 text-[8.5px] uppercase font-bold tracking-wider text-amber-500">Win Rate</span>
-                      <span className="text-xl font-black text-amber-500 tabular-nums">{winRate}%</span>
-                    </div>
-                    <div className="glass-panel p-3 rounded-xl border border-border-custom/30 flex flex-col gap-0.5">
-                      <span className="opacity-55 text-[8.5px] uppercase font-bold tracking-wider">Elo Rating</span>
-                      <span className="text-xl font-black text-accent-custom tabular-nums">{profile?.elo || 1450}</span>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="glass-panel p-3 rounded-xl border border-border-custom/30 flex flex-col gap-0.5">
+                        <span className="opacity-55 text-[8.5px] uppercase font-bold tracking-wider">Played</span>
+                        <span className="text-xl font-black text-text-custom tabular-nums">{personalStats.gamesPlayed}</span>
+                      </div>
+                      <div className="glass-panel p-3 rounded-xl border border-border-custom/30 flex flex-col gap-0.5">
+                        <span className="opacity-55 text-[8.5px] uppercase font-bold tracking-wider text-emerald-500">Won</span>
+                        <span className="text-xl font-black text-emerald-500 tabular-nums">{personalStats.gamesCompleted}</span>
+                      </div>
+                      <div className="glass-panel p-3 rounded-xl border border-border-custom/30 flex flex-col gap-0.5">
+                        <span className="opacity-55 text-[8.5px] uppercase font-bold tracking-wider text-amber-500">Win Rate</span>
+                        <span className="text-xl font-black text-amber-500 tabular-nums">{winRate}%</span>
+                      </div>
+                      <div className="glass-panel p-3 rounded-xl border border-border-custom/30 flex flex-col gap-0.5">
+                        <span className="opacity-55 text-[8.5px] uppercase font-bold tracking-wider">Elo Rating</span>
+                        <span className="text-xl font-black text-accent-custom tabular-nums">{profile?.elo || 1450}</span>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -4953,6 +5171,22 @@ export default function App() {
           </div>
         </div>
       )}
+      {/* DAILY CHALLENGE CALENDAR MODAL */}
+      <DailyCalendarModal
+        isOpen={isCalendarOpen}
+        onClose={() => setIsCalendarOpen(false)}
+        selectedDate={selectedCalendarDate}
+        onSelectDate={(newDate) => {
+          setSelectedCalendarDate(newDate);
+          fetchDailyLeaderboard(newDate);
+        }}
+        onPlayDate={(dateToPlay) => {
+          setSelectedCalendarDate(dateToPlay);
+          startDailyGame(dateToPlay);
+        }}
+        solvedDates={solvedDailyDates}
+        leaderboardForDate={dailyLeaderboards[selectedCalendarDate] || []}
+      />
     </div>
   );
 }

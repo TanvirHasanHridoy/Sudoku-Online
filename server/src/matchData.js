@@ -8,7 +8,8 @@ let file, data;
 export function openMatchData() {
   const directory = path.resolve(process.env.SUDOKU_DATA_DIR || fileURLToPath(new URL('../data/', import.meta.url)));
   file = path.join(directory, 'matches.json');
-  data = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : { results: {}, challenges: {} };
+  data = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : { results: {}, challenges: {}, dailyScores: {} };
+  if (!data.dailyScores) data.dailyScores = {};
 }
 
 function commit(next) {
@@ -42,6 +43,33 @@ export function readChallenge(id) {
     return { ...challenge, expired: true };
   }
   return challenge;
+}
+
+export function recordDailyScore(dateStr, entry) {
+  if (!data.dailyScores) data.dailyScores = {};
+  const currentList = Array.isArray(data.dailyScores[dateStr]) ? [...data.dailyScores[dateStr]] : [];
+  const existingIdx = currentList.findIndex(e => e.playerId === entry.playerId);
+  if (existingIdx !== -1) {
+    if (entry.timeSeconds < currentList[existingIdx].timeSeconds) {
+      currentList[existingIdx] = { ...entry, submittedAt: Date.now() };
+    }
+  } else {
+    currentList.push({ ...entry, submittedAt: Date.now() });
+  }
+  // Sort primarily by timeSeconds ascending, then strikes ascending
+  currentList.sort((a, b) => a.timeSeconds - b.timeSeconds || a.strikes - b.strikes);
+  const updatedScores = { ...data.dailyScores, [dateStr]: currentList };
+  commit({ ...data, dailyScores: updatedScores });
+  return getDailyLeaderboard(dateStr);
+}
+
+export function getDailyLeaderboard(dateStr) {
+  if (!data.dailyScores) data.dailyScores = {};
+  const list = Array.isArray(data.dailyScores[dateStr]) ? data.dailyScores[dateStr] : [];
+  return list.slice(0, 5).map((item, idx) => ({
+    ...item,
+    rank: idx + 1,
+  }));
 }
 
 // Durable pending deliveries survive process restart. The database function deduplicates retries.

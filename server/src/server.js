@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { openMatchData, flushProfileResults, recordResult, resultsFor, readChallenge, saveChallenge } from './matchData.js';
+import { openMatchData, flushProfileResults, recordResult, resultsFor, readChallenge, saveChallenge, recordDailyScore, getDailyLeaderboard } from './matchData.js';
 import express from 'express';
 import { createServer } from 'http';
 import { WebSocketServer } from 'ws';
@@ -1117,6 +1117,41 @@ wss.on('connection', (ws) => {
           ws.send(JSON.stringify(type === 'OPEN_CHALLENGE'
             ? { type: 'CHALLENGE_OPENED', payload: { id: payload.id, puzzle, difficulty, name, expiresAt } }
             : { type: 'CHALLENGE_SCORE', payload: { id: payload.id, name, ...score } }));
+          break;
+        }
+        case 'GET_DAILY_LEADERBOARD': {
+          const { date } = payload || {};
+          if (!date || typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+          const leaderboard = getDailyLeaderboard(date);
+          ws.send(JSON.stringify({
+            type: 'DAILY_LEADERBOARD',
+            payload: { date, leaderboard }
+          }));
+          break;
+        }
+        case 'SUBMIT_DAILY_SCORE': {
+          const { date, playerId, name, avatar, timeSeconds, formattedTime, strikes } = payload || {};
+          if (!date || typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+          if (!playerId || typeof playerId !== 'string') return;
+          if (typeof timeSeconds !== 'number' || timeSeconds < 0) return;
+          const cleanName = typeof name === 'string' && name.trim() ? name.trim().slice(0, 20) : 'Anonymous';
+          const cleanAvatar = typeof avatar === 'string' ? avatar : 'apex';
+          const cleanStrikes = Number.isInteger(strikes) && strikes >= 0 ? strikes : 0;
+          const cleanFormattedTime = typeof formattedTime === 'string' ? formattedTime : `${Math.floor(timeSeconds / 60)}:${String(timeSeconds % 60).padStart(2, '0')}`;
+
+          const leaderboard = recordDailyScore(date, {
+            playerId,
+            name: cleanName,
+            avatar: cleanAvatar,
+            timeSeconds,
+            formattedTime: cleanFormattedTime,
+            strikes: cleanStrikes
+          });
+
+          ws.send(JSON.stringify({
+            type: 'DAILY_LEADERBOARD',
+            payload: { date, leaderboard }
+          }));
           break;
         }
         case 'COOP_MOVE': {

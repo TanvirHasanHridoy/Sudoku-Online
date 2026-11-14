@@ -319,3 +319,50 @@ test('chat messages and presets broadcast with spectator flags and text sanitiza
   assert.equal(truncatedMsg.text.length, 80);
 });
 
+test('daily challenge leaderboard retrieval and score submission', async () => {
+  const c1 = await client();
+  const c2 = await client();
+
+  const testDate = '2022-09-02';
+
+  // Request empty leaderboard
+  c1.send('GET_DAILY_LEADERBOARD', { date: testDate });
+  const initial = await c1.next('DAILY_LEADERBOARD');
+  assert.equal(initial.date, testDate);
+  assert.ok(Array.isArray(initial.leaderboard));
+
+  // Player 1 submits score
+  c1.send('SUBMIT_DAILY_SCORE', {
+    date: testDate,
+    playerId: c1.id,
+    name: 'Speedster',
+    avatar: 'apex',
+    timeSeconds: 150,
+    formattedTime: '02:30',
+    strikes: 0,
+  });
+  const res1 = await c1.next('DAILY_LEADERBOARD');
+  assert.equal(res1.date, testDate);
+  const p1Entry = res1.leaderboard.find(e => e.playerId === c1.id);
+  assert.ok(p1Entry);
+  assert.equal(p1Entry.timeSeconds, 150);
+  assert.equal(p1Entry.name, 'Speedster');
+
+  // Player 2 submits faster score
+  c2.send('SUBMIT_DAILY_SCORE', {
+    date: testDate,
+    playerId: c2.id,
+    name: 'GrandMaster',
+    avatar: 'zen',
+    timeSeconds: 120,
+    formattedTime: '02:00',
+    strikes: 1,
+  });
+  const res2 = await c2.next('DAILY_LEADERBOARD');
+  assert.equal(res2.leaderboard[0].name, 'GrandMaster');
+  assert.equal(res2.leaderboard[0].rank, 1);
+  assert.equal(res2.leaderboard[1].name, 'Speedster');
+  assert.equal(res2.leaderboard[1].rank, 2);
+});
+
+

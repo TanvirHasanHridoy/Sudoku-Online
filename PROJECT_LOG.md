@@ -196,3 +196,39 @@ On branch `feature/multiplayer-ux-and-connection`:
 
 
 
+## 2026-11-15 · Daily Challenge with Calendar Picker, Fixed Lobby Chat, and Lobby UX Improvements
+
+On branch `feature/daily-challenge-and-lobby-ux`:
+* **Deterministic Daily Challenge & Calendar Picker:**
+  - **Zero-Database Deterministic Board Generation (`client/src/utils/dailyChallenge.js`):**
+    - Built a fast, stable deterministic Sudoku generator using 32-bit FNV-1a hashing on date strings (`"YYYY-MM-DD"`) and Mulberry32 PRNG.
+    - Deterministically seeds candidate shuffling and cell removal while enforcing unique solution validation via backtracking solver.
+    - Guarantees 100% identical boards for every player worldwide for any selected date (e.g. September 2, 2022) with zero database queries.
+  - **Interactive Calendar Modal (`client/src/components/DailyCalendarModal.jsx`):**
+    - Month and year navigation with quick month and year dropdown selectors (2020 through current year), next/previous controls, and a "Jump to Today" shortcut.
+    - Visual day grid displaying weekday headers, day numbers, today ring indicator, and emerald checkmark badges (`✓`) on dates solved by the user.
+    - Selected date summary card showing date details, solved status, Top 5 Global Solvers preview, and a direct "Play Challenge" launcher.
+  - **Persistent Solved Date Tracking:**
+    - Player's solved challenge dates persist in `localStorage` under `sudoku_daily_solved`.
+  - **Top 5 World Solvers Ranking Board in Game View:**
+    - Game header displays a distinct Daily Challenge calendar badge (`📅 Daily Challenge · [Date]`) with solved indicator.
+    - Game view right sidebar features the Top 5 Global Solvers leaderboard for that specific date (rank 1–5, player name, avatar, time, and strikes).
+    - Hybrid leaderboard: Combines server-persisted player scores with deterministic benchmark solvers when historical or newly opened dates have fewer than 5 submissions, ensuring a competitive target to beat.
+  - **WebSocket Protocol for Daily Leaderboards (`server/src/server.js`, `server/src/matchData.js`):**
+    - Added `GET_DAILY_LEADERBOARD` message handler to fetch top 5 solvers for any requested date.
+    - Added `SUBMIT_DAILY_SCORE` message handler to record solve times and mistakes, persisting scores in `matches.json` under `dailyScores` and broadcasting updated top 5 rankings.
+* **Lobby Chat Fixes & Visual Polish:**
+  - **Fixed-Height Scrollable Chat Window:** Replaced variable height with a fixed height (`h-28 overflow-y-auto space-y-1.5 pr-1 scrollbar-thin`) and auto-scroll anchor (`lobbyChatEndRef`). Typing new messages and incoming banter no longer stretches or shifts the lobby container.
+  - **Conditional Visibility:** Lobby chat and preset buttons are wrapped in `activePlayers.length > 1`, remaining hidden when a host is alone in the lobby and appearing automatically when opponents join.
+* **Lobby Difficulty & Ready Button UX Improvements:**
+  - **Horizontal Difficulty Buttons:** Replaced the `<select>` dropdown in the lobby with individual horizontal buttons (`beginner`, `easy`, `medium`, `hard`, `expert` on desktop; `easy`, `medium`, `hard`, `expert` on mobile) featuring active state highlights.
+  - **Host vs. Guest Button Roles:**
+    - When Player A (host) creates a room and Player B joins, Player A only sees the primary "Start the Match" button (the redundant "Ready to Start" toggle is removed for the host).
+    - Player B's (guest) button now clearly reads "Ready" (or "Unready" when toggled) instead of "Ready to Start".
+* **Verification:**
+  - Node integration test suite passed all 16 tests (`npm test`), including dedicated tests for `GET_DAILY_LEADERBOARD` and `SUBMIT_DAILY_SCORE` verification.
+  - Algorithmic determinism test executed in Node: verified identical board reproduction, 36 clues, unique solution, and 5 benchmark scores for `"2022-09-02"`.
+  - Client production build compiled cleanly with zero errors (`npm run build --prefix client`).
+  - ESLint verified on all new and modified components.
+* **Remaining limitations:**
+  - Global leaderboard persistence requires active connection to the game server. Solved status is tracked locally when offline.

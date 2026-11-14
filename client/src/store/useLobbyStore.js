@@ -53,6 +53,7 @@ export const useLobbyStore = create((set, get) => ({
 
   // Toast Notifications
   toasts: [],
+  dailyLeaderboards: {},
 
   // WebRTC Audio Call States
   localAudioStream: null,
@@ -279,6 +280,18 @@ export const useLobbyStore = create((set, get) => ({
           }
           case 'CHALLENGE_SCORE': {
             if (payload.id === get().challenge?.id) set({ challengeScore: payload });
+            break;
+          }
+          case 'DAILY_LEADERBOARD': {
+            const { date, leaderboard } = payload;
+            if (date && Array.isArray(leaderboard)) {
+              set((state) => ({
+                dailyLeaderboards: {
+                  ...state.dailyLeaderboards,
+                  [date]: leaderboard,
+                },
+              }));
+            }
             break;
           }
           case 'COOP_BOARD': {
@@ -1041,6 +1054,32 @@ export const useLobbyStore = create((set, get) => ({
       payload: {
         board: generatedPuzzle,
         solution: generatedSolution
+      }
+    }));
+  },
+
+  fetchDailyLeaderboard: (date) => {
+    const { ws } = get();
+    if (!ws || ws.readyState !== 1 || !date) return;
+    ws.send(JSON.stringify({
+      type: 'GET_DAILY_LEADERBOARD',
+      payload: { date }
+    }));
+  },
+
+  submitDailyScore: ({ date, timeSeconds, formattedTime, strikes }) => {
+    const { ws, myPlayerId, myPlayerName, selectedAvatar } = get();
+    if (!ws || ws.readyState !== 1 || !date) return;
+    ws.send(JSON.stringify({
+      type: 'SUBMIT_DAILY_SCORE',
+      payload: {
+        date,
+        playerId: myPlayerId,
+        name: myPlayerName,
+        avatar: selectedAvatar,
+        timeSeconds,
+        formattedTime,
+        strikes: strikes || 0,
       }
     }));
   },
