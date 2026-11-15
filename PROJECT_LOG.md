@@ -380,6 +380,12 @@ On branch `feature/coop-voice-chat-and-multiplayer-polish`:
 * **Themed Scrollbars & Opponent Climax Heartbeat Warning:**
   - Chat logs, modal bodies, and mobile drawers use custom themed scrollbar styling (`::-webkit-scrollbar-thumb` using `var(--accent-color)` and `var(--border-color)`).
   - Opponent finish warning previously scaled the entire board; it now strictly triggers at $\ge 90\%$ opponent progress with a pulsating border animation (`@keyframes heartbeatBorder`) and an anatomical procedural Web Audio API heartbeat loop (`playSound.startHeartbeat`).
+* **Build & JSX Syntax Stabilization:**
+  - Resolved Vite build parse errors in `client/src/App.jsx`:
+    - Fixed pause countdown overlay JSX nesting and duplicate resume/exit buttons.
+    - Cleaned up mobile chat drawer tags and duplicate handler bindings.
+    - Removed redundant redeclarations of `isGamePaused`, `prog`, and `cellsDisplay`.
+    - Cleaned up leftover fullscreen modal wrapper on the compact floating invitation toast.
 * **Verification:**
   - Added new integration tests in `server/test/multiplayer.test.js`:
     - `co-op tracks shared teamProgress and cellsContributed per player`
