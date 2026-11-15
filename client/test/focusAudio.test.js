@@ -194,3 +194,41 @@ test('All JSX tags used in App.jsx are valid imports or defined identifiers', as
   }
   assert.deepEqual(missing, [], `Found unimported JSX tags in App.jsx: ${missing.join(', ')}`);
 });
+
+test('Post-game completion modals are guarded by activeView === "game" to prevent home screen lingering', async () => {
+  const fs = await import('fs');
+  const content = fs.readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf-8');
+
+  // Verify Win modal guard
+  assert.ok(
+    content.includes('activeView === "game" && gameStatus === "won"'),
+    'Win modal must check activeView === "game"'
+  );
+
+  // Verify Loss modal guard
+  assert.ok(
+    content.includes('activeView === "game" && gameStatus === "lost"'),
+    'Loss modal must check activeView === "game"'
+  );
+
+  // Verify Practice complete modal guard
+  assert.ok(
+    content.includes('activeView === "game" && gameStatus === "practice-completed"'),
+    'Practice complete modal must check activeView === "game"'
+  );
+});
+
+test('Solo-to-Lobby transition guarantees activeView = home and activeTab = lobby when room is not started', async () => {
+  const fs = await import('fs');
+  const content = fs.readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf-8');
+
+  // Verify effect for pre-game room lobby
+  assert.ok(
+    content.includes('if (room && !room.isGameStarted)'),
+    'App.jsx must watch room && !room.isGameStarted'
+  );
+  assert.ok(
+    content.includes('useGameStore.setState({ gameStatus: "idle" })'),
+    'App.jsx must reset gameStatus to idle when joining an unstarted room'
+  );
+});

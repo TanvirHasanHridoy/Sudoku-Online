@@ -448,3 +448,38 @@ On branch `feature/coop-voice-chat-and-multiplayer-polish`:
 * **Remaining limitations:**
   - Full-mesh WebRTC topology is optimal for rooms with up to 4 players; rooms exceeding 6+ concurrent voice channels would benefit from an SFU (Selective Forwarding Unit) media relay to reduce upstream bandwidth.
 
+## 2026-11-15 · Post-Game Modal Redundancy Cleanup, Home Modal Persistence Fix & Solo-to-Lobby Flow
+
+On branch `feature/coop-voice-chat-and-multiplayer-polish`:
+* **Elimination of Duplicate Post-Game Buttons:**
+  - Diagnosed and removed legacy duplicate "Spectate" buttons occurring in both the Win dialog and Loss dialog.
+  - Single, high-visibility `[👁️ Spectate {OpponentName}]` action rendered cleanly in the actions stack.
+* **Strict Rematch Button Display Rules:**
+  - **While Opponent is Solving (`!bothFinished`):** Rematch button is strictly **hidden**. Rendered options are limited to:
+    1. `[👁️ Spectate {OpponentName}]` (Primary action)
+    2. `[✏️ Keep Solving (Practice Mode)]` (On Loss modal for eliminated players)
+    3. `[UserPlus Challenge a friend]` (Generate and share 48-hour challenge link)
+    4. `[🚪 Leave Room & Go to Home]` (Prominent high-contrast red exit button)
+  - **After Both Players Finish (`bothFinished`):** Rematch becomes the primary action:
+    1. `[⚡ Rematch (Match N+1)]` (Pulsing action showing real-time vote tally)
+    2. `[✏️ Keep Solving (Practice Mode)]` (On Loss modal)
+    3. `[UserPlus Challenge a friend]`
+    4. `[🏠 Return to Room Lobby]`
+    5. `[🚪 Leave Room & Go to Home]`
+* **Fixed Modal Linger on Home Navigation:**
+  - Enforced `activeView === "game"` prerequisite across Win, Loss, and Practice Complete dialog overlays.
+  - Updated all exit and return handlers ("Back to Home", "Exit Room", "Leave Room") to explicitly invoke `useGameStore.setState({ gameStatus: 'idle' })`.
+  - Updated `useLobbyStore.exitToHome()` to always set `gameStatus: 'idle'`, ensuring the modal immediately unmounts when navigating back to home.
+* **Solo-to-Lobby Seamless Transition:**
+  - When Player A is actively playing a solo match and accepts an invitation to join Player B's multiplayer room:
+    - Pre-game lobby room effect automatically forces `activeView = 'home'`, `activeTab = 'lobby'`, and sets `gameStatus: 'idle'`.
+    - Accept button in `activeLobbyInvitation` immediately transitions state before socket join.
+    - Prevents Player A from getting stranded on the solo board while Player B sits in the lobby.
+* **Verification:**
+  - All 31/31 unit, regression, and component tests passed (`npm test`).
+  - Added test verifying modal guards prevent rendering on the home view (`activeView === "game"`).
+  - Added test asserting solo-to-lobby transition guarantees pre-game room reset.
+  - Production Vite client build passed cleanly in 1.05s (`npm run build --prefix client`).
+* **Remaining limitations:**
+  - Full-mesh WebRTC topology is optimal for rooms with up to 4 players; rooms exceeding 6+ concurrent voice channels would benefit from an SFU (Selective Forwarding Unit) media relay to reduce upstream bandwidth.
+

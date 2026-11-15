@@ -536,6 +536,8 @@ export const useLobbyStore = create((set, get) => ({
               if (payload.sharedBoard) useGameStore.setState({ board: payload.sharedBoard });
               if (me.hasFinishedGame) useGameStore.setState({ gameStatus: me.strikes >= 3 ? 'lost' : 'won' });
               useGameStore.getState().persistState();
+            } else if (!payload.room.isGameStarted) {
+              useGameStore.setState({ gameStatus: 'idle' });
             }
             break;
           }
@@ -1266,6 +1268,7 @@ export const useLobbyStore = create((set, get) => ({
 
     // Clear any persisted solo-game state (useGameStore is already imported at the top)
     useGameStore.getState().resetPersistedState();
+    useGameStore.setState({ gameStatus: 'idle' });
 
     // Reset lobby / room state locally
     set({
