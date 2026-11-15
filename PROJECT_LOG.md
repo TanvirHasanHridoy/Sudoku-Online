@@ -245,3 +245,15 @@ On branch `feature/daily-challenge-and-lobby-ux`:
   - Tested TCP connection on `127.0.0.1:5173` via PowerShell (`TcpTestSucceeded: True`).
   - Tested HTTP request to `http://localhost:5173/` (HTTP 200 OK).
   - Confirmed Vite logs are clean with no unhandled runtime errors.
+
+## 2026-11-15 · Remove Mock Benchmark Solvers from Daily Ranking
+
+On branch `feature/daily-challenge-and-lobby-ux`:
+* **Removed Fake Benchmark Scores:**
+  - Removed `getSeededBenchmarkScores` from `client/src/utils/dailyChallenge.js`, `client/src/components/DailyCalendarModal.jsx`, and `client/src/App.jsx`.
+  - Daily leaderboards now strictly show genuine player scores submitted via `SUBMIT_DAILY_SCORE`.
+  - When a date has no solvers yet, the modal and game view display an empty state message: *"No one has solved this date yet. Be the first to claim #1!"*, preserving authentic competition without generated bot scores.
+* **Verification:**
+  - `npm test` passed 16/16 tests.
+  - Production build passed (`npm run build --prefix client`).
+  - Dev server confirmed via Vite HMR update.

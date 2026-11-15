@@ -46,7 +46,6 @@ import {
   formatReadableDate,
   getSolvedDailyDates,
   markDailyDateSolved,
-  getSeededBenchmarkScores,
 } from "./utils/dailyChallenge";
 import { playSound } from "./utils/audio";
 import { useGameStore } from "./store/useGameStore";
@@ -1017,18 +1016,7 @@ export default function App() {
     const targetDate = dailyDate || selectedCalendarDate;
     if (!targetDate) return [];
     const serverList = dailyLeaderboards[targetDate] || [];
-    if (serverList.length >= 5) {
-      return serverList.slice(0, 5);
-    }
-    const benchmarks = getSeededBenchmarkScores(targetDate);
-    const combined = [...serverList];
-    for (const bench of benchmarks) {
-      if (combined.length >= 5) break;
-      if (!combined.some((p) => p.name === bench.name)) {
-        combined.push(bench);
-      }
-    }
-    return combined.sort((a, b) => a.timeSeconds - b.timeSeconds).slice(0, 5).map((e, idx) => ({
+    return serverList.slice(0, 5).map((e, idx) => ({
       ...e,
       rank: idx + 1,
     }));
@@ -4420,34 +4408,40 @@ export default function App() {
                       </div>
 
                       <div className="space-y-1.5">
-                        {topFiveDailyLeaderboard.map((item) => {
-                          const isMe = item.playerId === myPlayerId || item.name === myPlayerName;
-                          return (
-                            <div
-                              key={item.id || item.rank}
-                              className={`flex items-center justify-between py-2 px-3 rounded-xl text-xs transition-all ${
-                                isMe
-                                  ? "bg-accent-custom/20 border border-accent-custom/50 font-bold"
-                                  : "bg-panel-custom/60 border border-border-custom/30"
-                              }`}
-                            >
-                              <div className="flex items-center gap-2 min-w-0">
-                                <span className="w-5 text-center font-black shrink-0">
-                                  {item.rank === 1 ? "🥇" : item.rank === 2 ? "🥈" : item.rank === 3 ? "🥉" : `#${item.rank}`}
-                                </span>
-                                <span className="font-bold truncate text-text-custom">
-                                  {item.name} {isMe && <span className="text-[9px] text-accent-custom font-extrabold">(You)</span>}
-                                </span>
+                        {topFiveDailyLeaderboard.length === 0 ? (
+                          <div className="py-3 px-3 text-center text-xs opacity-60 italic bg-panel-custom/60 rounded-xl border border-border-custom/30">
+                            No one has solved this day's challenge yet. Solve it to claim #1 in the world!
+                          </div>
+                        ) : (
+                          topFiveDailyLeaderboard.map((item) => {
+                            const isMe = item.playerId === myPlayerId || item.name === myPlayerName;
+                            return (
+                              <div
+                                key={item.id || item.rank}
+                                className={`flex items-center justify-between py-2 px-3 rounded-xl text-xs transition-all ${
+                                  isMe
+                                    ? "bg-accent-custom/20 border border-accent-custom/50 font-bold"
+                                    : "bg-panel-custom/60 border border-border-custom/30"
+                                }`}
+                              >
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <span className="w-5 text-center font-black shrink-0">
+                                    {item.rank === 1 ? "🥇" : item.rank === 2 ? "🥈" : item.rank === 3 ? "🥉" : `#${item.rank}`}
+                                  </span>
+                                  <span className="font-bold truncate text-text-custom">
+                                    {item.name} {isMe && <span className="text-[9px] text-accent-custom font-extrabold">(You)</span>}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-2 font-mono font-bold text-xs shrink-0">
+                                  <span className="text-accent-custom">{item.formattedTime}</span>
+                                  <span className="text-[9px] opacity-50 font-normal">
+                                    {item.strikes === 0 ? "0 strikes" : `${item.strikes} strike${item.strikes > 1 ? "s" : ""}`}
+                                  </span>
+                                </div>
                               </div>
-                              <div className="flex items-center gap-2 font-mono font-bold text-xs shrink-0">
-                                <span className="text-accent-custom">{item.formattedTime}</span>
-                                <span className="text-[9px] opacity-50 font-normal">
-                                  {item.strikes === 0 ? "0 strikes" : `${item.strikes} strike${item.strikes > 1 ? "s" : ""}`}
-                                </span>
-                              </div>
-                            </div>
-                          );
-                        })}
+                            );
+                          })
+                        )}
                       </div>
 
                       {solvedDailyDates.has(dailyDate) ? (

@@ -12,7 +12,6 @@ import {
 import {
   formatDateKey,
   formatReadableDate,
-  getSeededBenchmarkScores,
 } from '../utils/dailyChallenge';
 
 const MONTH_NAMES = [
@@ -90,25 +89,14 @@ export default function DailyCalendarModal({
 
   const isSelectedDateSolved = Boolean(solvedDates?.has?.(selectedDate));
 
-  // Combine server daily leaderboard with seeded benchmarks if less than 5
+  // Genuine player daily leaderboard (no fake benchmarks)
   const topFiveLeaderboard = useMemo(() => {
     const serverList = Array.isArray(leaderboardForDate) ? leaderboardForDate : [];
-    if (serverList.length >= 5) {
-      return serverList.slice(0, 5);
-    }
-    const benchmarks = getSeededBenchmarkScores(selectedDate);
-    const combined = [...serverList];
-    for (const bench of benchmarks) {
-      if (combined.length >= 5) break;
-      if (!combined.some((p) => p.name === bench.name)) {
-        combined.push(bench);
-      }
-    }
-    return combined.sort((a, b) => a.timeSeconds - b.timeSeconds).slice(0, 5).map((entry, idx) => ({
+    return serverList.slice(0, 5).map((entry, idx) => ({
       ...entry,
       rank: idx + 1,
     }));
-  }, [leaderboardForDate, selectedDate]);
+  }, [leaderboardForDate]);
 
   if (!isOpen) return null;
 
@@ -296,37 +284,43 @@ export default function DailyCalendarModal({
               <span className="text-[9px] opacity-40 font-semibold">World Records</span>
             </div>
             <div className="space-y-1 bg-panel-custom/80 rounded-xl p-2 border border-border-custom/40 text-xs">
-              {topFiveLeaderboard.map((item) => (
-                <div
-                  key={item.id || item.rank}
-                  className="flex items-center justify-between py-0.5 px-1.5 rounded-lg text-[11px]"
-                >
-                  <div className="flex items-center gap-1.5">
-                    <span
-                      className={`w-4 text-center font-black ${
-                        item.rank === 1
-                          ? 'text-amber-400'
-                          : item.rank === 2
-                          ? 'text-slate-300'
-                          : item.rank === 3
-                          ? 'text-amber-600'
-                          : 'opacity-50'
-                      }`}
-                    >
-                      {item.rank === 1 ? '🥇' : item.rank === 2 ? '🥈' : item.rank === 3 ? '🥉' : `#${item.rank}`}
-                    </span>
-                    <span className="font-bold truncate max-w-[120px] text-text-custom">
-                      {item.name}
-                    </span>
+              {topFiveLeaderboard.length === 0 ? (
+                <p className="text-[11px] opacity-50 italic py-2 text-center">
+                  No one has solved this date yet. Be the first to claim #1!
+                </p>
+              ) : (
+                topFiveLeaderboard.map((item) => (
+                  <div
+                    key={item.id || item.rank}
+                    className="flex items-center justify-between py-0.5 px-1.5 rounded-lg text-[11px]"
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span
+                        className={`w-4 text-center font-black ${
+                          item.rank === 1
+                            ? 'text-amber-400'
+                            : item.rank === 2
+                            ? 'text-slate-300'
+                            : item.rank === 3
+                            ? 'text-amber-600'
+                            : 'opacity-50'
+                        }`}
+                      >
+                        {item.rank === 1 ? '🥇' : item.rank === 2 ? '🥈' : item.rank === 3 ? '🥉' : `#${item.rank}`}
+                      </span>
+                      <span className="font-bold truncate max-w-[120px] text-text-custom">
+                        {item.name}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 font-mono text-[11px] font-bold">
+                      <span className="text-accent-custom">{item.formattedTime}</span>
+                      <span className="text-[9px] opacity-40">
+                        {item.strikes === 0 ? 'Clean' : `${item.strikes} strike`}
+                      </span>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2 font-mono text-[11px] font-bold">
-                    <span className="text-accent-custom">{item.formattedTime}</span>
-                    <span className="text-[9px] opacity-40">
-                      {item.strikes === 0 ? 'Clean' : `${item.strikes} strike`}
-                    </span>
-                  </div>
-                </div>
-              ))}
+                ))
+              )}
             </div>
           </div>
 
