@@ -475,6 +475,8 @@ On branch `feature/coop-voice-chat-and-multiplayer-polish`:
     - Pre-game lobby room effect automatically forces `activeView = 'home'`, `activeTab = 'lobby'`, and sets `gameStatus: 'idle'`.
     - Accept button in `activeLobbyInvitation` immediately transitions state before socket join.
     - Prevents Player A from getting stranded on the solo board while Player B sits in the lobby.
+* **Game Guide & Mode Explanations Discoverability:**
+  - Added 1-tap `[?]` / `Game Guide` access points in the top navigation header (beside Settings), next to the "Enable Special Abilities (Mana) for Room" checkbox on the home lobby, and inside the Player Settings modal, in addition to the room configuration specs bars.
 * **Verification:**
   - All 31/31 unit, regression, and component tests passed (`npm test`).
   - Added test verifying modal guards prevent rendering on the home view (`activeView === "game"`).
