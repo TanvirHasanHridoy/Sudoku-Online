@@ -257,3 +257,35 @@ On branch `feature/daily-challenge-and-lobby-ux`:
   - `npm test` passed 16/16 tests.
   - Production build passed (`npm run build --prefix client`).
   - Dev server confirmed via Vite HMR update.
+
+## 2026-11-15 · Dynamic Lo-Fi Focus Audio Engine & Board View Auto-Focus
+
+On branch `feature/lofi-audio-and-board-focus`:
+* **Sudoku Board View Auto-Focus on Game Start:**
+  - Attached `boardAreaRef` to the active Sudoku grid container in `client/src/App.jsx`.
+  - Added an auto-focus effect on `activeView === "game"` or `room?.isGameStarted` that smoothly centers the board in the viewport (`boardAreaRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' })`).
+  - Eliminates vertical displacement when transitioning from lobby or home views, ensuring the Sudoku board is centered and in focus on both mobile and desktop screens.
+* **Procedural Dynamic Lo-Fi & Focus Audio Engine (`client/src/utils/focusAudio.js`):**
+  - **100% Web Audio API procedural synthesis:** Zero external audio downloads, zero streaming, fully functional offline.
+  - **Atmospheric Mood Presets:**
+    - ☕ **Rainy Cafe Lo-Fi:** Warm electric piano 7th/9th jazz chords (Fmaj7 $\to$ Em7 $\to$ Dm9 $\to$ Cmaj7) with procedural pink-noise rain filter and subtle vinyl crackle clicks.
+    - 🌌 **Midnight Deep Focus:** Analog detuned drone pads (Dsus2 $\to$ Gsus2 $\to$ Bm7 $\to$ Asus4) with subterranean bass rumble and a gentle 14Hz beta-wave concentration binaural tone.
+    - 📼 **Tape Synth Warmth:** 80s chillwave synth pads with wow/flutter pitch modulation (0.35Hz slow drift LFO) and warm analog tape saturation.
+  - **Multi-Stage Adaptive Progression:**
+    - **Stage 1 (0% – 30% progress):** Gentle atmospheric bed + slow, warm ambient chords.
+    - **Stage 2 (30% – 70% progress):** Seamlessly adds mellow lo-fi rhythm section (pitch-swept sub-kick, brush snare, swung closed hi-hat) and deep sub-bassline.
+    - **Stage 3 (70% – 100% progress):** Layers high-octave pentatonic vibraphone/bell arpeggios for focused momentum towards the finish.
+    - **Victory Resolution:** Harmonious major 9th chord sweep (C $\to$ E $\to$ G $\to$ B $\to$ D $\to$ G) with shimmer release, smoothly fading out over 4.5 seconds.
+  - **Audio Safety & Smoothness:** Master dynamics compressor / limiter prevents any clipping or distortion; gain ramping prevents audible clicks on toggles.
+  - **Playback Policy:** Opt-in (off by default); plays strictly during active puzzle gameplay (solo, daily challenge, multiplayer races, co-op); automatically pauses when returning home, entering lobby, or pausing game.
+* **Responsive UI Integration:**
+  - **Desktop Header:** Added `🎧 Focus Lo-Fi` button with animated live equalizer bars. Clicking opens a popover menu with master toggle, preset switcher (☕ Rainy Cafe, 🌌 Midnight Deep Focus, 📼 Tape Synth Warmth), and volume slider.
+  - **Mobile Ergonomics:** Header remains clean and uncluttered (`hidden md:block`); full Lo-Fi controls are integrated inside the **Player Settings Modal** under a dedicated *"Focus Lo-Fi Soundscape"* card with scrollable modal container (`max-h-[88vh] overflow-y-auto scrollbar-thin`).
+  - **Preferences Persistence:** Settings persist in `localStorage` under `sudoku_lofi_enabled`, `sudoku_lofi_volume`, and `sudoku_lofi_preset`.
+* **Verification:**
+  - Added unit test suite in `client/test/focusAudio.test.js` testing all 3 presets, volume clamping, preset switching, stage mapping (0–30%, 30–70%, 70–100%), and enable/disable toggling.
+  - Full test suite passed 21/21 tests (`npm test`).
+  - Production build compiled cleanly with PWA compliance in 1.35s (`npm run build --prefix client`).
+  - Dev server confirmed via Vite HMR update without errors.
+* **Remaining limitations:**
+  - Web Audio playback requires an initial user interaction (such as tapping start, clicking a cell, or toggling the audio button) to satisfy browser autoplay security policies.

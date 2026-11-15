@@ -34,6 +34,8 @@ import {
   Send,
   MessageSquare,
   Calendar,
+  Headphones,
+  Music,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import SudokuGrid from "./components/SudokuGrid";
@@ -48,6 +50,7 @@ import {
   markDailyDateSolved,
 } from "./utils/dailyChallenge";
 import { playSound } from "./utils/audio";
+import { focusAudio, LOFI_PRESETS } from "./utils/focusAudio";
 import { useGameStore } from "./store/useGameStore";
 import { useLobbyStore } from "./store/useLobbyStore";
 import { useSocialStore, getRankTierFromElo } from "./store/useSocialStore";
@@ -126,6 +129,48 @@ export default function App() {
     setShowManaOptionSetting(val);
     localStorage.setItem("sudoku_show_mana_option", JSON.stringify(val));
   };
+
+  // Procedural Lo-Fi Soundscape & Board Focus states
+  const [lofiEnabled, setLofiEnabled] = useState(() => focusAudio.isEnabled);
+  const [lofiVolume, setLofiVolume] = useState(() => focusAudio.volume);
+  const [lofiPreset, setLofiPreset] = useState(() => focusAudio.currentPresetId);
+  const [isLofiMenuOpen, setIsLofiMenuOpen] = useState(false);
+  const lofiMenuRef = useRef(null);
+  const boardAreaRef = useRef(null);
+
+  const handleToggleLofi = (enabled) => {
+    const next = enabled !== undefined ? enabled : !lofiEnabled;
+    setLofiEnabled(next);
+    focusAudio.setEnabled(next);
+    if (next && activeView === "game" && gameStatus === "playing" && !isGamePaused) {
+      focusAudio.play();
+    } else if (!next) {
+      focusAudio.pause();
+    }
+  };
+
+  const handleLofiVolumeChange = (newVol) => {
+    setLofiVolume(newVol);
+    focusAudio.setVolume(newVol);
+  };
+
+  const handleLofiPresetChange = (presetId) => {
+    setLofiPreset(presetId);
+    focusAudio.setPreset(presetId);
+  };
+
+  // Close desktop Lo-Fi popover on click outside
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (lofiMenuRef.current && !lofiMenuRef.current.contains(e.target)) {
+        setIsLofiMenuOpen(false);
+      }
+    };
+    if (isLofiMenuOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [isLofiMenuOpen]);
 
   // Zustand Store - Game State
   const {
@@ -768,6 +813,37 @@ export default function App() {
       setActiveTab("lobby");
     }
   }, [room, activeView, stayedMatch]);
+
+  // Auto-focus on the Sudoku board when entering game
+  useEffect(() => {
+    if (activeView === "game") {
+      const timer = setTimeout(() => {
+        if (boardAreaRef.current) {
+          boardAreaRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+      }, 120);
+      return () => clearTimeout(timer);
+    }
+  }, [activeView, room?.isGameStarted]);
+
+  // Dynamic Procedural Lo-Fi Soundscape Synchronization
+  useEffect(() => {
+    focusAudio.updateProgress(myProgress);
+  }, [myProgress]);
+
+  useEffect(() => {
+    if (activeView === "game" && gameStatus === "playing" && !isGamePaused && lofiEnabled) {
+      focusAudio.play();
+    } else {
+      focusAudio.pause();
+    }
+  }, [activeView, gameStatus, isGamePaused, lofiEnabled]);
+
+  useEffect(() => {
+    if (gameStatus === "won" && lofiEnabled) {
+      focusAudio.triggerWin();
+    }
+  }, [gameStatus, lofiEnabled]);
 
   // Auto-open friend challenge from URL and enter game immediately
   useEffect(() => {
@@ -1826,10 +1902,123 @@ export default function App() {
           <button
             onClick={() => setSoundEnabled(!soundEnabled)}
             className="p-2 rounded-xl border border-border-custom hover:bg-accent-glow hover:border-accent-custom hover:text-accent-custom active:scale-95 transition-all"
-            title={soundEnabled ? "Mute" : "Unmute"}
+            title={soundEnabled ? "Mute Game SFX" : "Unmute Game SFX"}
           >
             {soundEnabled ? <Volume2 size={18} /> : <VolumeX size={18} />}
           </button>
+
+          {/* Desktop Focus Lo-Fi Popover Button (Hidden on Mobile to preserve navbar space) */}
+          <div className="relative hidden md:block" ref={lofiMenuRef}>
+            <button
+              onClick={() => setIsLofiMenuOpen(!isLofiMenuOpen)}
+              className={`p-2 rounded-xl border transition-all flex items-center gap-1.5 text-xs font-semibold active:scale-95 cursor-pointer ${
+                lofiEnabled
+                  ? "border-accent-custom bg-accent-glow text-accent-custom shadow-xs"
+                  : "border-border-custom hover:bg-accent-glow hover:border-accent-custom hover:text-accent-custom"
+              }`}
+              title="Focus Lo-Fi Soundscape (Ambient & Generative)"
+            >
+              <Headphones size={18} className={lofiEnabled && activeView === "game" && gameStatus === "playing" && !isGamePaused ? "text-accent-custom" : ""} />
+              <span className="hidden lg:inline">Focus Lo-Fi</span>
+              {lofiEnabled && activeView === "game" && gameStatus === "playing" && !isGamePaused && (
+                <span className="flex items-end gap-0.5 ml-0.5 h-3">
+                  <span className="w-0.5 bg-accent-custom rounded-full animate-pulse h-2" />
+                  <span className="w-0.5 bg-accent-custom rounded-full animate-pulse h-3 delay-75" />
+                  <span className="w-0.5 bg-accent-custom rounded-full animate-pulse h-1.5 delay-150" />
+                </span>
+              )}
+            </button>
+
+            {isLofiMenuOpen && (
+              <div className="absolute right-0 mt-2 w-72 glass-card rounded-2xl p-4 shadow-2xl border border-border-custom/50 z-50 animate-scale-in text-text-custom space-y-3">
+                <div className="flex items-center justify-between border-b border-border-custom/20 pb-2">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-sm">🎧</span>
+                    <span className="text-xs font-bold uppercase tracking-wider text-accent-custom">
+                      Focus Lo-Fi
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => setIsLofiMenuOpen(false)}
+                    className="text-text-custom/50 hover:text-text-custom p-1 rounded-lg hover:bg-accent-glow cursor-pointer transition-colors"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+
+                {/* Master Enable Toggle */}
+                <div className="flex items-center justify-between p-2 rounded-xl bg-accent-glow/20 border border-border-custom/30">
+                  <div className="flex flex-col text-left">
+                    <span className="text-xs font-bold">Ambient Music</span>
+                    <span className="text-[10px] opacity-60">Plays during puzzle solving</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={lofiEnabled}
+                    onChange={(e) => handleToggleLofi(e.target.checked)}
+                    className="size-4 rounded border-border-custom text-accent-custom bg-accent-glow/20 focus:ring-accent-custom cursor-pointer"
+                  />
+                </div>
+
+                {/* Preset Selector */}
+                <div className="space-y-1.5 text-left">
+                  <label className="text-[10px] uppercase font-bold opacity-75 tracking-wider block">
+                    Mood Preset
+                  </label>
+                  <div className="space-y-1">
+                    {Object.values(LOFI_PRESETS).map((p) => {
+                      const isSelected = lofiPreset === p.id;
+                      return (
+                        <button
+                          key={p.id}
+                          onClick={() => handleLofiPresetChange(p.id)}
+                          className={`w-full text-left p-2 rounded-xl text-xs font-medium border transition-all cursor-pointer flex items-center justify-between ${
+                            isSelected
+                              ? "border-accent-custom bg-accent-custom/15 text-accent-custom font-bold shadow-xs"
+                              : "border-border-custom/30 hover:border-border-custom hover:bg-accent-glow/30 opacity-80 hover:opacity-100"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="text-base">{p.emoji}</span>
+                            <div>
+                              <div className="text-xs font-bold leading-tight">{p.name}</div>
+                              <div className="text-[9px] opacity-60 line-clamp-1">{p.description}</div>
+                            </div>
+                          </div>
+                          {isSelected && <Check size={14} className="text-accent-custom shrink-0 ml-1" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Volume Slider */}
+                <div className="space-y-1 pt-1 text-left">
+                  <div className="flex items-center justify-between text-xs font-medium">
+                    <span className="text-[10px] uppercase font-bold opacity-75 tracking-wider flex items-center gap-1.5">
+                      <Volume2 size={13} /> Volume
+                    </span>
+                    <span className="text-[11px] font-mono opacity-80">{Math.round(lofiVolume * 100)}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.02"
+                    value={lofiVolume}
+                    onChange={(e) => handleLofiVolumeChange(parseFloat(e.target.value))}
+                    className="w-full accent-accent-custom cursor-pointer h-1.5 bg-accent-glow rounded-lg"
+                  />
+                </div>
+
+                {/* Adaptive Flow Tag */}
+                <div className="p-2 rounded-xl bg-panel-custom/40 border border-border-custom/20 text-[10px] opacity-75 text-left">
+                  <span className="font-bold text-accent-custom">⚡ Adaptive Flow: </span>
+                  <span>Evolves with progress (Chords → Drums & Bass → Bell Climax).</span>
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Settings button */}
           <button
@@ -3323,6 +3512,7 @@ export default function App() {
 
               {/* Sudoku Board Grid Wrapper with active spectator outline and spectator eye count badge */}
               <div
+                ref={boardAreaRef}
                 className={`relative w-full max-w-[460px] p-1 rounded-2xl transition-all duration-500 ${isOpponentClose
                   ? "ring-4 ring-rose-500 shadow-[0_0_35px_rgba(244,63,94,0.5)] animate-pulse"
                   : isOpponentWarning
@@ -4410,11 +4600,10 @@ export default function App() {
                             return (
                               <div
                                 key={item.id || item.rank}
-                                className={`flex items-center justify-between py-2 px-3 rounded-xl text-xs transition-all ${
-                                  isMe
-                                    ? "bg-accent-custom/20 border border-accent-custom/50 font-bold"
-                                    : "bg-panel-custom/60 border border-border-custom/30"
-                                }`}
+                                className={`flex items-center justify-between py-2 px-3 rounded-xl text-xs transition-all ${isMe
+                                  ? "bg-accent-custom/20 border border-accent-custom/50 font-bold"
+                                  : "bg-panel-custom/60 border border-border-custom/30"
+                                  }`}
                               >
                                 <div className="flex items-center gap-2 min-w-0">
                                   <span className="w-5 text-center font-black shrink-0">
@@ -4969,7 +5158,7 @@ export default function App() {
       {/* USER PREFERENCES SETTINGS MODAL */}
       {showSettingsModal && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-fade-in">
-          <div className="glass-card rounded-2xl p-6 max-w-sm w-full space-y-5 animate-scale-in relative border border-border-custom/40 text-text-custom">
+          <div className="glass-card rounded-2xl p-6 max-w-sm w-full max-h-[88vh] overflow-y-auto scrollbar-thin space-y-5 animate-scale-in relative border border-border-custom/40 text-text-custom">
             {/* Close Button */}
             <button
               onClick={() => setShowSettingsModal(false)}
@@ -5060,6 +5249,81 @@ export default function App() {
                   onChange={(e) => setSoundEnabled(e.target.checked)}
                   className="w-4 h-4 rounded border-border-custom text-accent-custom bg-accent-glow/20 focus:ring-accent-custom focus:ring-offset-0 cursor-pointer animate-scale-in"
                 />
+              </div>
+
+              {/* Focus Lo-Fi Soundscape Settings Card */}
+              <div className="p-3 rounded-xl border border-border-custom bg-accent-glow/15 space-y-3 text-left">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Headphones size={16} className="text-accent-custom shrink-0" />
+                    <div>
+                      <span className="block text-xs font-bold text-text-custom">Focus Lo-Fi Soundscape</span>
+                      <span className="block text-[9px] text-text-custom/70">100% offline procedural ambient music</span>
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={lofiEnabled}
+                    onChange={(e) => handleToggleLofi(e.target.checked)}
+                    className="w-4 h-4 rounded border-border-custom text-accent-custom bg-accent-glow/20 focus:ring-accent-custom cursor-pointer"
+                  />
+                </div>
+
+                {lofiEnabled && (
+                  <div className="space-y-2.5 pt-1 border-t border-border-custom/20 animate-fade-in">
+                    {/* Mood Preset Buttons */}
+                    <div className="space-y-1">
+                      <label className="text-[9px] uppercase font-bold opacity-75 tracking-wider block">
+                        Atmospheric Mood
+                      </label>
+                      <div className="grid grid-cols-1 gap-1">
+                        {Object.values(LOFI_PRESETS).map((p) => {
+                          const isSelected = lofiPreset === p.id;
+                          return (
+                            <button
+                              key={p.id}
+                              type="button"
+                              onClick={() => handleLofiPresetChange(p.id)}
+                              className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-all cursor-pointer flex items-center justify-between ${
+                                isSelected
+                                  ? "border-accent-custom bg-accent-custom/20 text-accent-custom font-bold"
+                                  : "border-border-custom/30 hover:bg-accent-glow/20 opacity-80"
+                              }`}
+                            >
+                              <span className="flex items-center gap-1.5">
+                                <span>{p.emoji}</span>
+                                <span className="text-[11px] font-semibold">{p.name}</span>
+                              </span>
+                              {isSelected && <Check size={12} className="text-accent-custom" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Volume Slider */}
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between text-[10px]">
+                        <span className="opacity-75 font-semibold flex items-center gap-1">
+                          <Volume2 size={12} /> Music Volume
+                        </span>
+                        <span className="font-mono opacity-80">{Math.round(lofiVolume * 100)}%</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.02"
+                        value={lofiVolume}
+                        onChange={(e) => handleLofiVolumeChange(parseFloat(e.target.value))}
+                        className="w-full accent-accent-custom cursor-pointer h-1.5 bg-accent-glow rounded-lg"
+                      />
+                    </div>
+                    <p className="text-[8px] opacity-60 italic">
+                      Music plays during puzzle solving and dynamically evolves as you fill the grid.
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
 
