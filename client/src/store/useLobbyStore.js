@@ -290,12 +290,19 @@ export const useLobbyStore = create((set, get) => ({
           case 'DAILY_LEADERBOARD': {
             const { date, leaderboard } = payload;
             if (date && Array.isArray(leaderboard)) {
-              set((state) => ({
-                dailyLeaderboards: {
-                  ...state.dailyLeaderboards,
-                  [date]: leaderboard,
-                },
-              }));
+              set((state) => {
+                const existing = state.dailyLeaderboards[date];
+                // Do not overwrite non-empty Supabase leaderboard with empty local fallback
+                if (existing && existing.length > 0 && leaderboard.length === 0) {
+                  return {};
+                }
+                return {
+                  dailyLeaderboards: {
+                    ...state.dailyLeaderboards,
+                    [date]: leaderboard,
+                  },
+                };
+              });
             }
             break;
           }
@@ -1124,7 +1131,7 @@ export const useLobbyStore = create((set, get) => ({
           .order('created_at', { ascending: true })
           .limit(10);
 
-        if (!error && Array.isArray(data)) {
+        if (!error && Array.isArray(data) && data.length > 0) {
           const formatted = data.map((row, idx) => ({
             rank: idx + 1,
             playerId: row.player_id,
@@ -1140,6 +1147,7 @@ export const useLobbyStore = create((set, get) => ({
               [date]: formatted,
             },
           }));
+          return; // Supabase returned genuine data, skip local server fallback
         }
       }
     } catch (err) {
