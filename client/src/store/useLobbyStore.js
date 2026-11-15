@@ -600,7 +600,15 @@ export const useLobbyStore = create((set, get) => ({
                     } 
                   : p
               );
-              return { room: { ...state.room, players: updatedPlayers } };
+              return { 
+                room: { 
+                  ...state.room, 
+                  players: updatedPlayers,
+                  seriesScore: payload.seriesScore !== undefined ? payload.seriesScore : state.room.seriesScore,
+                  currentStreak: payload.currentStreak !== undefined ? payload.currentStreak : state.room.currentStreak,
+                  seriesCount: payload.seriesCount !== undefined ? payload.seriesCount : state.room.seriesCount
+                } 
+              };
             });
             break;
           }
@@ -710,7 +718,15 @@ export const useLobbyStore = create((set, get) => ({
                     }
                   : p
               );
-              return { room: { ...state.room, players: updatedPlayers } };
+              return { 
+                room: { 
+                  ...state.room, 
+                  players: updatedPlayers,
+                  seriesScore: payload.seriesScore !== undefined ? payload.seriesScore : state.room.seriesScore,
+                  currentStreak: payload.currentStreak !== undefined ? payload.currentStreak : state.room.currentStreak,
+                  seriesCount: payload.seriesCount !== undefined ? payload.seriesCount : state.room.seriesCount
+                } 
+              };
             });
             if (result === 'won' && playerId) {
               const currentFinishers = get().finishers || [];

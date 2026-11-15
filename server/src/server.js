@@ -661,13 +661,21 @@ wss.on('connection', (ws) => {
               payload: {
                 playerId: currentPlayer.id,
                 name: currentPlayer.name,
-                result: 'lost'
+                result: 'lost',
+                seriesScore: room.seriesScore,
+                currentStreak: room.currentStreak,
+                seriesCount: room.seriesCount
               }
             }, currentPlayer.id);
           } else if (wasFinished && finisherInfo) {
             broadcastToRoom(currentRoomCode, {
               type: 'PLAYER_FINISHED',
-              payload: finisherInfo
+              payload: {
+                ...finisherInfo,
+                seriesScore: room.seriesScore,
+                currentStreak: room.currentStreak,
+                seriesCount: room.seriesCount
+              }
             }, currentPlayer.id);
           }
           break;

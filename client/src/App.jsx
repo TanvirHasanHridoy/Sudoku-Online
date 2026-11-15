@@ -4555,11 +4555,20 @@ export default function App() {
                                       {room.isGameStarted && (
                                         (() => {
                                           const pFinisher = (finishers || []).find((f) => f.playerId === p.id);
-                                          const isFinished = !isMe && (!!pFinisher || p.hasFinishedGame || p.result === 'won' || p.progress >= 100);
-                                          if (isFinished) {
+                                          const isEliminated = p.strikes >= 3 || p.result === 'lost';
+                                          if (isEliminated) {
+                                            return (
+                                              <div className="flex items-center justify-between text-[11px] font-bold text-rose-500 py-1 bg-rose-500/10 px-2 rounded-lg border border-rose-500/20">
+                                                <span>💀 Eliminated (3 Strikes)</span>
+                                                <span className="text-[10px] opacity-75 font-mono">{p.progress || 0}%</span>
+                                              </div>
+                                            );
+                                          }
+                                          const isWon = !isEliminated && !isMe && (!!pFinisher || p.result === 'won' || (p.hasFinishedGame && p.strikes < 3) || p.progress >= 100);
+                                          if (isWon) {
                                             const place = pFinisher?.place || (p.result === 'won' ? 1 : null);
                                             return (
-                                              <div className="flex items-center justify-between text-[11px] font-bold text-accent-custom py-1 bg-accent-glow/20 px-2 rounded-lg border border-accent-custom/20">
+                                              <div className="flex items-center justify-between text-[11px] font-bold text-emerald-400 py-1 bg-emerald-500/10 px-2 rounded-lg border border-emerald-500/20">
                                                 <span>{place === 1 ? '🥇 1st Place' : place === 2 ? '🥈 2nd Place' : place === 3 ? '🥉 3rd Place' : place ? `#${place}` : '🏆 Solved!'}</span>
                                                 {pFinisher?.formattedTime && <span className="text-[10px] opacity-75 font-mono">{pFinisher.formattedTime}</span>}
                                               </div>

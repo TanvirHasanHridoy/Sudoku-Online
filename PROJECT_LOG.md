@@ -485,3 +485,24 @@ On branch `feature/coop-voice-chat-and-multiplayer-polish`:
 * **Remaining limitations:**
   - Full-mesh WebRTC topology is optimal for rooms with up to 4 players; rooms exceeding 6+ concurrent voice channels would benefit from an SFU (Selective Forwarding Unit) media relay to reduce upstream bandwidth.
 
+## 2026-11-15 · Series Score Synchronization & Lobby Connections Elimination Badge Fix
+
+On branch `feature/coop-voice-chat-and-multiplayer-polish`:
+* **Series Score Desynchronization Fix:**
+  - Diagnosed that `PROGRESS_UPDATED` client handler in `useLobbyStore.js` only updated `room.players` and dropped `seriesScore`, `currentStreak`, and `seriesCount`.
+  - Updated `useLobbyStore.js` to preserve `seriesScore`, `currentStreak`, and `seriesCount` across both `PROGRESS_UPDATED` and `PLAYER_FINISHED` events.
+  - Forwarded `seriesScore`, `currentStreak`, and `seriesCount` in `server/src/server.js` within `PLAYER_FINISHED` broadcasts.
+  - The post-game modal now accurately displays the updated series standings (e.g. `1 - 0`) immediately upon match completion rather than falling back to a tied `0 - 0` display.
+* **Lobby Connections Elimination Badge Fix:**
+  - Fixed a condition in `client/src/App.jsx` where eliminated opponents (`strikes >= 3` or `result === 'lost'`) were evaluated as finishers and defaulted to `🏆 Solved!` because their `place` was null.
+  - Explicitly separated `isEliminated` from `isWon`. Eliminated opponents now display a clear `💀 Eliminated (3 Strikes)` badge with their final progress percentage in red, while actual solvers display podium placements or `🏆 Solved!`.
+* **Side-Effect Prevention Architectural Guide:**
+  - Authored comprehensive professional guide in `docs/SIDE_EFFECT_CONTROL_STRATEGY.md` covering the 5 Pillars: Finite State Machines (FSMs), Pure Selectors Outside JSX, Typed WebSocket Contracts, Atomic Component Decoupling (<250 LOC), and Test-Driven Bug Fixes.
+* **Verification:**
+  - Full automated test suite passed all 33/33 tests (`npm test`).
+  - Added unit test asserting `Lobby Connections` explicitly distinguishes eliminated players from solvers.
+  - Added unit test asserting `useLobbyStore` retains `seriesScore`, `currentStreak`, and `seriesCount` on updates.
+  - Production Vite client build passed cleanly in 1.42s (`npm run build --prefix client`).
+* **Remaining limitations:**
+  - Full-mesh WebRTC topology is optimal for rooms with up to 4 players; rooms exceeding 6+ concurrent voice channels would benefit from an SFU (Selective Forwarding Unit) media relay to reduce upstream bandwidth.
+

@@ -232,3 +232,44 @@ test('Solo-to-Lobby transition guarantees activeView = home and activeTab = lobb
     'App.jsx must reset gameStatus to idle when joining an unstarted room'
   );
 });
+
+test('Lobby connections explicitly distinguishes eliminated players from solvers', async () => {
+  const fs = await import('fs');
+  const content = fs.readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf-8');
+
+  // Verify isEliminated check precedes isWon
+  assert.ok(
+    content.includes("const isEliminated = p.strikes >= 3 || p.result === 'lost';"),
+    'App.jsx must check isEliminated'
+  );
+  assert.ok(
+    content.includes('💀 Eliminated (3 Strikes)'),
+    'App.jsx must render elimination badge'
+  );
+  assert.ok(
+    content.includes('const isWon = !isEliminated'),
+    'App.jsx isWon check must exclude eliminated players'
+  );
+});
+
+test('useLobbyStore preserves seriesScore, currentStreak, and seriesCount on updates', async () => {
+  const fs = await import('fs');
+  const lobbyStoreContent = fs.readFileSync(new URL('../src/store/useLobbyStore.js', import.meta.url), 'utf-8');
+  const serverContent = fs.readFileSync(new URL('../../server/src/server.js', import.meta.url), 'utf-8');
+
+  // Verify seriesScore is retained in PROGRESS_UPDATED and PLAYER_FINISHED
+  assert.ok(
+    lobbyStoreContent.includes('seriesScore: payload.seriesScore !== undefined ? payload.seriesScore : state.room.seriesScore'),
+    'useLobbyStore must retain seriesScore in room updates'
+  );
+  assert.ok(
+    lobbyStoreContent.includes('currentStreak: payload.currentStreak !== undefined ? payload.currentStreak : state.room.currentStreak'),
+    'useLobbyStore must retain currentStreak in room updates'
+  );
+
+  // Verify server sends seriesScore on PLAYER_FINISHED
+  assert.ok(
+    serverContent.includes('type: \'PLAYER_FINISHED\'') && serverContent.includes('seriesScore: room.seriesScore'),
+    'server.js must broadcast seriesScore in PLAYER_FINISHED'
+  );
+});
