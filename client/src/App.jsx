@@ -339,6 +339,7 @@ export default function App() {
   const [selectedCalendarDate, setSelectedCalendarDate] = useState(() => formatDateKey(new Date()));
   const [dailyDate, setDailyDate] = useState(null);
   const [solvedDailyDates, setSolvedDailyDates] = useState(() => getSolvedDailyDates());
+  const dailySubmissionRef = useRef(null);
 
   // Real-time username checking & validation states
   const [dbUsernameError, setDbUsernameError] = useState("");
@@ -1283,6 +1284,10 @@ export default function App() {
   }, [challenge, gameStatus, isConnected, ws]);
   useEffect(() => {
     if (dailyDate && gameStatus === "won") {
+      const submissionKey = `${dailyDate}_${seconds}_${strikes}`;
+      if (dailySubmissionRef.current === submissionKey) return;
+      dailySubmissionRef.current = submissionKey;
+
       markDailyDateSolved(dailyDate);
       setSolvedDailyDates(getSolvedDailyDates());
       submitDailyScore({
@@ -1294,7 +1299,7 @@ export default function App() {
       fetchDailyLeaderboard(dailyDate);
       useLobbyStore.getState().addToast(`🎉 Daily Challenge for ${formatReadableDate(dailyDate)} Solved!`, "success");
     }
-  }, [dailyDate, gameStatus]);
+  }, [dailyDate, gameStatus, seconds, strikes]);
   useEffect(() => {
     if (dailyDate) {
       fetchDailyLeaderboard(dailyDate);

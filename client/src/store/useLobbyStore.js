@@ -1108,30 +1108,124 @@ export const useLobbyStore = create((set, get) => ({
     }));
   },
 
-  fetchDailyLeaderboard: (date) => {
+  fetchDailyLeaderboard: async (date) => {
+    if (!date) return;
+
+    // 1. Fetch directly from Supabase for cross-platform persistence across all accounts
+    try {
+      const { supabase } = await import('../lib/supabase');
+      if (supabase) {
+        const { data, error } = await supabase
+          .from('daily_challenge_scores')
+          .select('player_id, name, avatar, time_seconds, formatted_time, strikes, created_at')
+          .eq('challenge_date', date)
+          .order('time_seconds', { ascending: true })
+          .order('strikes', { ascending: true })
+          .order('created_at', { ascending: true })
+          .limit(10);
+
+        if (!error && Array.isArray(data)) {
+          const formatted = data.map((row, idx) => ({
+            rank: idx + 1,
+            playerId: row.player_id,
+            name: row.name,
+            avatar: row.avatar || 'apex',
+            timeSeconds: row.time_seconds,
+            formattedTime: row.formatted_time,
+            strikes: row.strikes || 0,
+          }));
+          set((state) => ({
+            dailyLeaderboards: {
+              ...state.dailyLeaderboards,
+              [date]: formatted,
+            },
+          }));
+        }
+      }
+    } catch (err) {
+      console.warn('[LobbyStore] Failed to fetch daily leaderboard from Supabase:', err);
+    }
+
+    // 2. Also query local WebSocket server as dual-sync fallback
     const { ws } = get();
-    if (!ws || ws.readyState !== 1 || !date) return;
-    ws.send(JSON.stringify({
-      type: 'GET_DAILY_LEADERBOARD',
-      payload: { date }
-    }));
+    if (ws && ws.readyState === 1) {
+      ws.send(JSON.stringify({
+        type: 'GET_DAILY_LEADERBOARD',
+        payload: { date }
+      }));
+    }
   },
 
-  submitDailyScore: ({ date, timeSeconds, formattedTime, strikes }) => {
+  submitDailyScore: async ({ date, timeSeconds, formattedTime, strikes }) => {
+    if (!date || typeof timeSeconds !== 'number') return;
     const { ws, myPlayerId, myPlayerName, selectedAvatar } = get();
-    if (!ws || ws.readyState !== 1 || !date) return;
-    ws.send(JSON.stringify({
-      type: 'SUBMIT_DAILY_SCORE',
-      payload: {
-        date,
-        playerId: myPlayerId,
-        name: myPlayerName,
-        avatar: selectedAvatar,
-        timeSeconds,
-        formattedTime,
-        strikes: strikes || 0,
+    const effectiveId = myPlayerId || localStorage.getItem('sudoku_player_id') || 'guest_' + Math.random().toString(36).slice(2, 9);
+    const effectiveName = myPlayerName || localStorage.getItem('sudoku_player_name') || 'Player';
+    const effectiveAvatar = selectedAvatar || localStorage.getItem('sudoku_avatar') || 'apex';
+    const cleanStrikes = Number.isInteger(strikes) && strikes >= 0 ? strikes : 0;
+    const cleanTimeStr = formattedTime || `${Math.floor(timeSeconds / 60).toString().padStart(2, '0')}:${(timeSeconds % 60).toString().padStart(2, '0')}`;
+
+    // 1. Persist directly to Supabase
+    try {
+      const { supabase } = await import('../lib/supabase');
+      if (supabase) {
+        const { data: existing, error: checkError } = await supabase
+          .from('daily_challenge_scores')
+          .select('id, time_seconds')
+          .eq('challenge_date', date)
+          .eq('player_id', effectiveId)
+          .maybeSingle();
+
+        if (!checkError && existing) {
+          // If faster, update the existing record
+          if (timeSeconds < existing.time_seconds) {
+            await supabase
+              .from('daily_challenge_scores')
+              .update({
+                name: effectiveName,
+                avatar: effectiveAvatar,
+                time_seconds: timeSeconds,
+                formatted_time: cleanTimeStr,
+                strikes: cleanStrikes,
+              })
+              .eq('id', existing.id);
+          }
+        } else if (!checkError) {
+          await supabase
+            .from('daily_challenge_scores')
+            .insert({
+              challenge_date: date,
+              player_id: effectiveId,
+              name: effectiveName,
+              avatar: effectiveAvatar,
+              time_seconds: timeSeconds,
+              formatted_time: cleanTimeStr,
+              strikes: cleanStrikes,
+            });
+        }
+
+        // Re-fetch leaderboard from Supabase immediately to refresh UI
+        await get().fetchDailyLeaderboard(date);
       }
-    }));
+    } catch (err) {
+      console.warn('[LobbyStore] Failed saving daily score to Supabase:', err);
+    }
+
+    // 2. Also send over WebSocket as dual-sync fallback
+    if (ws && ws.readyState === 1) {
+      ws.send(JSON.stringify({
+        type: 'SUBMIT_DAILY_SCORE',
+        payload: {
+          date,
+          playerId: effectiveId,
+          name: effectiveName,
+          avatar: effectiveAvatar,
+          timeSeconds,
+          formattedTime: cleanTimeStr,
+          strikes: cleanStrikes,
+        }
+      }));
+    }
   },
 
   sendProgress: (progress, strikes, mana, cellsLeft, total, formattedTime) => {

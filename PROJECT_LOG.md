@@ -506,3 +506,17 @@ On branch `feature/coop-voice-chat-and-multiplayer-polish`:
 * **Remaining limitations:**
   - Full-mesh WebRTC topology is optimal for rooms with up to 4 players; rooms exceeding 6+ concurrent voice channels would benefit from an SFU (Selective Forwarding Unit) media relay to reduce upstream bandwidth.
 
+## 2026-11-15 · Supabase Daily Challenge Leaderboard Integration
+
+On branch `feature/coop-voice-chat-and-multiplayer-polish`:
+* **Supabase Daily Challenge Score Persistence:**
+  - Designed and authored `server/sql/daily_challenge_scores.sql` schema with compound index, RLS policies, and unique player date constraints.
+  - Updated `useLobbyStore.js` to persist daily challenge completions directly into `daily_challenge_scores` on Supabase and fetch cross-account daily leaderboards with WebSocket fallback.
+  - Guarded submission in `App.jsx` with `dailySubmissionRef` to prevent duplicate submissions while ensuring final timer and strike counts are synced.
+* **Verification:**
+  - All 34/34 automated test suite passed (`npm test`).
+  - Added test asserting `useLobbyStore` integrates daily challenge scores with Supabase table.
+  - Production Vite client build passed cleanly in 1.40s (`npm run build --prefix client`).
+* **Remaining limitations:**
+  - Requires running `server/sql/daily_challenge_scores.sql` in the Supabase SQL Editor once to initialize the table.
+

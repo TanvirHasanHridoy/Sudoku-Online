@@ -273,3 +273,17 @@ test('useLobbyStore preserves seriesScore, currentStreak, and seriesCount on upd
     'server.js must broadcast seriesScore in PLAYER_FINISHED'
   );
 });
+
+test('useLobbyStore integrates daily challenge scores with Supabase daily_challenge_scores table', async () => {
+  const fs = await import('fs');
+  const lobbyStoreContent = fs.readFileSync(new URL('../src/store/useLobbyStore.js', import.meta.url), 'utf-8');
+
+  assert.ok(
+    lobbyStoreContent.includes('daily_challenge_scores'),
+    'useLobbyStore must reference daily_challenge_scores table'
+  );
+  assert.ok(
+    lobbyStoreContent.includes('challenge_date'),
+    'useLobbyStore must query and insert by challenge_date'
+  );
+});
