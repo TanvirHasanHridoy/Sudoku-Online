@@ -646,6 +646,15 @@ const spectatedPlayer = room?.players?.find(
   (p) => p.id === spectatingPlayerId,
 );
 const hasSpectatedPlayerLeft = !!(spectatingPlayerId && !spectatedPlayer);
+const spectatedFinisher = (finishers || []).find((f) => f.playerId === spectatingPlayerId);
+const isSpectatedPlayerFinished = !!(
+  spectatedFinisher ||
+  spectatedPlayer?.hasFinishedGame ||
+  spectatedPlayer?.result === "won" ||
+  ((spectatedPlayer?.progress || 0) >= 100)
+);
+const hasSpectatedVotedRematch = !!(room?.playAgainVotes?.[spectatingPlayerId]);
+const haveIVotedRematch = !!(room?.playAgainVotes?.[myPlayerId]);
 
 // Connect WebSockets, init ELO profile, and restore persisted solo game on mount
 useEffect(() => {
@@ -2714,18 +2723,29 @@ return (
                     </div>
 
                     {/* Room Configuration Specs Bar */}
-                    <div className="flex flex-wrap items-center gap-1.5 py-1.5 px-2.5 bg-accent-glow/20 border border-border-custom/40 rounded-xl text-[11px] font-bold">
-                      <span className="px-2 py-0.5 rounded-md bg-accent-custom text-white capitalize shadow-xs">
-                        {room.difficulty || "medium"}
-                      </span>
-                      <span className={`px-2 py-0.5 rounded-md border ${room.coop ? "bg-indigo-500/15 border-indigo-500/30 text-indigo-400" : "bg-emerald-500/15 border-emerald-500/30 text-emerald-400"}`}>
-                        {room.coop ? "🤝 Co-op Mode" : "⚡ Speed Race"}
-                      </span>
-                      {room.enableAbilities && (
-                        <span className="px-2 py-0.5 rounded-md bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center gap-1">
-                          ✨ Abilities ON
+                    <div className="flex flex-wrap items-center justify-between gap-1.5 py-1.5 px-2.5 bg-accent-glow/20 border border-border-custom/40 rounded-xl text-[11px] font-bold">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="px-2 py-0.5 rounded-md bg-accent-custom text-white capitalize shadow-xs">
+                          {room.difficulty || "medium"}
                         </span>
-                      )}
+                        <span className={`px-2 py-0.5 rounded-md border ${room.coop ? "bg-indigo-500/15 border-indigo-500/30 text-indigo-400" : "bg-emerald-500/15 border-emerald-500/30 text-emerald-400"}`}>
+                          {room.coop ? "🤝 Co-op Mode" : "⚡ Speed Race"}
+                        </span>
+                        {room.enableAbilities && (
+                          <span className="px-2 py-0.5 rounded-md bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center gap-1">
+                            ✨ Abilities ON
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setIsGuideOpen(true)}
+                        className="text-[10px] text-accent-custom hover:underline flex items-center gap-1 cursor-pointer font-bold opacity-80 hover:opacity-100"
+                        title="View Mode & Ability Rules"
+                      >
+                        <HelpCircle size={12} />
+                        <span>Game Guide</span>
+                      </button>
                     </div>
 
                     <div>
@@ -3319,46 +3339,22 @@ return (
                             </div>
                           </div>
                           <div className="shrink-0 flex items-center gap-1">
-                            {f.status === "in-game" && f.roomCode ? (
-                              <button
-                                onClick={() => handleSpectateFriend(f.roomCode, f.id)}
-                                className="px-2 py-1 bg-rose-500 hover:bg-rose-600 text-white font-bold text-[9px] rounded-lg shadow-sm active:scale-95 transition-all flex items-center gap-1 cursor-pointer font-sans"
-                                title="Spectate friend's live match"
-                              >
-                                <Eye size={11} /> Spectate
-                              </button>
-                            ) : room ? (
-                              <button
-                                onClick={() => inviteFriend(f.id)}
-                                disabled={f.status !== "online"}
-                                className={`px-2 py-1 border transition-all rounded-md text-[9px] font-bold ${f.status === "online"
-                                  ? "bg-accent-glow border-border-custom hover:border-accent-custom hover:text-accent-custom active:scale-95 cursor-pointer"
-                                  : "bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700 cursor-not-allowed opacity-50"
-                                  }`}
-                                title={
-                                  f.status !== "online"
-                                    ? `Friend is currently: ${f.status}`
-                                    : "Invite to Room"
-                                }
-                              >
-                                Invite
-                              </button>
-                            ) : f.status === "in-lobby" && f.roomCode ? (
-                              <button
-                                onClick={() => joinRoom(f.roomCode)}
-                                className="px-2 py-1 border transition-all rounded-md text-[9px] font-bold bg-emerald-500/10 border-emerald-500/30 hover:border-emerald-500 hover:text-emerald-500 hover:bg-emerald-500/20 active:scale-95 cursor-pointer text-emerald-500"
-                                title="Join Friend's Lobby Room"
-                              >
-                                Join Room
-                              </button>
-                            ) : (
-                              <span className="text-[9px] uppercase font-bold opacity-45 px-1">
-                                {f.status || "offline"}
-                              </span>
-                            )}
                             {(() => {
                               const isFriendInSameRoom = room && (room.code === f.roomCode || room.players?.some((p) => p.id === f.id));
                               if (isFriendInSameRoom) {
+                                const isMeFinished = gameStatus === "won" || gameStatus === "lost";
+                                const isFriendFinished = (finishers || []).some((fin) => fin.playerId === f.id);
+                                if (isMeFinished && !isFriendFinished && room.isGameStarted) {
+                                  return (
+                                    <button
+                                      onClick={() => startSpectating(f.id)}
+                                      className="px-2 py-1 bg-rose-500 hover:bg-rose-600 text-white font-bold text-[9px] rounded-lg shadow-sm active:scale-95 transition-all flex items-center gap-1 cursor-pointer font-sans"
+                                      title="Spectate friend in current match"
+                                    >
+                                      <Eye size={11} /> Spectate
+                                    </button>
+                                  );
+                                }
                                 return (
                                   <span className="text-[9px] uppercase font-bold text-accent-custom px-1.5 py-0.5 rounded bg-accent-glow/30 border border-accent-custom/20">
                                     In Match
@@ -3505,7 +3501,7 @@ return (
                       leaveRoom();
                       setActiveView("home");
                     }}
-                    className="px-4 py-2.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-400 border border-rose-500/30 font-bold rounded-xl active:scale-95 transition-all text-xs flex items-center gap-1.5 cursor-pointer"
+                    className="px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl active:scale-95 transition-all text-xs flex items-center gap-1.5 shadow-md shadow-rose-950/40 border border-rose-400/30 cursor-pointer"
                   >
                     <LogOut size={14} />
                     Exit Match
@@ -3783,38 +3779,85 @@ return (
             {/* Spectator Top Bar Indicator */}
             {spectatingPlayerId && (
               <div
-                className={`w-full max-w-[460px] glass-panel px-4 py-2 rounded-xl mb-3 border flex items-center justify-between shadow-md transition-all ${hasSpectatedPlayerLeft
-                  ? "border-zinc-500/30 shadow-zinc-500/5 bg-zinc-500/5 opacity-80"
-                  : "border-rose-500/30 animate-pulse shadow-rose-500/10 bg-rose-500/5"
-                  }`}
+                className={`w-full max-w-[460px] glass-panel px-4 py-2.5 rounded-2xl mb-3 border flex flex-col sm:flex-row items-center justify-between gap-2.5 shadow-lg transition-all ${
+                  isSpectatedPlayerFinished
+                    ? "border-emerald-500/50 bg-emerald-950/20 shadow-emerald-500/10"
+                    : hasSpectatedPlayerLeft
+                    ? "border-zinc-500/30 shadow-zinc-500/5 bg-zinc-500/5 opacity-80"
+                    : "border-rose-500/30 animate-pulse shadow-rose-500/10 bg-rose-500/5"
+                }`}
               >
-                <div className="flex items-center gap-2">
-                  {hasSpectatedPlayerLeft ? (
-                    <div className="w-2 h-2 rounded-full bg-zinc-500"></div>
+                <div className="flex items-center gap-2.5">
+                  {isSpectatedPlayerFinished ? (
+                    <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-sm shadow-emerald-400" />
+                  ) : hasSpectatedPlayerLeft ? (
+                    <div className="w-2.5 h-2.5 rounded-full bg-zinc-500" />
                   ) : (
-                    <div className="w-2 h-2 rounded-full bg-rose-500 animate-ping"></div>
+                    <div className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping" />
                   )}
-                  <span
-                    className={`text-xs font-bold uppercase tracking-wider ${hasSpectatedPlayerLeft ? "text-zinc-500" : "text-rose-500"
-                      }`}
-                  >
-                    {hasSpectatedPlayerLeft
-                      ? "⏹️ Spectating Ended"
-                      : "🔴 Live Spectating"}
-                  </span>
+                  <div>
+                    <div className="flex items-center gap-1.5">
+                      <span
+                        className={`text-xs font-black uppercase tracking-wider ${
+                          isSpectatedPlayerFinished
+                            ? "text-emerald-400"
+                            : hasSpectatedPlayerLeft
+                            ? "text-zinc-500"
+                            : "text-rose-500"
+                        }`}
+                      >
+                        {isSpectatedPlayerFinished
+                          ? hasSpectatedVotedRematch
+                            ? "🏁 Opponent Finished & Wants Rematch!"
+                            : "🏁 Opponent Finished!"
+                          : hasSpectatedPlayerLeft
+                          ? "⏹️ Spectating Ended"
+                          : "🔴 Live Spectating"}
+                      </span>
+                    </div>
+                    <span className="text-[11px] font-bold text-text-custom opacity-85 block">
+                      {spectatedPlayer?.name || "Opponent"}
+                      {spectatedFinisher?.formattedTime ? ` • ${spectatedFinisher.formattedTime}` : ""}
+                    </span>
+                  </div>
                 </div>
-                <span className="text-xs font-bold">
-                  {hasSpectatedPlayerLeft
-                    ? "Disconnected"
-                    : room?.players?.find((p) => p.id === spectatingPlayerId)
-                      ?.name || "Opponent"}
-                </span>
-                <button
-                  onClick={stopSpectating}
-                  className="text-[10px] uppercase font-bold bg-rose-500 hover:bg-rose-600 text-white px-2.5 py-1 rounded-lg transition-colors active:scale-95"
-                >
-                  Stop
-                </button>
+
+                <div className="flex items-center gap-2">
+                  {isSpectatedPlayerFinished && (
+                    <button
+                      onClick={() => {
+                        votePlayAgain(true);
+                        addToast(
+                          "Voted for Rematch! Waiting for next match to start...",
+                          "success",
+                        );
+                      }}
+                      className={`text-xs font-bold px-3 py-1.5 rounded-xl shadow-md active:scale-95 transition-all flex items-center gap-1 cursor-pointer ${
+                        haveIVotedRematch
+                          ? "bg-amber-500 text-slate-950 font-black cursor-default"
+                          : hasSpectatedVotedRematch
+                          ? "bg-emerald-500 hover:bg-emerald-400 text-white animate-pulse"
+                          : "bg-accent-custom hover:bg-accent-hover text-white"
+                      }`}
+                    >
+                      <RefreshCw
+                        size={12}
+                        className={haveIVotedRematch ? "animate-spin" : ""}
+                      />
+                      {haveIVotedRematch
+                        ? "Voted (Waiting)"
+                        : hasSpectatedVotedRematch
+                        ? "Accept Rematch"
+                        : "Rematch"}
+                    </button>
+                  )}
+                  <button
+                    onClick={stopSpectating}
+                    className="text-xs font-bold bg-panel-custom hover:bg-panel-custom/80 border border-border-custom text-text-custom px-3 py-1.5 rounded-xl transition-colors active:scale-95 cursor-pointer flex items-center gap-1"
+                  >
+                    {isSpectatedPlayerFinished ? "View Results" : "Stop"}
+                  </button>
+                </div>
               </div>
             )}
 
@@ -3946,6 +3989,25 @@ return (
                   <p className="text-xs opacity-75 mt-1 max-w-[280px]">
                     The player you were spectating has left the game lobby.
                   </p>
+                </div>
+              )}
+              {/* Spectated Player Finished Board Overlay */}
+              {spectatingPlayerId && isSpectatedPlayerFinished && !hasSpectatedPlayerLeft && (
+                <div className="absolute inset-0 bg-slate-950/75 backdrop-blur-xs rounded-2xl flex flex-col items-center justify-center p-4 z-20 animate-fade-in border-2 border-emerald-500/50">
+                  <div className="w-14 h-14 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center mb-3 shadow-lg">
+                    <Trophy size={32} className="animate-bounce" />
+                  </div>
+                  <h3 className="text-lg font-black text-white">
+                    {spectatedPlayer?.name || "Opponent"} Finished!
+                  </h3>
+                  <p className="text-xs text-emerald-400 font-mono font-bold mt-1">
+                    {spectatedFinisher?.formattedTime ? `Solved in ${spectatedFinisher.formattedTime}` : "Puzzle Solved 🏆"}
+                  </p>
+                  {hasSpectatedVotedRematch && (
+                    <span className="mt-2 text-[11px] font-extrabold text-amber-400 bg-amber-500/15 border border-amber-500/30 px-3 py-1 rounded-full animate-pulse shadow-sm">
+                      ⚡ Wants a Rematch!
+                    </span>
+                  )}
                 </div>
               )}
               {room &&
@@ -4297,18 +4359,29 @@ return (
                           </div>
 
                           {/* Room Configuration Specs Bar */}
-                          <div className="flex flex-wrap items-center gap-1.5 py-1.5 px-2.5 bg-accent-glow/20 border border-border-custom/40 rounded-xl text-[11px] font-bold">
-                            <span className="px-2 py-0.5 rounded-md bg-accent-custom text-white capitalize shadow-xs">
-                              {room.difficulty || "medium"}
-                            </span>
-                            <span className={`px-2 py-0.5 rounded-md border ${room.coop ? "bg-indigo-500/15 border-indigo-500/30 text-indigo-400" : "bg-emerald-500/15 border-emerald-500/30 text-emerald-400"}`}>
-                              {room.coop ? "🤝 Co-op Mode" : "⚡ Speed Race"}
-                            </span>
-                            {room.enableAbilities && (
-                              <span className="px-2 py-0.5 rounded-md bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center gap-1">
-                                ✨ Abilities ON
+                          <div className="flex flex-wrap items-center justify-between gap-1.5 py-1.5 px-2.5 bg-accent-glow/20 border border-border-custom/40 rounded-xl text-[11px] font-bold">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="px-2 py-0.5 rounded-md bg-accent-custom text-white capitalize shadow-xs">
+                                {room.difficulty || "medium"}
                               </span>
-                            )}
+                              <span className={`px-2 py-0.5 rounded-md border ${room.coop ? "bg-indigo-500/15 border-indigo-500/30 text-indigo-400" : "bg-emerald-500/15 border-emerald-500/30 text-emerald-400"}`}>
+                                {room.coop ? "🤝 Co-op Mode" : "⚡ Speed Race"}
+                              </span>
+                              {room.enableAbilities && (
+                                <span className="px-2 py-0.5 rounded-md bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center gap-1">
+                                  ✨ Abilities ON
+                                </span>
+                              )}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setIsGuideOpen(true)}
+                              className="text-[10px] text-accent-custom hover:underline flex items-center gap-1 cursor-pointer font-bold opacity-80 hover:opacity-100"
+                              title="View Mode & Ability Rules"
+                            >
+                              <HelpCircle size={12} />
+                              <span>Game Guide</span>
+                            </button>
                           </div>
 
                           {/* Lobby Connections list */}
@@ -4974,46 +5047,22 @@ return (
                               </div>
 
                               <div className="shrink-0 flex items-center gap-1">
-                                {f.status === "in-game" && f.roomCode ? (
-                                  <button
-                                    onClick={() => handleSpectateFriend(f.roomCode, f.id)}
-                                    className="px-2 py-1 bg-rose-500 hover:bg-rose-600 text-white font-bold text-[9px] rounded-lg shadow-sm active:scale-95 transition-all flex items-center gap-1 cursor-pointer font-sans"
-                                    title="Spectate friend's live match"
-                                  >
-                                    <Eye size={11} /> Spectate
-                                  </button>
-                                ) : room ? (
-                                  <button
-                                    onClick={() => inviteFriend(f.id)}
-                                    disabled={f.status !== "online"}
-                                    className={`px-2 py-1 border transition-all rounded-md text-[9px] font-bold ${f.status === "online"
-                                      ? "bg-accent-glow border-border-custom hover:border-accent-custom hover:text-accent-custom active:scale-95 cursor-pointer"
-                                      : "bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700 cursor-not-allowed opacity-50"
-                                      }`}
-                                    title={
-                                      f.status !== "online"
-                                        ? `Friend is currently: ${f.status}`
-                                        : "Invite to Room"
-                                    }
-                                  >
-                                    Invite
-                                  </button>
-                                ) : f.status === "in-lobby" && f.roomCode ? (
-                                  <button
-                                    onClick={() => joinRoom(f.roomCode)}
-                                    className="px-2 py-1 border transition-all rounded-md text-[9px] font-bold bg-emerald-500/10 border-emerald-500/30 hover:border-emerald-500 hover:text-emerald-500 hover:bg-emerald-500/20 active:scale-95 cursor-pointer text-emerald-500"
-                                    title="Join Friend's Lobby Room"
-                                  >
-                                    Join Room
-                                  </button>
-                                ) : (
-                                  <span className="text-[9px] uppercase font-bold opacity-45 px-1">
-                                    {f.status}
-                                  </span>
-                                )}
                                 {(() => {
                                   const isFriendInSameRoom = room && (room.code === f.roomCode || room.players?.some((p) => p.id === f.id));
                                   if (isFriendInSameRoom) {
+                                    const isMeFinished = gameStatus === "won" || gameStatus === "lost";
+                                    const isFriendFinished = (finishers || []).some((fin) => fin.playerId === f.id);
+                                    if (isMeFinished && !isFriendFinished && room.isGameStarted) {
+                                      return (
+                                        <button
+                                          onClick={() => startSpectating(f.id)}
+                                          className="px-2 py-1 bg-rose-500 hover:bg-rose-600 text-white font-bold text-[9px] rounded-lg shadow-sm active:scale-95 transition-all flex items-center gap-1 cursor-pointer font-sans"
+                                          title="Spectate friend in current match"
+                                        >
+                                          <Eye size={11} /> Spectate
+                                        </button>
+                                      );
+                                    }
                                     return (
                                       <span className="text-[9px] uppercase font-bold text-accent-custom px-1.5 py-0.5 rounded bg-accent-glow/30 border border-accent-custom/20">
                                         In Match
@@ -5063,7 +5112,7 @@ return (
                                   }
                                   return (
                                     <span className="text-[9px] uppercase font-bold opacity-45 px-1">
-                                      {f.status}
+                                      {f.status || "offline"}
                                     </span>
                                   );
                                 })()}
@@ -5423,51 +5472,114 @@ return (
               </p>
             </div>
           )}
-          {room && Object.values(room.playAgainVotes || {}).some(Boolean) && <p className="game-status" role="status">
-            {room.players.filter(p => room.playAgainVotes[p.id]).map(p => p.name).join(", ")} requested a rematch.
-          </p>}
-          {room && <button className="game-action" onClick={() => { setStayedMatch(room.matchId); setActiveView("home"); }}>Stay in room</button>}
-          {isMultiplayer && bothFinished && (
-            <button
-              onClick={() => {
-                votePlayAgain(true);
-                addToast(
-                  "Submitted Vote to Play Again! Waiting for opponents...",
-                  "info",
-                );
-              }}
-              className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl active:scale-[0.98] transition-all flex items-center justify-center gap-1.5 shadow-md shadow-emerald-500/20"
-            >
-              Rematch {room?.seriesCount ? `(Match ${room.seriesCount + 1})` : ""}
-            </button>
-          )}
+          {/* Post-Game Multiplayer Actions */}
+          {room && room.players.filter(p => !p.isSpectator).length > 1 ? (
+            <div className="space-y-2.5 pt-1">
+              {/* State 1: Match still in progress (Opponent hasn't finished yet) */}
+              {!bothFinished && (
+                <>
+                  {(() => {
+                    const activeOpponentToSpectate = room.players.find(
+                      (p) => !p.isSpectator && p.id !== myPlayerId && !p.hasFinishedGame
+                    );
+                    if (activeOpponentToSpectate) {
+                      return (
+                        <div className="space-y-2">
+                          <div className="p-2.5 bg-accent-glow/30 border border-accent-custom/30 rounded-xl text-xs font-bold text-accent-custom flex items-center justify-center gap-1.5 animate-pulse">
+                            <span>⏱️ {activeOpponentToSpectate.name} is still solving...</span>
+                          </div>
+                          <button
+                            onClick={() => startSpectating(activeOpponentToSpectate.id)}
+                            className="w-full py-3.5 bg-accent-custom hover:bg-accent-hover text-white font-extrabold rounded-xl active:scale-[0.98] transition-all flex items-center justify-center gap-2 shadow-lg shadow-accent-custom/25 cursor-pointer text-sm"
+                          >
+                            <Eye size={16} /> Spectate {activeOpponentToSpectate.name}
+                          </button>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
+                </>
+              )}
 
-          {(!room || room.players.filter(p => !p.isSpectator).length <= 1) && (
-            <button
-              onClick={() => {
-                if (room) {
-                  exitToHome(() => startNewGame(difficulty));
-                } else {
-                  startNewGame(difficulty);
-                }
-              }}
-              className="w-full py-3 bg-accent-glow hover:bg-accent-glow/70 border border-border-custom text-text-custom font-bold rounded-xl active:scale-[0.98] transition-all flex items-center justify-center gap-1.5"
-            >
-              <RefreshCw size={15} /> Play Again
-            </button>
-          )}
+              {/* State 2: Match is fully completed (All players finished) */}
+              {bothFinished && (
+                <>
+                  {Object.values(room.playAgainVotes || {}).some(Boolean) && (
+                    <div className="p-2.5 bg-amber-500/15 border border-amber-500/30 rounded-xl text-xs font-bold text-amber-400 flex items-center justify-center gap-1.5 animate-pulse">
+                      <span>⚡ {room.players.filter(p => room.playAgainVotes[p.id]).map(p => p.name).join(", ")} wants a Rematch!</span>
+                    </div>
+                  )}
 
-          <button
-            onClick={() => {
-              exitToHome(() => {
-                setActiveView("home");
-                setSeconds(0);
-              });
-            }}
-            className="w-full py-3 bg-rose-500/10 border border-rose-500/30 hover:bg-rose-500 hover:text-white text-rose-500 font-bold rounded-xl active:scale-[0.98] transition-all flex items-center justify-center gap-1.5"
-          >
-            Exit Room
-          </button>
+                  <button
+                    onClick={() => {
+                      votePlayAgain(true);
+                      addToast("Submitted Rematch Vote! Waiting for opponent...", "success");
+                    }}
+                    className={`w-full py-3.5 font-extrabold rounded-xl active:scale-[0.98] transition-all flex items-center justify-center gap-2 shadow-lg cursor-pointer text-sm ${
+                      room?.playAgainVotes?.[myPlayerId]
+                        ? "bg-amber-500 text-slate-950 font-black cursor-default shadow-amber-500/25"
+                        : "bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/30 animate-pulse"
+                    }`}
+                  >
+                    <RefreshCw size={16} className={room?.playAgainVotes?.[myPlayerId] ? "animate-spin" : ""} />
+                    {room?.playAgainVotes?.[myPlayerId]
+                      ? "Rematch Voted (Waiting for Opponent)"
+                      : `⚡ Rematch ${room?.seriesCount ? `(Match ${room.seriesCount + 1})` : ""}`}
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setStayedMatch(room.matchId);
+                      setActiveTab("lobby");
+                      setActiveView("home");
+                    }}
+                    className="w-full py-3 bg-panel-custom hover:bg-panel-custom/80 border border-border-custom text-text-custom font-bold rounded-xl active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer text-xs"
+                  >
+                    <Home size={15} /> Return to Room Lobby
+                  </button>
+                </>
+              )}
+
+              {/* Distinguishable Danger Exit Button */}
+              <button
+                onClick={() => {
+                  exitToHome(() => {
+                    setActiveView("home");
+                    setSeconds(0);
+                  });
+                }}
+                className="w-full py-3 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl active:scale-[0.98] transition-all flex items-center justify-center gap-2 shadow-md shadow-rose-950/40 border border-rose-400/30 cursor-pointer text-xs"
+              >
+                <LogOut size={15} /> Leave Room
+              </button>
+            </div>
+          ) : (
+            /* Solo / Practice completion options */
+            <div className="space-y-2.5 pt-1">
+              <button
+                onClick={() => {
+                  if (room) {
+                    exitToHome(() => startNewGame(difficulty));
+                  } else {
+                    startNewGame(difficulty);
+                  }
+                }}
+                className="w-full py-3.5 bg-accent-custom hover:bg-accent-hover text-white font-extrabold rounded-xl active:scale-[0.98] transition-all flex items-center justify-center gap-2 shadow-lg shadow-accent-custom/25 cursor-pointer text-sm"
+              >
+                <RefreshCw size={16} /> Play Again
+              </button>
+              <button
+                onClick={() => {
+                  setActiveView("home");
+                  setSeconds(0);
+                }}
+                className="w-full py-3 bg-panel-custom hover:bg-panel-custom/80 border border-border-custom text-text-custom font-bold rounded-xl active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer text-xs"
+              >
+                <Home size={15} /> Back to Home
+              </button>
+            </div>
+          )}
         </div>
       </div>
     )}
@@ -5606,51 +5718,114 @@ return (
               </p>
             </div>
           )}
-          {room && Object.values(room.playAgainVotes || {}).some(Boolean) && <p className="game-status" role="status">
-            {room.players.filter(p => room.playAgainVotes[p.id]).map(p => p.name).join(", ")} requested a rematch.
-          </p>}
-          {room && <button className="game-action" onClick={() => { setStayedMatch(room.matchId); setActiveView("home"); }}>Stay in room</button>}
-          {isMultiplayer && bothFinished && (
-            <button
-              onClick={() => {
-                votePlayAgain(true);
-                addToast(
-                  "Submitted Vote to Play Again! Waiting for opponents...",
-                  "info",
-                );
-              }}
-              className="w-full py-3 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl active:scale-[0.98] transition-all flex items-center justify-center gap-1.5 shadow-md shadow-rose-500/20"
-            >
-              Rematch {room?.seriesCount ? `(Match ${room.seriesCount + 1})` : ""}
-            </button>
-          )}
+          {/* Post-Game Multiplayer Actions */}
+          {room && room.players.filter(p => !p.isSpectator).length > 1 ? (
+            <div className="space-y-2.5 pt-1">
+              {/* State 1: Match still in progress (Opponent hasn't finished yet) */}
+              {!bothFinished && (
+                <>
+                  {(() => {
+                    const activeOpponentToSpectate = room.players.find(
+                      (p) => !p.isSpectator && p.id !== myPlayerId && !p.hasFinishedGame
+                    );
+                    if (activeOpponentToSpectate) {
+                      return (
+                        <div className="space-y-2">
+                          <div className="p-2.5 bg-accent-glow/30 border border-accent-custom/30 rounded-xl text-xs font-bold text-accent-custom flex items-center justify-center gap-1.5 animate-pulse">
+                            <span>⏱️ {activeOpponentToSpectate.name} is still solving...</span>
+                          </div>
+                          <button
+                            onClick={() => startSpectating(activeOpponentToSpectate.id)}
+                            className="w-full py-3.5 bg-accent-custom hover:bg-accent-hover text-white font-extrabold rounded-xl active:scale-[0.98] transition-all flex items-center justify-center gap-2 shadow-lg shadow-accent-custom/25 cursor-pointer text-sm"
+                          >
+                            <Eye size={16} /> Spectate {activeOpponentToSpectate.name}
+                          </button>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
+                </>
+              )}
 
-          {(!room || room.players.filter(p => !p.isSpectator).length <= 1) && (
-            <button
-              onClick={() => {
-                if (room) {
-                  exitToHome(() => startNewGame(difficulty));
-                } else {
-                  startNewGame(difficulty);
-                }
-              }}
-              className="w-full py-3 bg-accent-glow hover:bg-accent-glow/70 border border-border-custom text-text-custom font-bold rounded-xl active:scale-[0.98] transition-all flex items-center justify-center gap-1.5"
-            >
-              <RefreshCw size={15} /> Play Again
-            </button>
-          )}
+              {/* State 2: Match is fully completed (All players finished) */}
+              {bothFinished && (
+                <>
+                  {Object.values(room.playAgainVotes || {}).some(Boolean) && (
+                    <div className="p-2.5 bg-amber-500/15 border border-amber-500/30 rounded-xl text-xs font-bold text-amber-400 flex items-center justify-center gap-1.5 animate-pulse">
+                      <span>⚡ {room.players.filter(p => room.playAgainVotes[p.id]).map(p => p.name).join(", ")} wants a Rematch!</span>
+                    </div>
+                  )}
 
-          <button
-            onClick={() => {
-              exitToHome(() => {
-                setActiveView("home");
-                setSeconds(0);
-              });
-            }}
-            className="w-full py-3 bg-rose-500/10 border border-rose-500/30 hover:bg-rose-500 hover:text-white text-rose-500 font-bold rounded-xl active:scale-[0.98] transition-all flex items-center justify-center gap-1.5"
-          >
-            Exit Room
-          </button>
+                  <button
+                    onClick={() => {
+                      votePlayAgain(true);
+                      addToast("Submitted Rematch Vote! Waiting for opponent...", "success");
+                    }}
+                    className={`w-full py-3.5 font-extrabold rounded-xl active:scale-[0.98] transition-all flex items-center justify-center gap-2 shadow-lg cursor-pointer text-sm ${
+                      room?.playAgainVotes?.[myPlayerId]
+                        ? "bg-amber-500 text-slate-950 font-black cursor-default shadow-amber-500/25"
+                        : "bg-rose-600 hover:bg-rose-500 text-white shadow-rose-600/30 animate-pulse"
+                    }`}
+                  >
+                    <RefreshCw size={16} className={room?.playAgainVotes?.[myPlayerId] ? "animate-spin" : ""} />
+                    {room?.playAgainVotes?.[myPlayerId]
+                      ? "Rematch Voted (Waiting for Opponent)"
+                      : `⚡ Rematch ${room?.seriesCount ? `(Match ${room.seriesCount + 1})` : ""}`}
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setStayedMatch(room.matchId);
+                      setActiveTab("lobby");
+                      setActiveView("home");
+                    }}
+                    className="w-full py-3 bg-panel-custom hover:bg-panel-custom/80 border border-border-custom text-text-custom font-bold rounded-xl active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer text-xs"
+                  >
+                    <Home size={15} /> Return to Room Lobby
+                  </button>
+                </>
+              )}
+
+              {/* Distinguishable Danger Exit Button */}
+              <button
+                onClick={() => {
+                  exitToHome(() => {
+                    setActiveView("home");
+                    setSeconds(0);
+                  });
+                }}
+                className="w-full py-3 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl active:scale-[0.98] transition-all flex items-center justify-center gap-2 shadow-md shadow-rose-950/40 border border-rose-400/30 cursor-pointer text-xs"
+              >
+                <LogOut size={15} /> Leave Room
+              </button>
+            </div>
+          ) : (
+            /* Solo / Practice elimination options */
+            <div className="space-y-2.5 pt-1">
+              <button
+                onClick={() => {
+                  if (room) {
+                    exitToHome(() => startNewGame(difficulty));
+                  } else {
+                    startNewGame(difficulty);
+                  }
+                }}
+                className="w-full py-3.5 bg-accent-custom hover:bg-accent-hover text-white font-extrabold rounded-xl active:scale-[0.98] transition-all flex items-center justify-center gap-2 shadow-lg shadow-accent-custom/25 cursor-pointer text-sm"
+              >
+                <RefreshCw size={16} /> Play Again
+              </button>
+              <button
+                onClick={() => {
+                  setActiveView("home");
+                  setSeconds(0);
+                }}
+                className="w-full py-3 bg-panel-custom hover:bg-panel-custom/80 border border-border-custom text-text-custom font-bold rounded-xl active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer text-xs"
+              >
+                <Home size={15} /> Back to Home
+              </button>
+            </div>
+          )}
         </div>
       </div>
     )}
@@ -5701,9 +5876,9 @@ return (
                 setSeconds(0);
               });
             }}
-            className="w-full py-3 bg-rose-500/10 border border-rose-500/30 hover:bg-rose-500 hover:text-white text-rose-500 font-bold rounded-xl active:scale-[0.98] transition-all flex items-center justify-center gap-1.5"
+            className="w-full py-3 bg-panel-custom hover:bg-panel-custom/80 border border-border-custom text-text-custom font-bold rounded-xl active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer text-xs"
           >
-            Exit to Home
+            <Home size={15} /> Exit to Home
           </button>
         </div>
       </div>

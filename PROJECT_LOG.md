@@ -398,3 +398,31 @@ On branch `feature/coop-voice-chat-and-multiplayer-polish`:
 * **Remaining limitations:**
   - Full-mesh WebRTC topology is optimal for rooms with up to 4 players; rooms exceeding 6+ concurrent voice channels would benefit from an SFU (Selective Forwarding Unit) media relay to reduce upstream bandwidth.
 
+## 2026-11-15 · In-Spectate Rematch UX, Post-Game Modal Revamp, Social Duplicate Fix & Lobby Guide
+
+On branch `feature/coop-voice-chat-and-multiplayer-polish`:
+* **In-Spectate Rematch Flow & Opponent Finished Board Overlay:**
+  - When Player A is spectating Player B and B finishes:
+    - Player B's board displays a clean, non-intrusive completion overlay (`Trophy size={32}`, "Opponent Finished! Solved in MM:SS 🏆", and "⚡ Wants a Rematch!" badge if voted).
+    - Top spectate indicator bar automatically transforms into an active banner (`🏁 Opponent Finished & Wants Rematch!`) with 1-tap `[Accept Rematch]` (or `[Rematch]`) and `[View Results]`.
+    - Player A can accept the rematch directly from the spectating screen without leaving or navigating back.
+* **Post-Game Modal Options Architecture:**
+  - Implemented 2 distinct states based on game progress:
+    - **State 1 (Match In Progress / Opponent Solving):** Shows waiting badge, primary `[👁️ Spectate {OpponentName}]`, and high-contrast red `[🚪 Leave Room]`.
+    - **State 2 (Match Fully Completed):** Shows rematch request banner, primary `[⚡ Rematch (Match N+1)]` (animated pulse, reflects 1/2 ready status), secondary `[🏠 Return to Room Lobby]`, and high-contrast red `[🚪 Leave Room]`.
+    - **Solo/Practice Mode:** Shows primary `[🔄 Play Again]` and secondary `[🏠 Back to Home]`.
+* **Exit Button Distinguishability:**
+  - Replaced faint `bg-rose-500/10` with high-contrast, prominent danger styling across pause overlay, victory modal, elimination modal, and practice completion:
+    `bg-rose-600 hover:bg-rose-500 text-white font-bold shadow-md shadow-rose-950/40 border border-rose-400/30`.
+* **Social Drawer Duplicate Status/Button Fix:**
+  - Resolved bug in both header and social drawer where friend action buttons and statuses were rendered twice (ternary chain immediately followed by IIFE). Consolidated into a single clean IIFE.
+  - Added smart in-room detection: if Player A has finished and Player B is still solving in the same room, Player A sees an in-room `[👁️ Spectate]` button next to B in the Friends tab.
+* **Lobby-Only Guide Architecture for Modes & Mana:**
+  - Added 1-tap `[💡 Game Guide]` trigger button in Room Configuration Specs bars across pre-game and in-game room lobbies.
+  - Preserved 100% clean board focus during active gameplay without popup interruptions.
+* **Verification:**
+  - Automated test suite passed all 27/27 tests (`npm test`).
+  - Production build compiled cleanly in 1.95s (`npm run build --prefix client`).
+* **Remaining limitations:**
+  - Full-mesh WebRTC topology is optimal for rooms with up to 4 players; rooms exceeding 6+ concurrent voice channels would benefit from an SFU (Selective Forwarding Unit) media relay to reduce upstream bandwidth.
+
