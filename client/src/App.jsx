@@ -36,6 +36,8 @@ import {
   Calendar,
   Headphones,
   Music,
+  HelpCircle,
+  BookOpen,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import SudokuGrid from "./components/SudokuGrid";
@@ -43,6 +45,7 @@ import Keypad from "./components/Keypad";
 import SabotageOverlay from "./components/SabotageOverlay";
 import DailyCalendarModal from "./components/DailyCalendarModal";
 import MatchmakingTimeoutModal from "./components/MatchmakingTimeoutModal";
+import GameGuideModal from "./components/GameGuideModal";
 import {
   generateDailySudoku,
   formatDateKey,
@@ -113,8 +116,9 @@ export default function App() {
   const challengeAutoRequested = useRef(false);
   const roomCodeParam = new URLSearchParams(location.search).get("room");
   const roomAutoJoined = useRef(false);
-  // Settings Panel preferences states
+  // Settings & Guide Panel preferences states
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [showGuideModal, setShowGuideModal] = useState(false);
   const [keypadLayout, setKeypadLayout] = useState(() => localStorage.getItem("sudoku_keypad_layout") || "single-row");
   const [showManaOptionSetting, setShowManaOptionSetting] = useState(() => {
     const saved = localStorage.getItem("sudoku_show_mana_option");
@@ -633,6 +637,7 @@ export default function App() {
     (p) => p.id === spectatingPlayerId,
   );
   const hasSpectatedPlayerLeft = !!(spectatingPlayerId && !spectatedPlayer);
+  const isSpectatedPlayerDone = !!(spectatedPlayer && isPlayerDone(spectatedPlayer));
 
   // Connect WebSockets, init ELO profile, and restore persisted solo game on mount
   useEffect(() => {
@@ -2101,6 +2106,15 @@ export default function App() {
             )}
           </div>
 
+          {/* How to Play & Game Modes Guide */}
+          <button
+            onClick={() => setShowGuideModal(true)}
+            className="p-2 rounded-xl border border-border-custom hover:bg-accent-glow hover:border-accent-custom hover:text-accent-custom active:scale-95 transition-all cursor-pointer"
+            title="How to Play & Game Modes Guide"
+          >
+            <HelpCircle size={18} />
+          </button>
+
           {/* Settings button */}
           <button
             onClick={() => setShowSettingsModal(true)}
@@ -2592,37 +2606,60 @@ export default function App() {
                       )}
 
                       {/* Create Room section */}
-                      <div className="space-y-3">
+                      <div className="space-y-2.5">
                         <button
                           onClick={() =>
                             createRoom(selectedDifficulty, showManaOptionSetting ? enableAbilities : false)
                           }
-                          className="w-full py-3 bg-accent-glow hover:bg-accent-glow/70 border border-border-custom text-text-custom font-bold text-xs rounded-xl active:scale-[0.98] transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
+                          className="w-full py-2.5 px-3 bg-accent-glow hover:bg-accent-glow/70 border border-border-custom text-text-custom font-bold text-xs rounded-xl active:scale-[0.98] transition-all flex flex-col items-center justify-center gap-0.5 cursor-pointer disabled:opacity-50 disabled:pointer-events-none shadow-xs"
                           disabled={!isConnected || isSavingUsername || isCheckingUsername}
                         >
-                          <Users size={14} className="text-accent-custom" />
-                          Create Multiplayer Room
+                          <div className="flex items-center gap-1.5">
+                            <Users size={14} className="text-accent-custom" />
+                            <span>Create Speed Race Room</span>
+                          </div>
+                          <span className="text-[9px] opacity-60 font-normal">Head-to-head race on identical boards</span>
                         </button>
-                        <button className="game-action" disabled={!isConnected || isSavingUsername || isCheckingUsername}
-                          onClick={() => createRoom(selectedDifficulty, false, true)}>
-                          <Users size={14} className="text-accent-custom" /> Create two-player co-op room
+                        <button
+                          className="w-full py-2.5 px-3 bg-accent-glow hover:bg-accent-glow/70 border border-border-custom text-text-custom font-bold text-xs rounded-xl active:scale-[0.98] transition-all flex flex-col items-center justify-center gap-0.5 cursor-pointer disabled:opacity-50 disabled:pointer-events-none shadow-xs"
+                          disabled={!isConnected || isSavingUsername || isCheckingUsername}
+                          onClick={() => createRoom(selectedDifficulty, false, true)}
+                        >
+                          <div className="flex items-center gap-1.5">
+                            <Users size={14} className="text-accent-custom" />
+                            <span>Create Two-Player Co-op Room</span>
+                          </div>
+                          <span className="text-[9px] opacity-60 font-normal">Collaborate together on one shared board</span>
                         </button>
 
                         {showManaOptionSetting && (
-                          <div className="flex items-center gap-2 select-none justify-center">
-                            <input
-                              type="checkbox"
-                              id="enableAbilitiesCheck"
-                              checked={enableAbilities}
-                              onChange={(e) => setEnableAbilities(e.target.checked)}
-                              className="w-4 h-4 rounded border-border-custom text-accent-custom bg-accent-glow/20 focus:ring-accent-custom focus:ring-offset-0 cursor-pointer"
-                            />
-                            <label
-                              htmlFor="enableAbilitiesCheck"
-                              className="text-[10px] uppercase font-bold opacity-80 tracking-wider cursor-pointer"
-                            >
-                              Enable Special Abilities (Mana) for Room
-                            </label>
+                          <div className="space-y-1 pt-1">
+                            <div className="flex items-center gap-1.5 select-none justify-center">
+                              <input
+                                type="checkbox"
+                                id="enableAbilitiesCheck"
+                                checked={enableAbilities}
+                                onChange={(e) => setEnableAbilities(e.target.checked)}
+                                className="w-4 h-4 rounded border-border-custom text-accent-custom bg-accent-glow/20 focus:ring-accent-custom focus:ring-offset-0 cursor-pointer"
+                              />
+                              <label
+                                htmlFor="enableAbilitiesCheck"
+                                className="text-[10px] uppercase font-bold opacity-80 tracking-wider cursor-pointer"
+                              >
+                                Enable Special Abilities (Mana) for Race
+                              </label>
+                              <button
+                                type="button"
+                                onClick={() => setShowGuideModal(true)}
+                                className="text-accent-custom hover:underline text-[10px] font-bold cursor-pointer"
+                                title="Learn about Mana & Abilities"
+                              >
+                                (?)
+                              </button>
+                            </div>
+                            <p className="text-[9px] text-center opacity-60 max-w-xs mx-auto">
+                              Earn Mana via streaks to cast Ink Splatters & Scrambles against opponents.
+                            </p>
                           </div>
                         )}
                       </div>
@@ -3314,6 +3351,29 @@ export default function App() {
                             {(() => {
                               const isFriendInSameRoom = room && (room.code === f.roomCode || room.players?.some((p) => p.id === f.id));
                               if (isFriendInSameRoom) {
+                                if (spectatingPlayerId === f.id) {
+                                  return (
+                                    <span className="text-[9px] uppercase font-bold text-rose-500 px-1.5 py-0.5 rounded bg-rose-500/15 border border-rose-500/30 animate-pulse">
+                                      👁️ Watching
+                                    </span>
+                                  );
+                                }
+                                const myPlayerObj = room.players?.find((p) => p.id === myPlayerId);
+                                const friendPlayerObj = room.players?.find((p) => p.id === f.id);
+                                const haveIFinished = isPlayerDone(myPlayerObj);
+                                const hasFriendFinished = isPlayerDone(friendPlayerObj);
+
+                                if (haveIFinished && !hasFriendFinished) {
+                                  return (
+                                    <button
+                                      onClick={() => startSpectating(f.id)}
+                                      className="px-2 py-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-[9px] rounded-lg shadow-sm active:scale-95 transition-all flex items-center gap-1 cursor-pointer font-sans"
+                                      title={`Spectate ${f.name}'s board`}
+                                    >
+                                      <Eye size={10} /> Spectate
+                                    </button>
+                                  );
+                                }
                                 return (
                                   <span className="text-[9px] uppercase font-bold text-accent-custom px-1.5 py-0.5 rounded bg-accent-glow/30 border border-accent-custom/20">
                                     In Match
@@ -3748,16 +3808,25 @@ export default function App() {
                   <div className="flex items-center gap-2">
                     {hasSpectatedPlayerLeft ? (
                       <div className="w-2 h-2 rounded-full bg-zinc-500"></div>
+                    ) : isSpectatedPlayerDone ? (
+                      <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
                     ) : (
                       <div className="w-2 h-2 rounded-full bg-rose-500 animate-ping"></div>
                     )}
                     <span
-                      className={`text-xs font-bold uppercase tracking-wider ${hasSpectatedPlayerLeft ? "text-zinc-500" : "text-rose-500"
-                        }`}
+                      className={`text-xs font-bold uppercase tracking-wider ${
+                        hasSpectatedPlayerLeft
+                          ? "text-zinc-500"
+                          : isSpectatedPlayerDone
+                            ? "text-emerald-400 font-extrabold"
+                            : "text-rose-500"
+                      }`}
                     >
                       {hasSpectatedPlayerLeft
                         ? "⏹️ Spectating Ended"
-                        : "🔴 Live Spectating"}
+                        : isSpectatedPlayerDone
+                          ? "🏁 Opponent Finished"
+                          : "🔴 Live Spectating"}
                     </span>
                   </div>
                   <span className="text-xs font-bold">
@@ -3768,9 +3837,13 @@ export default function App() {
                   </span>
                   <button
                     onClick={stopSpectating}
-                    className="text-[10px] uppercase font-bold bg-rose-500 hover:bg-rose-600 text-white px-2.5 py-1 rounded-lg transition-colors active:scale-95"
+                    className={`text-[10px] uppercase font-bold text-white px-2.5 py-1 rounded-lg transition-colors active:scale-95 cursor-pointer ${
+                      isSpectatedPlayerDone
+                        ? "bg-emerald-600 hover:bg-emerald-500 shadow-sm"
+                        : "bg-rose-500 hover:bg-rose-600"
+                    }`}
                   >
-                    Stop
+                    {isSpectatedPlayerDone ? "View Results" : "Stop"}
                   </button>
                 </div>
               )}
@@ -4178,20 +4251,33 @@ export default function App() {
                             </div>
 
                             {showManaOptionSetting && (
-                              <div className="flex items-center gap-2 select-none py-1 justify-center">
-                                <input
-                                  type="checkbox"
-                                  id="enableAbilitiesCheckMobile"
-                                  checked={enableAbilities}
-                                  onChange={(e) => setEnableAbilities(e.target.checked)}
-                                  className="w-4 h-4 rounded border-border-custom text-accent-custom bg-accent-glow/20 focus:ring-accent-custom focus:ring-offset-0 cursor-pointer"
-                                />
-                                <label
-                                  htmlFor="enableAbilitiesCheckMobile"
-                                  className="text-[10px] uppercase font-bold opacity-80 tracking-wider cursor-pointer"
-                                >
-                                  Enable Special Abilities (Mana) for Room
-                                </label>
+                              <div className="space-y-1 py-1">
+                                <div className="flex items-center gap-1.5 select-none justify-center">
+                                  <input
+                                    type="checkbox"
+                                    id="enableAbilitiesCheckMobile"
+                                    checked={enableAbilities}
+                                    onChange={(e) => setEnableAbilities(e.target.checked)}
+                                    className="w-4 h-4 rounded border-border-custom text-accent-custom bg-accent-glow/20 focus:ring-accent-custom focus:ring-offset-0 cursor-pointer"
+                                  />
+                                  <label
+                                    htmlFor="enableAbilitiesCheckMobile"
+                                    className="text-[10px] uppercase font-bold opacity-80 tracking-wider cursor-pointer"
+                                  >
+                                    Enable Special Abilities (Mana) for Race
+                                  </label>
+                                  <button
+                                    type="button"
+                                    onClick={() => setShowGuideModal(true)}
+                                    className="text-accent-custom hover:underline text-[10px] font-bold cursor-pointer"
+                                    title="Learn about Mana & Abilities"
+                                  >
+                                    (?)
+                                  </button>
+                                </div>
+                                <p className="text-[9px] text-center opacity-60 max-w-xs mx-auto">
+                                  Earn Mana via streaks to cast Ink Splatters & Scrambles against opponents.
+                                </p>
                               </div>
                             )}
 
@@ -4199,15 +4285,25 @@ export default function App() {
                               onClick={() =>
                                 createRoom(selectedDifficulty, showManaOptionSetting ? enableAbilities : false)
                               }
-                              className="w-full py-3 bg-accent-glow hover:bg-accent-glow/70 border border-border-custom text-text-custom font-bold text-xs rounded-xl active:scale-95 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                              className="w-full py-2.5 px-3 bg-accent-glow hover:bg-accent-glow/70 border border-border-custom text-text-custom font-bold text-xs rounded-xl active:scale-95 transition-all flex flex-col items-center justify-center gap-0.5 cursor-pointer disabled:opacity-50"
                               disabled={!isConnected}
                             >
-                              <PlayCircle size={15} className="text-accent-custom" />
-                              Create New Lobby
+                              <div className="flex items-center gap-1.5">
+                                <PlayCircle size={14} className="text-accent-custom" />
+                                <span>Create Speed Race Room</span>
+                              </div>
+                              <span className="text-[9px] opacity-60 font-normal">Head-to-head race on identical boards</span>
                             </button>
-                            <button className="game-action" disabled={!isConnected}
-                              onClick={() => createRoom(selectedDifficulty, false, true)}>
-                              <Users size={14} className="text-accent-custom" /> Create two-player co-op room
+                            <button
+                              className="w-full py-2.5 px-3 bg-accent-glow hover:bg-accent-glow/70 border border-border-custom text-text-custom font-bold text-xs rounded-xl active:scale-95 transition-all flex flex-col items-center justify-center gap-0.5 cursor-pointer disabled:opacity-50"
+                              disabled={!isConnected}
+                              onClick={() => createRoom(selectedDifficulty, false, true)}
+                            >
+                              <div className="flex items-center gap-1.5">
+                                <Users size={14} className="text-accent-custom" />
+                                <span>Create Two-Player Co-op Room</span>
+                              </div>
+                              <span className="text-[9px] opacity-60 font-normal">Collaborate together on one shared board</span>
                             </button>
                           </div>
                         ) : (
@@ -4937,6 +5033,29 @@ export default function App() {
                                   {(() => {
                                     const isFriendInSameRoom = room && (room.code === f.roomCode || room.players?.some((p) => p.id === f.id));
                                     if (isFriendInSameRoom) {
+                                      if (spectatingPlayerId === f.id) {
+                                        return (
+                                          <span className="text-[9px] uppercase font-bold text-rose-500 px-1.5 py-0.5 rounded bg-rose-500/15 border border-rose-500/30 animate-pulse">
+                                            👁️ Watching
+                                          </span>
+                                        );
+                                      }
+                                      const myPlayerObj = room.players?.find((p) => p.id === myPlayerId);
+                                      const friendPlayerObj = room.players?.find((p) => p.id === f.id);
+                                      const haveIFinished = isPlayerDone(myPlayerObj);
+                                      const hasFriendFinished = isPlayerDone(friendPlayerObj);
+
+                                      if (haveIFinished && !hasFriendFinished) {
+                                        return (
+                                          <button
+                                            onClick={() => startSpectating(f.id)}
+                                            className="px-2 py-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-[9px] rounded-lg shadow-sm active:scale-95 transition-all flex items-center gap-1 cursor-pointer font-sans"
+                                            title={`Spectate ${f.name}'s board`}
+                                          >
+                                            <Eye size={10} /> Spectate
+                                          </button>
+                                        );
+                                      }
                                       return (
                                         <span className="text-[9px] uppercase font-bold text-accent-custom px-1.5 py-0.5 rounded bg-accent-glow/30 border border-accent-custom/20">
                                           In Match
@@ -5853,6 +5972,12 @@ export default function App() {
         />
       ))}
 
+      {/* GAME MODES & HOW TO PLAY GUIDE MODAL */}
+      <GameGuideModal
+        isOpen={showGuideModal}
+        onClose={() => setShowGuideModal(false)}
+      />
+
       {/* USER PREFERENCES SETTINGS MODAL */}
       {showSettingsModal && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-fade-in">
@@ -5873,6 +5998,19 @@ export default function App() {
                 Customize your gameplay preferences
               </p>
             </div>
+
+            {/* Quick Link to How to Play Guide */}
+            <button
+              type="button"
+              onClick={() => {
+                setShowSettingsModal(false);
+                setShowGuideModal(true);
+              }}
+              className="w-full py-2.5 px-3 bg-accent-glow hover:bg-accent-glow/70 border border-border-custom text-text-custom font-bold text-xs rounded-xl flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer shadow-xs"
+            >
+              <BookOpen size={14} className="text-accent-custom" />
+              <span>How to Play & Game Modes Guide</span>
+            </button>
 
             <div className="space-y-4">
               <label className="flex items-center gap-3 rounded-xl border border-border-custom bg-accent-glow/20 px-3 py-2 text-left cursor-pointer"><input className="size-4 accent-accent-custom" type="checkbox" checked={focus} onChange={e => {

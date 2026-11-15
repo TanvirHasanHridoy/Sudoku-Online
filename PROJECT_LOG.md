@@ -367,6 +367,16 @@ On branch `feature/coop-voice-chat-and-multiplayer-polish`:
   - **In-Room Add Friend Button:** In player cards (both lobby and match views), players who are not yet on the user's friends list have a `+ Add Friend` (`<UserPlus size={11} />`) action button.
   - **In-Match Spectate Button Suppression:** If Player A and Player B are in the same room/match together, Player A sees an `In Match` badge instead of a `Spectate` button next to B in the Friends tab.
   - **Friend Requests in Friends Tab:** Added pending friend requests block with Accept/Decline actions inside the Friends tab across all views (Home, Lobby, Game), and added a red notification badge (`🔴 {count}`) on the Friends tab button.
+* **Post-Finish Spectating Lifecycle (Player A Finishes Before B):**
+  - When Player A finishes first, the victory modal surfaces an immediate `👁️ Spectate {Player B}` button.
+  - In Player A's Friends tab, Player B transitions from `In Match` to an active `[👁️ Spectate]` button (which invokes `startSpectating(B.id)` right inside the room without socket re-joins).
+  - During spectating, Player A's board live-mirrors Player B's inputs with a top indicator `🔴 Live Spectating: {Player B}` and a `[Stop]` button to return to Player A's completed board overview.
+  - When Player B finishes, the top banner updates to `🏁 Opponent Finished` with a `[View Results]` button, and the series summary and rematch vote buttons unlock simultaneously for both.
+* **Game Modes & Mana Abilities Clarity Architecture:**
+  - Added dedicated `GameGuideModal.jsx` accessible via a `(?)` Help icon in the header and Player Settings. Features two rich visual guides:
+    - **Game Modes:** Solo Practice, Daily Challenge, Speed Race, Two-Player Co-op, Competitive Matchmaking, and Spectator Mode.
+    - **Special Abilities (Mana):** Full breakdown of how Mana is earned via combo streaks, mistake penalties, and the 3 powers: Cleanse & Shield (35 Mana), Ink Splat (65 Mana), and Keypad Scramble (90 Mana).
+  - Added descriptive subtext to lobby creation buttons distinguishing Speed Race (head-to-head on identical boards) from Co-op (collaborative on one shared board), along with an inline `(?)` guide trigger beside the Mana checkbox.
 * **Themed Scrollbars & Opponent Climax Heartbeat Warning:**
   - Chat logs, modal bodies, and mobile drawers use custom themed scrollbar styling (`::-webkit-scrollbar-thumb` using `var(--accent-color)` and `var(--border-color)`).
   - Opponent finish warning previously scaled the entire board; it now strictly triggers at $\ge 90\%$ opponent progress with a pulsating border animation (`@keyframes heartbeatBorder`) and an anatomical procedural Web Audio API heartbeat loop (`playSound.startHeartbeat`).
