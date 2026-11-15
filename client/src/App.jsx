@@ -1,5 +1,5 @@
 import { raceProgress } from "./utils/play";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import {
   Volume2,
   VolumeX,

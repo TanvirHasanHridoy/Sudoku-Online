@@ -232,3 +232,16 @@ On branch `feature/daily-challenge-and-lobby-ux`:
   - ESLint verified on all new and modified components.
 * **Remaining limitations:**
   - Global leaderboard persistence requires active connection to the game server. Solved status is tracked locally when offline.
+
+## 2026-11-15 · Fix Localhost Binding & App.jsx useMemo Import
+
+On branch `feature/daily-challenge-and-lobby-ux`:
+* **App.jsx Missing Hook Import Fix:**
+  - Added missing `useMemo` import from `react` in `client/src/App.jsx`. Previously caused `ReferenceError: useMemo is not defined` when rendering `<App />`.
+* **Vite Host Binding Fix (`client/vite.config.js`):**
+  - Configured `server: { host: '0.0.0.0', port: 5173 }`.
+  - Ensures Vite binds across both IPv4 (`127.0.0.1`) and IPv6 (`::1`), allowing `http://localhost:5173/` and `http://127.0.0.1:5173/` to connect reliably in all Windows browsers.
+* **Verification:**
+  - Tested TCP connection on `127.0.0.1:5173` via PowerShell (`TcpTestSucceeded: True`).
+  - Tested HTTP request to `http://localhost:5173/` (HTTP 200 OK).
+  - Confirmed Vite logs are clean with no unhandled runtime errors.
