@@ -426,3 +426,25 @@ On branch `feature/coop-voice-chat-and-multiplayer-polish`:
 * **Remaining limitations:**
   - Full-mesh WebRTC topology is optimal for rooms with up to 4 players; rooms exceeding 6+ concurrent voice channels would benefit from an SFU (Selective Forwarding Unit) media relay to reduce upstream bandwidth.
 
+## 2026-11-15 · Blank Screen Post-Game Fix, Missing Icon Imports & Production ErrorBoundary Recovery
+
+On branch `feature/coop-voice-chat-and-multiplayer-polish`:
+* **Root Cause & Fix for Post-Game Blank Screen:**
+  - Diagnosed exact failure mechanism: In the Post-Game Modal buttons (`Home` icon) and Lobby Configuration specs bar (`HelpCircle` icon), components `<Home />` and `<HelpCircle />` were referenced in JSX without explicit imports from `lucide-react`.
+  - When the game finished, React attempted to mount the victory/elimination modal, threw runtime `ReferenceError: Home is not defined`, and unmounted the entire component tree, causing a blank screen.
+  - Page reload restored the finished room match state from localStorage on mount, re-triggering the unhandled ReferenceError in a reload loop.
+  - Fix: Added `Home` and `HelpCircle` to `lucide-react` imports, imported `GameGuideModal`, added `isGuideOpen` state, and mounted the modal.
+* **Production ErrorBoundary & Failsafe Recovery Architecture:**
+  - Created `client/src/components/ErrorBoundary.jsx` and wrapped `<App />` in `client/src/main.jsx`.
+  - Catches any unexpected render exceptions and displays a user-friendly recovery card instead of a blank white screen.
+  - Features a 1-tap **"Return to Home & Recover"** action via `client/src/utils/recovery.js` that clears corrupted room/game states (`sudoku_active_room_code`, `sudoku_game_state`, `sudoku_challenge`) and hard-navigates cleanly to `/`.
+  - Includes a 1-tap "Copy Error Details" button for streamlined debugging.
+* **Automated JSX Tag Validation Test:**
+  - Added automated test in `client/test/focusAudio.test.js`: `All JSX tags used in App.jsx are valid imports or defined identifiers`, preventing any future undeclared JSX components from reaching runtime.
+* **Verification:**
+  - Full automated test suite passed all 29/29 tests (`npm test`).
+  - Production Vite build compiled cleanly in 1.33s with zero errors (`npm run build --prefix client`).
+  - Dev server HTTP 200 delivery of `main.jsx` and `App.jsx` verified via automated fetch script.
+* **Remaining limitations:**
+  - Full-mesh WebRTC topology is optimal for rooms with up to 4 players; rooms exceeding 6+ concurrent voice channels would benefit from an SFU (Selective Forwarding Unit) media relay to reduce upstream bandwidth.
+

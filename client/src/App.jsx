@@ -36,6 +36,8 @@ import {
   Calendar,
   Headphones,
   Music,
+  Home,
+  HelpCircle,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import SudokuGrid from "./components/SudokuGrid";
@@ -43,6 +45,7 @@ import Keypad from "./components/Keypad";
 import SabotageOverlay from "./components/SabotageOverlay";
 import DailyCalendarModal from "./components/DailyCalendarModal";
 import MatchmakingTimeoutModal from "./components/MatchmakingTimeoutModal";
+import GameGuideModal from "./components/GameGuideModal";
 import {
   generateDailySudoku,
   formatDateKey,
@@ -115,6 +118,7 @@ export default function App() {
   const roomAutoJoined = useRef(false);
   // Settings Panel preferences states
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [isGuideOpen, setIsGuideOpen] = useState(false);
   const [keypadLayout, setKeypadLayout] = useState(() => localStorage.getItem("sudoku_keypad_layout") || "single-row");
   const [showManaOptionSetting, setShowManaOptionSetting] = useState(() => {
     const saved = localStorage.getItem("sudoku_show_mana_option");
@@ -6409,6 +6413,12 @@ return (
             });
           }}
           difficulty={lastQueueDifficulty}
+        />
+
+        {/* Game Modes & Mana Special Abilities Guide Modal */}
+        <GameGuideModal
+          isOpen={isGuideOpen}
+          onClose={() => setIsGuideOpen(false)}
         />
       </div>
     );

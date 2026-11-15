@@ -169,3 +169,28 @@ test('focusAudio toggleEnabled and setEnabled work as expected', () => {
   focusAudio.setEnabled(false);
   assert.equal(focusAudio.isEnabled, false);
 });
+
+test('clearCorruptedSession wipes active room and board state to recover cleanly', async () => {
+  const { clearCorruptedSession } = await import('../src/utils/recovery.js');
+  globalThis.localStorage.setItem('sudoku_active_room_code', '998877');
+  globalThis.localStorage.setItem('sudoku_game_state', JSON.stringify({ board: [] }));
+  
+  clearCorruptedSession();
+  assert.equal(globalThis.localStorage.getItem('sudoku_active_room_code'), null);
+  assert.equal(globalThis.localStorage.getItem('sudoku_game_state'), null);
+});
+
+test('All JSX tags used in App.jsx are valid imports or defined identifiers', async () => {
+  const fs = await import('fs');
+  const content = fs.readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf-8');
+  const importsBlock = content.slice(0, content.indexOf('const THEMES ='));
+  const jsxTags = new Set([...content.matchAll(/<([A-Z][a-zA-Z0-9]+)/g)].map(m => m[1]));
+  
+  const missing = [];
+  for (const tag of jsxTags) {
+    if (!importsBlock.includes(tag)) {
+      missing.push(tag);
+    }
+  }
+  assert.deepEqual(missing, [], `Found unimported JSX tags in App.jsx: ${missing.join(', ')}`);
+});
