@@ -106,6 +106,10 @@ function depart(room, player, expired) {
   delete room.pauseVotes[player.id];
   delete room.playAgainVotes[player.id];
   if (!player.isSpectator && (room.pauseRequesterId || room.isPaused)) {
+    if (room.lastPausedAt) {
+      room.totalPausedMs = (room.totalPausedMs || 0) + (Date.now() - room.lastPausedAt);
+      room.lastPausedAt = null;
+    }
     room.pauseRequesterId = null;
     room.pauseVotes = {};
     room.isPaused = false;
@@ -252,6 +256,10 @@ function getSanitizedRoom(room) {
     board: room.board,
     isGameStarted: room.isGameStarted,
     isPaused: room.isPaused,
+    gameStartedAt: room.gameStartedAt || null,
+    totalPausedMs: room.totalPausedMs || 0,
+    lastPausedAt: room.lastPausedAt || null,
+    serverTime: Date.now(),
     autoPausedFor: room.autoPausedFor || null,
     pauseVotes: room.pauseVotes,
     playAgainVotes: room.playAgainVotes,
@@ -282,6 +290,16 @@ function getSanitizedRoom(room) {
       result: p.gameResult || (p.strikes >= 3 ? 'lost' : p.hasFinishedGame ? 'won' : null)
     }))
   };
+}
+
+function areRacersFriends(room, racerA, racerB) {
+  if (!racerA || !racerB) return false;
+  if (room.isFriendMatch) return true;
+  const clientA = connectedClients.get(racerA.id);
+  const clientB = connectedClients.get(racerB.id);
+  if (clientA?.friendsList && (clientA.friendsList.has(racerB.id) || (clientB?.supabaseUserId && clientA.friendsList.has(clientB.supabaseUserId)))) return true;
+  if (clientB?.friendsList && (clientB.friendsList.has(racerA.id) || (clientA?.supabaseUserId && clientB.friendsList.has(clientA.supabaseUserId)))) return true;
+  return false;
 }
 
 wss.on('connection', (ws) => {
@@ -528,6 +546,9 @@ wss.on('connection', (ws) => {
           room.solution = solution;
           room.isGameStarted = true;
           room.isPaused = false;
+          room.gameStartedAt = Date.now();
+          room.totalPausedMs = 0;
+          room.lastPausedAt = null;
           room.autoPausedFor = null;
           room.finishers = [];
           room.pauseVotes = {};
@@ -613,7 +634,7 @@ wss.on('connection', (ws) => {
               }
 
               const racers = room.players.filter(p => !p.isSpectator);
-              if (racers.length === 2) {
+              if (racers.length === 2 && areRacersFriends(room, racers[0], racers[1])) {
                 recordRivalry(racers[0], racers[1], winnerId);
               }
             }
@@ -633,7 +654,9 @@ wss.on('connection', (ws) => {
                   room.currentStreak = { playerId: winnerId, count: 1 };
                 }
 
-                recordRivalry(racers[0], racers[1], winnerId);
+                if (areRacersFriends(room, racers[0], racers[1])) {
+                  recordRivalry(racers[0], racers[1], winnerId);
+                }
               }
             }
           }
@@ -755,6 +778,7 @@ wss.on('connection', (ws) => {
 
             if (willPause) {
               room.isPaused = true;
+              room.lastPausedAt = Date.now();
               broadcastToRoom(currentRoomCode, {
                 type: 'PAUSE_CONSENSUS',
                 payload: {
@@ -773,6 +797,10 @@ wss.on('connection', (ws) => {
               setTimeout(() => {
                 const r = rooms.get(currentRoomCode);
                 if (r && r.isPaused) {
+                  if (r.lastPausedAt) {
+                    r.totalPausedMs = (r.totalPausedMs || 0) + (Date.now() - r.lastPausedAt);
+                    r.lastPausedAt = null;
+                  }
                   r.isPaused = false;
                   broadcastToRoom(r.code, {
                     type: 'PAUSE_CONSENSUS',
@@ -826,6 +854,7 @@ wss.on('connection', (ws) => {
 
               if (willPause) {
                 room.isPaused = true;
+                room.lastPausedAt = Date.now();
                 room.lastPauseRequestTime = Date.now();
                 broadcastToRoom(currentRoomCode, {
                   type: 'PAUSE_CONSENSUS',
@@ -845,6 +874,10 @@ wss.on('connection', (ws) => {
                 setTimeout(() => {
                   const r = rooms.get(currentRoomCode);
                   if (r && r.isPaused) {
+                    if (r.lastPausedAt) {
+                      r.totalPausedMs = (r.totalPausedMs || 0) + (Date.now() - r.lastPausedAt);
+                      r.lastPausedAt = null;
+                    }
                     r.isPaused = false;
                     r.lastPauseRequestTime = Date.now();
                     broadcastToRoom(r.code, {
@@ -1627,6 +1660,7 @@ wss.on('connection', (ws) => {
           
           if (target && target.socket && target.socket.readyState === 1) {
             const room = rooms.get(roomCode);
+            if (room) room.isFriendMatch = true;
             const senderClient = connectedClients.get(registeredPlayerId || currentPlayer?.id);
             target.socket.send(JSON.stringify({
               type: 'LOBBY_INVITATION',
@@ -1853,10 +1887,6 @@ wss.on('connection', (ws) => {
     currentPlayer.isVoiceMuted = false;
     broadcastToRoom(room.code, {type:'VOICE_STATE_UPDATED', payload:{playerId:currentPlayer.id, isJoined:false, isMuted:false}});
     currentPlayer.disconnected = true;
-    if (room.isGameStarted && !currentPlayer.isSpectator && !room.isPaused && room.players.filter(p => !p.isSpectator).length === 2) {
-      room.isPaused = true;
-      room.autoPausedFor = currentPlayer.id;
-    }
     const delay = room.isGameStarted && !currentPlayer.isSpectator ? graceMs : lobbyGraceMs;
     currentPlayer.reconnectBy = Date.now() + delay;
     broadcastToRoom(room.code, { type: 'PLAYER_DISCONNECTED', payload: {

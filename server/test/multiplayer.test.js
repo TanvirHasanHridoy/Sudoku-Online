@@ -373,8 +373,13 @@ test('matchmaking queue prunes player and sends MATCHMAKING_TIMEOUT after timeou
   assert.equal(timeoutPayload.playerId, c.id);
 });
 
-test('head-to-head rivalry records match, updates series streak, and responds to GET_RIVALRIES', async () => {
+test('head-to-head rivalry records match only when racers are friends, updates series streak, and responds to GET_RIVALRIES', async () => {
   const { a, b, matchId } = await room();
+
+  // Establish friendship so rivalry guard permits recording
+  a.send('SET_FRIENDS_LIST', { friendIds: [b.id] });
+  b.send('SET_FRIENDS_LIST', { friendIds: [a.id] });
+  await sleep(30);
 
   // Player A completes puzzle first (progress 100)
   a.send('UPDATE_PROGRESS', { progress: 100, strikes: 0, matchId });
@@ -414,6 +419,39 @@ test('head-to-head rivalry records match, updates series streak, and responds to
   assert.equal(approvedA.room.seriesScore[a.id], 1);
   assert.equal(approvedA.room.currentStreak.playerId, a.id);
   assert.equal(approvedA.room.currentStreak.count, 1);
+});
+
+test('rivalry is NOT recorded for matches between non-friends', async () => {
+  const { a, b, matchId } = await room();
+
+  // No friendship established
+  a.send('UPDATE_PROGRESS', { progress: 100, strikes: 0, matchId });
+  await a.next('MATCH_RESULT');
+  b.send('UPDATE_PROGRESS', { progress: 80, strikes: 3, matchId });
+  await b.next('MATCH_RESULT');
+
+  a.send('GET_RIVALRIES', { playerId: a.id });
+  const aRivalries = await a.next('RIVALRIES_DATA');
+  const rivalryForA = aRivalries.rivalries.find(r => r.opponentId === b.id);
+  assert.equal(rivalryForA, undefined, 'Non-friends should not have head-to-head rivalry recorded');
+});
+
+test('sanitized room transmits continuous clock fields gameStartedAt, totalPausedMs, and serverTime', async () => {
+  const a = await client(), b = await client();
+  a.send('CREATE_ROOM', { playerId: a.id });
+  const created = await a.next('ROOM_CREATED');
+  b.send('JOIN_ROOM', { code: created.room.code, playerId: b.id });
+  await b.next('ROOM_JOINED');
+  b.send('TOGGLE_READY'); await b.next('ROOM_UPDATED');
+  a.send('TOGGLE_READY');
+  a.send('START_GAME', { board: puzzle, solution });
+  const { room } = await a.next('GAME_STARTED');
+
+  assert.ok(room, 'GAME_STARTED payload must contain sanitized room');
+  assert.ok(typeof room.gameStartedAt === 'number', 'gameStartedAt must be timestamp number');
+  assert.ok(room.gameStartedAt > 0, 'gameStartedAt must be positive');
+  assert.equal(room.totalPausedMs, 0, 'Initial totalPausedMs should be 0');
+  assert.ok(typeof room.serverTime === 'number', 'serverTime must be present');
 });
 
 test('friend status updates broadcast in-lobby, in-game with roomCode, and enable 1-click spectate', async () => {

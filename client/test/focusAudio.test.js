@@ -287,3 +287,60 @@ test('useLobbyStore integrates daily challenge scores with Supabase daily_challe
     'useLobbyStore must query and insert by challenge_date'
   );
 });
+
+test('heartbeat synthesizer audio gain is boosted to 0.60 with resonant lowpass filter', async () => {
+  const fs = await import('fs');
+  const audioContent = fs.readFileSync(new URL('../src/utils/audio.js', import.meta.url), 'utf-8');
+
+  assert.ok(
+    audioContent.includes('function playSingleHeartbeat(ctx, volume = 0.60)'),
+    'playSingleHeartbeat must default volume to 0.60'
+  );
+  assert.ok(
+    audioContent.includes('filter1.frequency.setValueAtTime(145, now)'),
+    'Heartbeat filter1 frequency must be tuned for presence'
+  );
+  assert.ok(
+    audioContent.includes('filter1.Q.setValueAtTime(2.0, now)'),
+    'Heartbeat filter1 must have resonant Q punch'
+  );
+});
+
+test('App.jsx single-source matchUrgency evaluator derives banners and unified board borders', async () => {
+  const fs = await import('fs');
+  const appContent = fs.readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf-8');
+
+  // Verify single-source evaluator
+  assert.ok(
+    appContent.includes('const matchUrgency = useMemo('),
+    'App.jsx must define centralized matchUrgency memoized evaluator'
+  );
+  assert.ok(
+    appContent.includes('level: \'climax\'') && appContent.includes('level: \'warning\''),
+    'matchUrgency must categorize into climax and warning levels'
+  );
+
+  // Verify single banner slot
+  assert.ok(
+    appContent.includes('matchUrgency.bannerText') && appContent.includes('matchUrgency.bannerType === \'tier2\''),
+    'App.jsx must render single consolidated banner driven by matchUrgency'
+  );
+
+  // Verify board wrapper consumes matchUrgency.level
+  assert.ok(
+    appContent.includes('matchUrgency.level === \'climax\''),
+    'Board wrapper border must strictly derive from matchUrgency.level'
+  );
+
+  // Verify mobile two-row header
+  assert.ok(
+    appContent.includes('flex sm:hidden items-center justify-between w-full pt-1.5 mt-1.5 border-t border-border-custom/30 gap-1.5'),
+    'Header must render dedicated Row 2 toolbar on mobile screens'
+  );
+
+  // Verify mobile chat floating button is excluded from activeView === game
+  assert.ok(
+    appContent.includes('activeView !== "game"') && appContent.includes('setIsMobileChatOpen(true)'),
+    'Mobile floating chat button must not render in game view'
+  );
+});

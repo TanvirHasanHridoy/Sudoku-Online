@@ -407,53 +407,152 @@ export default function App() {
   };
 
   // Derived opponent state — must be declared before any useEffect that references it
-  const activeOpponent = room?.players?.find((p) => !isPlayerDone(p));
+  const activeOpponentsList = useMemo(() => {
+    if (!room || !room.players) return [];
+    return room.players.filter((p) => !p.isSpectator && p.id !== myPlayerId);
+  }, [room?.players, myPlayerId]);
 
-  // Opponent nearing completion triggers Climax Peripheral Aura and end-game urgency
-  // Opponent nearing completion triggers Climax Heartbeat Aura strictly after 90% completed
-  const anyOpponentClose = room?.players?.find((p) => {
-    if (isPlayerDone(p)) return false;
-    const oppTotal = p.total || 32;
-    const oppLeft = p.cellsLeft !== undefined
-      ? p.cellsLeft
-      : Math.max(0, oppTotal - Math.round((oppTotal * (p.progress || 0)) / 100));
-    return (p.progress >= 85 || (oppLeft <= 5 && oppLeft > 0));
-    if (p.id === myPlayerId || p.isSpectator || isPlayerDone(p)) return false;
-    return (p.progress >= 90);
-  });
+  const [hudOpponentIndex, setHudOpponentIndex] = useState(0);
+  const hudTouchStartX = useRef(0);
+  const milestonesNotifiedRef = useRef(new Set());
 
-  const anyOpponentWarning = !anyOpponentClose && room?.players?.find((p) => {
-    if (isPlayerDone(p)) return false;
-    const oppTotal = p.total || 32;
-    const oppLeft = p.cellsLeft !== undefined
-      ? p.cellsLeft
-      : Math.max(0, oppTotal - Math.round((oppTotal * (p.progress || 0)) / 100));
-    return (p.progress >= 60 || (oppLeft <= 10 && oppLeft > 0));
-    if (p.id === myPlayerId || p.isSpectator || isPlayerDone(p)) return false;
-    return (p.progress >= 70 && p.progress < 90);
-  });
+  const activeOpponent = activeOpponentsList[hudOpponentIndex] || activeOpponentsList[0] || null;
 
-  const opponentCellsRemaining = anyOpponentClose
-    ? (anyOpponentClose.cellsLeft !== undefined
-      ? anyOpponentClose.cellsLeft
-      : Math.max(0, (anyOpponentClose.total || 32) - Math.round(((anyOpponentClose.total || 32) * (anyOpponentClose.progress || 0)) / 100)))
-    : null;
+  // Single-Source Centralized Match Urgency Evaluator
+  const matchUrgency = useMemo(() => {
+    if (!room || room.coop || activeView === "home" || gameStatus !== "playing") {
+      return {
+        level: 'none',
+        bannerText: null,
+        bannerType: null,
+        isClimaxAura: false,
+        heartbeatActive: false,
+        tier2Racers: [],
+        tier1Racers: []
+      };
+    }
 
-  const isOpponentClose = Boolean(
-    anyOpponentClose &&
-    !room?.coop &&
-    activeView !== "home" &&
-    gameStatus === "playing"
-  );
+    const activeOpponents = (room.players || []).filter(
+      (p) => !p.isSpectator && p.id !== myPlayerId && !isPlayerDone(p)
+    );
 
-  const isOpponentWarning = Boolean(
-    anyOpponentWarning &&
-    !room?.coop &&
-    activeView !== "home" &&
-    gameStatus === "playing"
-  );
+    const getRemainingCells = (p) => {
+      if (p.cellsLeft !== undefined) return p.cellsLeft;
+      const oppTotal = p.total || 32;
+      return Math.max(0, oppTotal - Math.round((oppTotal * (p.progress || 0)) / 100));
+    };
 
-  const boardUrgency = isOpponentClose ? 'critical' : isOpponentWarning ? 'warning' : null;
+    // Tier 2: Any active opponent >= 75% or <= 5 cells left
+    const tier2Racers = activeOpponents.filter((p) => {
+      const left = getRemainingCells(p);
+      return p.progress >= 75 || (left <= 5 && left > 0);
+    });
+
+    if (tier2Racers.length > 0) {
+      let bannerText = "";
+      if (tier2Racers.length === 1) {
+        const left = getRemainingCells(tier2Racers[0]);
+        bannerText = `⚠️ ${tier2Racers[0].name} is so close — only ${left} cells left!`;
+      } else {
+        bannerText = `⚠️ Cells left: ${tier2Racers.map((p) => `${p.name}: ${getRemainingCells(p)}`).join(", ")}`;
+      }
+      return {
+        level: 'climax',
+        bannerText,
+        bannerType: 'tier2',
+        isClimaxAura: true,
+        heartbeatActive: true,
+        tier2Racers,
+        tier1Racers: []
+      };
+    }
+
+    // Tier 1: Any active opponent between 55% and 74%
+    const tier1Racers = activeOpponents.filter((p) => p.progress >= 55 && p.progress < 75);
+    if (tier1Racers.length > 0) {
+      let bannerText = "";
+      if (tier1Racers.length === 1) {
+        bannerText = `⚡ ${tier1Racers[0].name} is picking up speed (${tier1Racers[0].progress}% completed)`;
+      } else {
+        bannerText = `⚡ Players are picking up speed! ${tier1Racers.map((p) => `${p.name} (${p.progress}%)`).join(", ")}`;
+      }
+      return {
+        level: 'warning',
+        bannerText,
+        bannerType: 'tier1',
+        isClimaxAura: false,
+        heartbeatActive: false,
+        tier2Racers: [],
+        tier1Racers
+      };
+    }
+
+    return {
+      level: 'none',
+      bannerText: null,
+      bannerType: null,
+      isClimaxAura: false,
+      heartbeatActive: false,
+      tier2Racers: [],
+      tier1Racers: []
+    };
+  }, [room?.players, room?.coop, activeView, gameStatus, myPlayerId, finishers]);
+
+  // Auto-threat focus: automatically navigate HUD to an opponent surging into Tier 2 or Tier 1
+  useEffect(() => {
+    if (matchUrgency.tier2Racers.length > 0) {
+      const targetId = matchUrgency.tier2Racers[0].id;
+      const idx = activeOpponentsList.findIndex((p) => p.id === targetId);
+      if (idx !== -1 && idx !== hudOpponentIndex) {
+        setHudOpponentIndex(idx);
+      }
+    } else if (matchUrgency.tier1Racers.length > 0) {
+      const targetId = matchUrgency.tier1Racers[0].id;
+      const idx = activeOpponentsList.findIndex((p) => p.id === targetId);
+      if (idx !== -1 && idx !== hudOpponentIndex) {
+        setHudOpponentIndex(idx);
+      }
+    }
+  }, [matchUrgency.tier2Racers, matchUrgency.tier1Racers, activeOpponentsList]);
+
+  // Keep HUD index in bounds
+  useEffect(() => {
+    if (hudOpponentIndex >= activeOpponentsList.length && activeOpponentsList.length > 0) {
+      setHudOpponentIndex(0);
+    }
+  }, [activeOpponentsList.length, hudOpponentIndex]);
+
+  // Milestone Toasts at 55% and 75% for 3+ player games
+  useEffect(() => {
+    if (!room || room.coop || !room.players || room.players.length < 3 || gameStatus !== "playing") {
+      return;
+    }
+    const opponents = room.players.filter((p) => !p.isSpectator && p.id !== myPlayerId && !isPlayerDone(p));
+    opponents.forEach((p) => {
+      const key55 = `55_${p.id}`;
+      const key75 = `75_${p.id}`;
+      if (p.progress >= 75 && !milestonesNotifiedRef.current.has(key75)) {
+        milestonesNotifiedRef.current.add(key75);
+        addToast(`🔥 ${p.name} reached 75% progress!`, "error");
+      } else if (p.progress >= 55 && p.progress < 75 && !milestonesNotifiedRef.current.has(key55)) {
+        milestonesNotifiedRef.current.add(key55);
+        addToast(`⚡ ${p.name} is picking up speed (55% completed)!`, "info");
+      }
+    });
+  }, [room?.players, room?.coop, gameStatus, myPlayerId, finishers]);
+
+  // Reset milestone notification ref on match start
+  useEffect(() => {
+    if (room?.matchId) {
+      milestonesNotifiedRef.current.clear();
+    }
+  }, [room?.matchId]);
+
+  const anyOpponentClose = matchUrgency.tier2Racers[0] || null;
+  const anyOpponentWarning = matchUrgency.tier1Racers[0] || null;
+  const isOpponentClose = matchUrgency.isClimaxAura;
+  const isOpponentWarning = matchUrgency.level === 'warning';
+  const boardUrgency = matchUrgency.level === 'climax' ? 'critical' : matchUrgency.level === 'warning' ? 'warning' : null;
 
   // 1v1 Series Rivalry & Streaks state
   const is1v1Multiplayer = Boolean(
@@ -864,8 +963,8 @@ export default function App() {
     localStorage.setItem("sudoku_theme", theme);
   }, [theme]);
 
-  // Timer Effect: stop timer if game is paused!
-  const isGamePaused = room?.isPaused || (room && !isConnected) || (pauseCountdown !== null && pauseCountdown > 0);
+  // Timer Effect: stop timer only if game is explicitly paused by consensus or countdown
+  const isGamePaused = Boolean(room?.isPaused || (pauseCountdown !== null && pauseCountdown > 0));
 
   useEffect(() => {
     if (gameStatus === "playing" && !isGamePaused) {
@@ -891,6 +990,19 @@ export default function App() {
     }
     return () => clearInterval(timerRef.current);
   }, [gameStatus, isGamePaused]);
+
+  // Continuous Server-Authoritative Clock Synchronization across temporary network disconnects
+  useEffect(() => {
+    if (room && room.isGameStarted && room.gameStartedAt) {
+      const now = Date.now();
+      const pausedDuration = room.totalPausedMs || 0;
+      const currentPauseOffset = (room.isPaused && room.lastPausedAt) ? Math.max(0, now - room.lastPausedAt) : 0;
+      const authoritativeSeconds = Math.max(0, Math.floor((now - room.gameStartedAt - pausedDuration - currentPauseOffset) / 1000));
+      if (Math.abs(seconds - authoritativeSeconds) >= 1) {
+        setSeconds(authoritativeSeconds);
+      }
+    }
+  }, [room?.gameStartedAt, room?.totalPausedMs, room?.isPaused, room?.lastPausedAt, room?.isGameStarted]);
 
   // Switch to game view when playing starts
   useEffect(() => {
@@ -956,9 +1068,9 @@ export default function App() {
     }
   }, [gameStatus, lofiEnabled]);
 
-  // Heartbeat sound synchronization when opponent is at >= 90%
+  // Heartbeat sound synchronization triggered strictly by single-source matchUrgency
   useEffect(() => {
-    if (isOpponentClose && soundEnabled) {
+    if (matchUrgency.heartbeatActive && soundEnabled) {
       playSound.startHeartbeat(soundEnabled);
     } else {
       playSound.stopHeartbeat();
@@ -966,7 +1078,7 @@ export default function App() {
     return () => {
       playSound.stopHeartbeat();
     };
-  }, [isOpponentClose, soundEnabled]);
+  }, [matchUrgency.heartbeatActive, soundEnabled]);
 
   // Auto-open friend challenge from URL and enter game immediately
   useEffect(() => {
@@ -1004,9 +1116,18 @@ export default function App() {
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      if (room?.matchId && isConnected) setSeconds(useGameStore.getState().elapsedSeconds || 0);
+      if (room?.matchId && isConnected) {
+        if (room.isGameStarted && room.gameStartedAt) {
+          const now = Date.now();
+          const pausedDuration = room.totalPausedMs || 0;
+          const currentPauseOffset = (room.isPaused && room.lastPausedAt) ? Math.max(0, now - room.lastPausedAt) : 0;
+          const authoritativeSeconds = Math.max(0, Math.floor((now - room.gameStartedAt - pausedDuration - currentPauseOffset) / 1000));
+          setSeconds(authoritativeSeconds);
+        } else {
+          setSeconds(useGameStore.getState().elapsedSeconds || 0);
+        }
+      }
       setLockedDigit(null);
-
     }, 0);
     return () => clearTimeout(timer);
   }, [room?.matchId, isConnected]);
@@ -1920,83 +2041,331 @@ export default function App() {
       </div>
 
       {/* Header bar */}
-      <header className="glass-panel w-full sticky top-0 px-4 md:px-8 py-3 flex items-center justify-between border-b border-border-custom z-40">
-        <div className="flex items-center gap-3">
-          <div className="bg-accent-custom p-2 rounded-xl text-white shadow-md shadow-accent-custom/20 transition-all duration-300">
-            <Zap size={22} className="animate-pulse" />
+      <header className="glass-panel w-full sticky top-0 px-3 md:px-8 py-2 md:py-3 border-b border-border-custom z-40">
+        {/* Row 1: Brand & User Profile */}
+        <div className="flex items-center justify-between w-full">
+          <div className="flex items-center gap-2.5 sm:gap-3">
+            <div className="bg-accent-custom p-1.5 sm:p-2 rounded-xl text-white shadow-md shadow-accent-custom/20 transition-all duration-300">
+              <Zap size={20} className="animate-pulse sm:w-[22px] sm:h-[22px]" />
+            </div>
+            <div>
+              <h1 className="text-lg sm:text-xl font-bold tracking-tight text-text-custom leading-tight">
+                Co-doku
+              </h1>
+              <p className="text-[9px] sm:text-[10px] text-accent-custom font-semibold uppercase tracking-wider">
+                {room ? `Room: ${room.code}` : "Competitive Hub"}
+              </p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-xl font-bold tracking-tight text-text-custom">
-              Co-doku
-            </h1>
-            <p className="text-[10px] text-accent-custom font-semibold uppercase tracking-wider">
-              {room ? `Multiplayer Room: ${room.code}` : "Competitive Hub"}
-            </p>
+
+          <div className="flex items-center gap-2 sm:gap-3">
+            {/* Supabase Google Auth Widget */}
+            {loadingAuth ? (
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-border-custom bg-panel-custom text-xs">
+                <span className="animate-spin text-accent-custom"><RefreshCw size={14} /></span>
+                <span className="opacity-70 font-semibold">Loading...</span>
+              </div>
+            ) : isGuest ? (
+              activeView !== "game" && (
+                <button
+                  onClick={signInWithGoogle}
+                  disabled={isSavingUsername || isCheckingUsername}
+                  className="px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl border border-border-custom hover:bg-accent-glow hover:border-accent-custom hover:text-accent-custom active:scale-95 transition-all flex items-center gap-1.5 text-xs font-bold text-text-custom cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
+                >
+                  <LogIn size={13} />
+                  <span>Link Google</span>
+                </button>
+              )
+            ) : (
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5 px-2 py-1 rounded-xl border border-border-custom bg-panel-custom/50">
+                  {profile?.avatar_url ? (
+                    <img
+                      src={profile.avatar_url}
+                      alt="avatar"
+                      className="w-5 h-5 rounded-full border border-accent-custom/55"
+                    />
+                  ) : (
+                    <div className="w-5 h-5 rounded-full bg-accent-custom text-white text-[10px] flex items-center justify-center font-bold">
+                      {profile?.display_name?.charAt(0)?.toUpperCase() || "P"}
+                    </div>
+                  )}
+                  <div className="text-[11px] font-bold tracking-tight max-w-[80px] truncate text-text-custom">
+                    {profile?.display_name}
+                  </div>
+                </div>
+                {activeView !== "game" && (
+                  <button
+                    onClick={signOut}
+                    disabled={isSavingUsername || isCheckingUsername}
+                    className="p-1.5 sm:p-2 rounded-xl border border-border-custom hover:bg-rose-500/10 hover:border-rose-500 hover:text-rose-500 active:scale-95 transition-all text-xs font-bold text-text-custom disabled:opacity-50 disabled:pointer-events-none"
+                    title="Sign Out"
+                  >
+                    <LogOut size={13} />
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Desktop Utility Buttons (Theme, Audio, Lo-Fi, Guide, Settings) */}
+            <div className="hidden sm:flex items-center gap-2 sm:gap-3">
+              {/* Theme custom picker */}
+              <div className="relative">
+                <button
+                  onClick={() => setShowThemeMenu(!showThemeMenu)}
+                  className="p-2 rounded-xl border border-border-custom hover:bg-accent-glow hover:border-accent-custom hover:text-accent-custom active:scale-95 transition-all flex items-center gap-1.5"
+                  title="Change Theme Palette"
+                >
+                  <Palette size={18} />
+                  <span className="text-xs font-bold hidden sm:inline">Theme</span>
+                </button>
+
+                {showThemeMenu && (
+                  <div className="absolute right-0 mt-2 w-48 rounded-xl border border-border-custom bg-panel-custom p-2 shadow-lg z-50 animate-scale-in">
+                    <p className="text-[9px] uppercase font-bold text-accent-custom tracking-wider px-2 py-1 border-b border-border-custom mb-1">
+                      Select Theme
+                    </p>
+                    <div className="space-y-0.5">
+                      {THEMES.map((t) => (
+                        <button
+                          key={t.id}
+                          onClick={() => {
+                            setTheme(t.id);
+                            setShowThemeMenu(false);
+                          }}
+                          className={`
+                            w-full text-left px-2 py-1.5 rounded-lg text-xs font-semibold flex items-center justify-between
+                            transition-colors hover:bg-accent-glow hover:text-accent-custom
+                            ${theme === t.id ? "text-accent-custom bg-accent-glow" : ""}
+                          `}
+                        >
+                          <span>{t.name}</span>
+                          <div
+                            className={`w-3.5 h-3.5 rounded-full border border-border-custom ${t.preview}`}
+                          />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Audio toggle */}
+              <button
+                onClick={() => setSoundEnabled(!soundEnabled)}
+                className="p-2 rounded-xl border border-border-custom hover:bg-accent-glow hover:border-accent-custom hover:text-accent-custom active:scale-95 transition-all"
+                title={soundEnabled ? "Mute Game SFX" : "Unmute Game SFX"}
+              >
+                {soundEnabled ? <Volume2 size={18} /> : <VolumeX size={18} />}
+              </button>
+
+              {/* Desktop Focus Lo-Fi Popover Button */}
+              <div className="relative hidden md:block" ref={lofiMenuRef}>
+                <button
+                  onClick={() => setIsLofiMenuOpen(!isLofiMenuOpen)}
+                  className={`p-2 rounded-xl border transition-all flex items-center gap-1.5 text-xs font-semibold active:scale-95 cursor-pointer ${lofiEnabled
+                    ? "border-accent-custom bg-accent-glow text-accent-custom shadow-xs"
+                    : "border-border-custom hover:bg-accent-glow hover:border-accent-custom hover:text-accent-custom"
+                    }`}
+                  title="Focus Lo-Fi Soundscape (Ambient & Generative)"
+                >
+                  <Headphones size={18} className={lofiEnabled && activeView === "game" && gameStatus === "playing" && !isGamePaused ? "text-accent-custom" : ""} />
+                  <span className="hidden lg:inline">Focus Lo-Fi</span>
+                  {lofiEnabled && activeView === "game" && gameStatus === "playing" && !isGamePaused && (
+                    <span className="flex items-end gap-0.5 ml-0.5 h-3">
+                      <span className="w-0.5 bg-accent-custom rounded-full animate-pulse h-2" />
+                      <span className="w-0.5 bg-accent-custom rounded-full animate-pulse h-3 delay-75" />
+                      <span className="w-0.5 bg-accent-custom rounded-full animate-pulse h-1.5 delay-150" />
+                    </span>
+                  )}
+                </button>
+
+                {isLofiMenuOpen && (
+                  <div className="absolute right-0 mt-2 w-72 glass-card rounded-2xl p-4 shadow-2xl border border-border-custom/50 z-50 animate-scale-in text-text-custom space-y-3">
+                    <div className="flex items-center justify-between border-b border-border-custom/20 pb-2">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-sm">🎧</span>
+                        <span className="text-xs font-bold uppercase tracking-wider text-accent-custom">
+                          Focus Lo-Fi
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => setIsLofiMenuOpen(false)}
+                        className="text-text-custom/50 hover:text-text-custom p-1 rounded-lg hover:bg-accent-glow cursor-pointer transition-colors"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+
+                    {/* Master Enable Toggle */}
+                    <div className="flex items-center justify-between p-2 rounded-xl bg-accent-glow/20 border border-border-custom/30">
+                      <div className="flex flex-col text-left">
+                        <span className="text-xs font-bold">Ambient Music</span>
+                        <span className="text-[10px] opacity-60">Plays during puzzle solving</span>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={lofiEnabled}
+                        onChange={(e) => handleToggleLofi(e.target.checked)}
+                        className="size-4 rounded border-border-custom text-accent-custom bg-accent-glow/20 focus:ring-accent-custom cursor-pointer"
+                      />
+                    </div>
+
+                    {/* Preset Selector */}
+                    <div className="space-y-1.5 text-left">
+                      <label className="text-[10px] uppercase font-bold opacity-75 tracking-wider block">
+                        Mood Preset
+                      </label>
+                      <div className="space-y-1">
+                        {Object.values(LOFI_PRESETS).map((p) => {
+                          const isSelected = lofiPreset === p.id;
+                          return (
+                            <button
+                              key={p.id}
+                              onClick={() => handleLofiPresetChange(p.id)}
+                              className={`w-full text-left p-2 rounded-xl text-xs font-medium border transition-all cursor-pointer flex items-center justify-between ${isSelected
+                                ? "border-accent-custom bg-accent-custom/15 text-accent-custom font-bold shadow-xs"
+                                : "border-border-custom/30 hover:border-border-custom hover:bg-accent-glow/30 opacity-80 hover:opacity-100"
+                                }`}
+                            >
+                              <div className="flex items-center gap-2">
+                                <span className="text-base">{p.emoji}</span>
+                                <div>
+                                  <div className="text-xs font-bold leading-tight">{p.name}</div>
+                                  <div className="text-[9px] opacity-60 line-clamp-1">{p.description}</div>
+                                </div>
+                              </div>
+                              {isSelected && <Check size={14} className="text-accent-custom shrink-0 ml-1" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Volume Slider */}
+                    <div className="space-y-1 pt-1 text-left">
+                      <div className="flex items-center justify-between text-xs font-medium">
+                        <span className="text-[10px] uppercase font-bold opacity-75 tracking-wider flex items-center gap-1.5">
+                          <Volume2 size={13} /> Volume
+                        </span>
+                        <span className="text-[11px] font-mono opacity-80">{Math.round(lofiVolume * 100)}%</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.02"
+                        value={lofiVolume}
+                        onChange={(e) => handleLofiVolumeChange(parseFloat(e.target.value))}
+                        className="w-full accent-accent-custom cursor-pointer h-1.5 bg-accent-glow rounded-lg"
+                      />
+                    </div>
+
+                    {/* Adaptive Flow Tag */}
+                    <div className="p-2 rounded-xl bg-panel-custom/40 border border-border-custom/20 text-[10px] opacity-75 text-left">
+                      <span className="font-bold text-accent-custom">⚡ Adaptive Flow: </span>
+                      <span>Evolves with progress (Chords → Drums & Bass → Bell Climax).</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Game Guide & Rules button */}
+              <button
+                onClick={() => setIsGuideOpen(true)}
+                className="p-2 rounded-xl border border-border-custom hover:bg-accent-glow hover:border-accent-custom hover:text-accent-custom active:scale-95 transition-all cursor-pointer"
+                title="Game Modes & Rules Guide"
+              >
+                <HelpCircle size={18} />
+              </button>
+
+              {/* Settings button */}
+              <button
+                onClick={() => setShowSettingsModal(true)}
+                className="p-2 rounded-xl border border-border-custom hover:bg-accent-glow hover:border-accent-custom hover:text-accent-custom active:scale-95 transition-all cursor-pointer"
+                title="Settings"
+              >
+                <Settings size={18} />
+              </button>
+            </div>
+
+            {/* Online User Avatar */}
+            <div className="flex items-center gap-2 pl-2 border-l border-border-custom">
+              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-accent-custom flex items-center justify-center font-bold text-white shadow-sm overflow-hidden transition-all duration-300">
+                {AVATARS.find((a) => a.id === selectedAvatar) ? (
+                  <img
+                    src={AVATARS.find((a) => a.id === selectedAvatar).src}
+                    alt="My Avatar"
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  "ME"
+                )}
+              </div>
+              <div className="hidden sm:block text-left">
+                <input
+                  type="text"
+                  value={inputName}
+                  onChange={(e) => {
+                    setInputName(e.target.value);
+                    setUsernameSuccess(false);
+                    setDbUsernameError("");
+                  }}
+                  disabled={isSavingUsername || isCheckingUsername}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleUsernameSave();
+                  }}
+                  className="text-xs font-bold leading-tight bg-transparent border-b border-transparent hover:border-border-custom focus:border-accent-custom focus:outline-none w-24 transition-all"
+                  title="Click to edit name. Press Enter to save."
+                />
+                <div className="flex items-center gap-1.5">
+                  <div
+                    className={`w-1.5 h-1.5 rounded-full ${connectionState === "connected" || isConnected
+                      ? "bg-emerald-500 animate-pulse"
+                      : connectionState === "connecting"
+                        ? "bg-amber-500 animate-pulse"
+                        : "bg-rose-500"
+                      }`}
+                  ></div>
+                  <span className="text-[9px] font-semibold opacity-65">
+                    {connectionState === "connected" || isConnected
+                      ? `Online (${elo} ELO)`
+                      : connectionState === "connecting"
+                        ? "Connecting..."
+                        : "Offline"}
+                  </span>
+                  {isSavingUsername && (
+                    <RefreshCw size={10} className="animate-spin text-accent-custom ml-1 shrink-0" />
+                  )}
+                  {!isGuest && (
+                    <div
+                      className="w-2.5 h-2.5 rounded-full bg-indigo-500 flex items-center justify-center text-white"
+                      title="Linked Account"
+                    >
+                      <Check size={8} strokeWidth={4} />
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
-          {/* Supabase Google Auth Widget */}
-          {loadingAuth ? (
-            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-border-custom bg-panel-custom text-xs">
-              <span className="animate-spin text-accent-custom"><RefreshCw size={14} /></span>
-              <span className="opacity-70 font-semibold">Loading...</span>
-            </div>
-          ) : isGuest ? (
-            activeView !== "game" && (
-              <button
-                onClick={signInWithGoogle}
-                disabled={isSavingUsername || isCheckingUsername}
-                className="px-3 py-1.5 rounded-xl border border-border-custom hover:bg-accent-glow hover:border-accent-custom hover:text-accent-custom active:scale-95 transition-all flex items-center gap-1.5 text-xs font-bold text-text-custom cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
-              >
-                <LogIn size={14} />
-                <span>Link Google</span>
-              </button>
-            )
-          ) : (
-            <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl border border-border-custom bg-panel-custom/50">
-                {profile?.avatar_url ? (
-                  <img
-                    src={profile.avatar_url}
-                    alt="avatar"
-                    className="w-5 h-5 rounded-full border border-accent-custom/55"
-                  />
-                ) : (
-                  <div className="w-5 h-5 rounded-full bg-accent-custom text-white text-[10px] flex items-center justify-center font-bold">
-                    {profile?.display_name?.charAt(0)?.toUpperCase() || "P"}
-                  </div>
-                )}
-                <div className="text-[11px] font-bold tracking-tight max-w-[80px] truncate text-text-custom">
-                  {profile?.display_name}
-                </div>
-              </div>
-              {activeView !== "game" && (
-                <button
-                  onClick={signOut}
-                  disabled={isSavingUsername || isCheckingUsername}
-                  className="p-2 rounded-xl border border-border-custom hover:bg-rose-500/10 hover:border-rose-500 hover:text-rose-500 active:scale-95 transition-all text-xs font-bold text-text-custom disabled:opacity-50 disabled:pointer-events-none"
-                  title="Sign Out"
-                >
-                  <LogOut size={14} />
-                </button>
-              )}
-            </div>
-          )}
-
-          {/* Theme custom picker */}
-          <div className="relative">
+        {/* Row 2: Mobile Utility Toolbar (<sm) */}
+        <div className="flex sm:hidden items-center justify-between w-full pt-1.5 mt-1.5 border-t border-border-custom/30 gap-1.5">
+          {/* Mobile Theme button */}
+          <div className="relative flex-1">
             <button
               onClick={() => setShowThemeMenu(!showThemeMenu)}
-              className="p-2 rounded-xl border border-border-custom hover:bg-accent-glow hover:border-accent-custom hover:text-accent-custom active:scale-95 transition-all flex items-center gap-1.5"
+              className="w-full py-1 px-1.5 rounded-lg border border-border-custom hover:bg-accent-glow hover:border-accent-custom hover:text-accent-custom active:scale-95 transition-all flex items-center justify-center gap-1 text-[11px] font-bold"
               title="Change Theme Palette"
             >
-              <Palette size={18} />
-              <span className="text-xs font-bold hidden sm:inline">Theme</span>
+              <Palette size={13} />
+              <span>Theme</span>
             </button>
 
             {showThemeMenu && (
-              <div className="absolute right-0 mt-2 w-48 rounded-xl border border-border-custom bg-panel-custom p-2 shadow-lg z-50 animate-scale-in">
+              <div className="absolute left-0 mt-2 w-48 rounded-xl border border-border-custom bg-panel-custom p-2 shadow-lg z-50 animate-scale-in">
                 <p className="text-[9px] uppercase font-bold text-accent-custom tracking-wider px-2 py-1 border-b border-border-custom mb-1">
                   Select Theme
                 </p>
@@ -2025,203 +2394,35 @@ export default function App() {
             )}
           </div>
 
-          {/* Audio toggle */}
+          {/* Mobile Audio toggle */}
           <button
             onClick={() => setSoundEnabled(!soundEnabled)}
-            className="p-2 rounded-xl border border-border-custom hover:bg-accent-glow hover:border-accent-custom hover:text-accent-custom active:scale-95 transition-all"
+            className="flex-1 py-1 px-1.5 rounded-lg border border-border-custom hover:bg-accent-glow hover:border-accent-custom hover:text-accent-custom active:scale-95 transition-all flex items-center justify-center gap-1 text-[11px] font-bold"
             title={soundEnabled ? "Mute Game SFX" : "Unmute Game SFX"}
           >
-            {soundEnabled ? <Volume2 size={18} /> : <VolumeX size={18} />}
+            {soundEnabled ? <Volume2 size={13} /> : <VolumeX size={13} />}
+            <span>{soundEnabled ? "Sound" : "Mute"}</span>
           </button>
 
-          {/* Desktop Focus Lo-Fi Popover Button (Hidden on Mobile to preserve navbar space) */}
-          <div className="relative hidden md:block" ref={lofiMenuRef}>
-            <button
-              onClick={() => setIsLofiMenuOpen(!isLofiMenuOpen)}
-              className={`p-2 rounded-xl border transition-all flex items-center gap-1.5 text-xs font-semibold active:scale-95 cursor-pointer ${lofiEnabled
-                ? "border-accent-custom bg-accent-glow text-accent-custom shadow-xs"
-                : "border-border-custom hover:bg-accent-glow hover:border-accent-custom hover:text-accent-custom"
-                }`}
-              title="Focus Lo-Fi Soundscape (Ambient & Generative)"
-            >
-              <Headphones size={18} className={lofiEnabled && activeView === "game" && gameStatus === "playing" && !isGamePaused ? "text-accent-custom" : ""} />
-              <span className="hidden lg:inline">Focus Lo-Fi</span>
-              {lofiEnabled && activeView === "game" && gameStatus === "playing" && !isGamePaused && (
-                <span className="flex items-end gap-0.5 ml-0.5 h-3">
-                  <span className="w-0.5 bg-accent-custom rounded-full animate-pulse h-2" />
-                  <span className="w-0.5 bg-accent-custom rounded-full animate-pulse h-3 delay-75" />
-                  <span className="w-0.5 bg-accent-custom rounded-full animate-pulse h-1.5 delay-150" />
-                </span>
-              )}
-            </button>
-
-            {isLofiMenuOpen && (
-              <div className="absolute right-0 mt-2 w-72 glass-card rounded-2xl p-4 shadow-2xl border border-border-custom/50 z-50 animate-scale-in text-text-custom space-y-3">
-                <div className="flex items-center justify-between border-b border-border-custom/20 pb-2">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-sm">🎧</span>
-                    <span className="text-xs font-bold uppercase tracking-wider text-accent-custom">
-                      Focus Lo-Fi
-                    </span>
-                  </div>
-                  <button
-                    onClick={() => setIsLofiMenuOpen(false)}
-                    className="text-text-custom/50 hover:text-text-custom p-1 rounded-lg hover:bg-accent-glow cursor-pointer transition-colors"
-                  >
-                    <X size={14} />
-                  </button>
-                </div>
-
-                {/* Master Enable Toggle */}
-                <div className="flex items-center justify-between p-2 rounded-xl bg-accent-glow/20 border border-border-custom/30">
-                  <div className="flex flex-col text-left">
-                    <span className="text-xs font-bold">Ambient Music</span>
-                    <span className="text-[10px] opacity-60">Plays during puzzle solving</span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={lofiEnabled}
-                    onChange={(e) => handleToggleLofi(e.target.checked)}
-                    className="size-4 rounded border-border-custom text-accent-custom bg-accent-glow/20 focus:ring-accent-custom cursor-pointer"
-                  />
-                </div>
-
-                {/* Preset Selector */}
-                <div className="space-y-1.5 text-left">
-                  <label className="text-[10px] uppercase font-bold opacity-75 tracking-wider block">
-                    Mood Preset
-                  </label>
-                  <div className="space-y-1">
-                    {Object.values(LOFI_PRESETS).map((p) => {
-                      const isSelected = lofiPreset === p.id;
-                      return (
-                        <button
-                          key={p.id}
-                          onClick={() => handleLofiPresetChange(p.id)}
-                          className={`w-full text-left p-2 rounded-xl text-xs font-medium border transition-all cursor-pointer flex items-center justify-between ${isSelected
-                            ? "border-accent-custom bg-accent-custom/15 text-accent-custom font-bold shadow-xs"
-                            : "border-border-custom/30 hover:border-border-custom hover:bg-accent-glow/30 opacity-80 hover:opacity-100"
-                            }`}
-                        >
-                          <div className="flex items-center gap-2">
-                            <span className="text-base">{p.emoji}</span>
-                            <div>
-                              <div className="text-xs font-bold leading-tight">{p.name}</div>
-                              <div className="text-[9px] opacity-60 line-clamp-1">{p.description}</div>
-                            </div>
-                          </div>
-                          {isSelected && <Check size={14} className="text-accent-custom shrink-0 ml-1" />}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Volume Slider */}
-                <div className="space-y-1 pt-1 text-left">
-                  <div className="flex items-center justify-between text-xs font-medium">
-                    <span className="text-[10px] uppercase font-bold opacity-75 tracking-wider flex items-center gap-1.5">
-                      <Volume2 size={13} /> Volume
-                    </span>
-                    <span className="text-[11px] font-mono opacity-80">{Math.round(lofiVolume * 100)}%</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.02"
-                    value={lofiVolume}
-                    onChange={(e) => handleLofiVolumeChange(parseFloat(e.target.value))}
-                    className="w-full accent-accent-custom cursor-pointer h-1.5 bg-accent-glow rounded-lg"
-                  />
-                </div>
-
-                {/* Adaptive Flow Tag */}
-                <div className="p-2 rounded-xl bg-panel-custom/40 border border-border-custom/20 text-[10px] opacity-75 text-left">
-                  <span className="font-bold text-accent-custom">⚡ Adaptive Flow: </span>
-                  <span>Evolves with progress (Chords → Drums & Bass → Bell Climax).</span>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Game Guide & Rules button */}
+          {/* Mobile Game Guide button */}
           <button
             onClick={() => setIsGuideOpen(true)}
-            className="p-2 rounded-xl border border-border-custom hover:bg-accent-glow hover:border-accent-custom hover:text-accent-custom active:scale-95 transition-all cursor-pointer"
+            className="flex-1 py-1 px-1.5 rounded-lg border border-border-custom hover:bg-accent-glow hover:border-accent-custom hover:text-accent-custom active:scale-95 transition-all cursor-pointer flex items-center justify-center gap-1 text-[11px] font-bold"
             title="Game Modes & Rules Guide"
           >
-            <HelpCircle size={18} />
+            <HelpCircle size={13} />
+            <span>Guide</span>
           </button>
 
-          {/* Settings button */}
+          {/* Mobile Settings button */}
           <button
             onClick={() => setShowSettingsModal(true)}
-            className="p-2 rounded-xl border border-border-custom hover:bg-accent-glow hover:border-accent-custom hover:text-accent-custom active:scale-95 transition-all cursor-pointer"
+            className="flex-1 py-1 px-1.5 rounded-lg border border-border-custom hover:bg-accent-glow hover:border-accent-custom hover:text-accent-custom active:scale-95 transition-all cursor-pointer flex items-center justify-center gap-1 text-[11px] font-bold"
             title="Settings"
           >
-            <Settings size={18} />
+            <Settings size={13} />
+            <span>Settings</span>
           </button>
-
-          {/* Online User Avatar */}
-          <div className="flex items-center gap-2 pl-2 border-l border-border-custom">
-            <div className="w-8 h-8 rounded-full bg-accent-custom flex items-center justify-center font-bold text-white shadow-sm overflow-hidden transition-all duration-300">
-              {AVATARS.find((a) => a.id === selectedAvatar) ? (
-                <img
-                  src={AVATARS.find((a) => a.id === selectedAvatar).src}
-                  alt="My Avatar"
-                  className="w-full h-full object-cover"
-                />
-              ) : (
-                "ME"
-              )}
-            </div>
-            <div className="hidden sm:block text-left">
-              <input
-                type="text"
-                value={inputName}
-                onChange={(e) => {
-                  setInputName(e.target.value);
-                  setUsernameSuccess(false);
-                  setDbUsernameError("");
-                }}
-                disabled={isSavingUsername || isCheckingUsername}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") handleUsernameSave();
-                }}
-                className="text-xs font-bold leading-tight bg-transparent border-b border-transparent hover:border-border-custom focus:border-accent-custom focus:outline-none w-24 transition-all"
-                title="Click to edit name. Press Enter to save."
-              />
-              <div className="flex items-center gap-1.5">
-                <div
-                  className={`w-1.5 h-1.5 rounded-full ${connectionState === "connected" || isConnected
-                    ? "bg-emerald-500 animate-pulse"
-                    : connectionState === "connecting"
-                      ? "bg-amber-500 animate-pulse"
-                      : "bg-rose-500"
-                    }`}
-                ></div>
-                <span className="text-[9px] font-semibold opacity-65">
-                  {connectionState === "connected" || isConnected
-                    ? `Online (${elo} ELO)`
-                    : connectionState === "connecting"
-                      ? "Connecting..."
-                      : "Offline"}
-                </span>
-                {isSavingUsername && (
-                  <RefreshCw size={10} className="animate-spin text-accent-custom ml-1 shrink-0" />
-                )}
-                {!isGuest && (
-                  <div
-                    className="w-2.5 h-2.5 rounded-full bg-indigo-500 flex items-center justify-center text-white"
-                    title="Linked Account"
-                  >
-                    <Check size={8} strokeWidth={4} />
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
         </div>
       </header>
 
@@ -3614,14 +3815,27 @@ export default function App() {
                   {room && (
                     <div className="relative">
                       <button
-                        onClick={() => setShowEmoteMenu((prev) => !prev)}
-                        className={`p-1 rounded-lg border text-text-custom transition-all active:scale-95 ${showEmoteMenu
-                          ? "bg-accent-custom text-white border-accent-custom"
-                          : "bg-accent-glow border-border-custom hover:border-accent-custom"
-                          }`}
+                        onClick={() => {
+                          if (window.innerWidth < 768) {
+                            setIsMobileChatOpen(true);
+                            setUnreadChatCount(0);
+                          } else {
+                            setShowEmoteMenu((prev) => !prev);
+                          }
+                        }}
+                        className={`relative p-1 rounded-lg border text-text-custom transition-all active:scale-95 ${
+                          showEmoteMenu || isMobileChatOpen
+                            ? "bg-accent-custom text-white border-accent-custom"
+                            : "bg-accent-glow border-border-custom hover:border-accent-custom"
+                        }`}
                         title="Quick Reactions & Chat"
                       >
-                        <Smile size={11} className={showEmoteMenu ? "text-white" : "text-accent-custom"} />
+                        <Smile size={11} className={showEmoteMenu || isMobileChatOpen ? "text-white" : "text-accent-custom"} />
+                        {unreadChatCount > 0 && (
+                          <span className="absolute -top-1 -right-1 w-3 h-3 bg-rose-500 text-white text-[8px] font-black rounded-full flex items-center justify-center animate-pulse">
+                            {unreadChatCount}
+                          </span>
+                        )}
                       </button>
                       {showEmoteMenu && (
                         <div className="absolute right-0 top-full mt-1.5 z-50 glass-panel p-2.5 rounded-2xl border border-border-custom shadow-2xl flex flex-col gap-2 w-64 select-none animate-scale-in">
@@ -3757,36 +3971,88 @@ export default function App() {
                 </div>
               )}
 
-              {/* Mobile Opponent HUD (only shown on mobile/tablet when in a multiplayer match) */}
-              {room && room.isGameStarted && activeOpponent && (
-                <div className="w-full max-w-[460px] lg:hidden mb-2 px-2 py-1.5 bg-accent-glow/10 border border-border-custom/40 rounded-xl flex items-center justify-between gap-3 text-xs select-none animate-scale-in">
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <div className="w-5 h-5 rounded-full bg-accent-custom text-white font-bold flex items-center justify-center text-[10px] overflow-hidden shrink-0">
-                      {AVATARS.find(a => a.id === activeOpponent.avatar) ? (
-                        <img
-                          src={AVATARS.find(a => a.id === activeOpponent.avatar).src}
-                          alt="Avatar"
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
-                        activeOpponent.name?.slice(0, 2)?.toUpperCase()
+              {/* Mobile Opponent HUD (Swipable carousel when multiple opponents) */}
+              {room && room.isGameStarted && activeOpponentsList.length > 0 && activeOpponent && (
+                <div
+                  onTouchStart={(e) => {
+                    hudTouchStartX.current = e.touches[0].clientX;
+                  }}
+                  onTouchEnd={(e) => {
+                    const deltaX = e.changedTouches[0].clientX - hudTouchStartX.current;
+                    if (Math.abs(deltaX) > 35 && activeOpponentsList.length > 1) {
+                      if (deltaX < 0) {
+                        setHudOpponentIndex((prev) => (prev + 1) % activeOpponentsList.length);
+                      } else {
+                        setHudOpponentIndex((prev) => (prev - 1 + activeOpponentsList.length) % activeOpponentsList.length);
+                      }
+                    }
+                  }}
+                  className="w-full max-w-[460px] lg:hidden mb-2 px-2.5 py-1.5 bg-accent-glow/10 border border-border-custom/40 rounded-xl flex flex-col gap-1 text-xs select-none animate-scale-in"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      {activeOpponentsList.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => setHudOpponentIndex((prev) => (prev - 1 + activeOpponentsList.length) % activeOpponentsList.length)}
+                          className="p-0.5 text-text-custom/50 hover:text-text-custom active:scale-90"
+                          title="Previous opponent"
+                        >
+                          ‹
+                        </button>
+                      )}
+                      <div className="w-5 h-5 rounded-full bg-accent-custom text-white font-bold flex items-center justify-center text-[10px] overflow-hidden shrink-0">
+                        {AVATARS.find(a => a.id === activeOpponent.avatar) ? (
+                          <img
+                            src={AVATARS.find(a => a.id === activeOpponent.avatar).src}
+                            alt="Avatar"
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          activeOpponent.name?.slice(0, 2)?.toUpperCase()
+                        )}
+                      </div>
+                      <span className="font-bold truncate text-[11px] leading-none text-text-custom">
+                        {activeOpponent.name}
+                      </span>
+                      <span className="text-[9px] opacity-60 shrink-0">
+                        {activeOpponent.elo} ELO
+                      </span>
+                    </div>
+
+                    {/* Opponent Strikes */}
+                    <div className="flex items-center gap-0.5 shrink-0">
+                      {Array(3)
+                        .fill(null)
+                        .map((_, i) => (
+                          <div
+                            key={i}
+                            className={`w-1.5 h-1.5 rounded-full ${i < maxStrikes - activeOpponent.strikes
+                              ? "bg-rose-500"
+                              : "border border-dashed border-border-custom opacity-40"
+                              }`}
+                          />
+                        ))}
+                      {activeOpponentsList.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => setHudOpponentIndex((prev) => (prev + 1) % activeOpponentsList.length)}
+                          className="p-0.5 text-text-custom/50 hover:text-text-custom active:scale-90 ml-0.5"
+                          title="Next opponent"
+                        >
+                          ›
+                        </button>
                       )}
                     </div>
-                    <span className="font-bold truncate text-[11px] leading-none text-text-custom">
-                      {activeOpponent.name}
-                    </span>
-                    <span className="text-[9px] opacity-60 shrink-0">
-                      {activeOpponent.elo} ELO
-                    </span>
                   </div>
 
                   {/* Opponent Progress Bar */}
-                  <div className="flex-1 flex items-center gap-2 min-w-0 px-1">
+                  <div className="flex items-center gap-2 min-w-0">
                     <div className="flex-1 bg-accent-glow/50 h-2 rounded-full overflow-hidden relative">
                       <div
-                        className={`h-full rounded-full transition-all duration-300 ${activeOpponent.progress >= 85
+                        className={`h-full rounded-full transition-all duration-300 ${activeOpponent.progress >= 75
                           ? "bg-rose-500 animate-pulse shadow-[0_0_10px_rgba(244,63,94,0.8)]"
-                          : activeOpponent.progress >= 60
+                          : activeOpponent.progress >= 55
                             ? "bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]"
                             : "bg-accent-custom"
                           }`}
@@ -3801,20 +4067,22 @@ export default function App() {
                     </span>
                   </div>
 
-                  {/* Opponent Strikes */}
-                  <div className="flex items-center gap-0.5 shrink-0">
-                    {Array(3)
-                      .fill(null)
-                      .map((_, i) => (
-                        <div
-                          key={i}
-                          className={`w-1.5 h-1.5 rounded-full ${i < maxStrikes - activeOpponent.strikes
-                            ? "bg-rose-500"
-                            : "border border-dashed border-border-custom opacity-40"
-                            }`}
+                  {/* Micro Pagination Dots if multiple opponents */}
+                  {activeOpponentsList.length > 1 && (
+                    <div className="flex items-center justify-center gap-1 pt-0.5">
+                      {activeOpponentsList.map((opp, idx) => (
+                        <button
+                          key={opp.id}
+                          type="button"
+                          onClick={() => setHudOpponentIndex(idx)}
+                          className={`h-1 rounded-full transition-all cursor-pointer ${
+                            idx === hudOpponentIndex ? "w-3 bg-accent-custom" : "w-1 bg-border-custom opacity-50"
+                          }`}
+                          title={`Switch to ${opp.name}`}
                         />
                       ))}
-                  </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -3934,39 +4202,40 @@ export default function App() {
                 </div>
               )}
 
-              {/* End-Game Urgency Badge */}
-              {isOpponentClose && anyOpponentClose && (
-                <div className="w-full max-w-[460px] mb-2 py-1.5 px-3 bg-rose-500/15 border border-rose-500/40 text-rose-500 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 animate-pulse select-none shadow-sm">
-                  <AlertTriangle size={14} className="shrink-0" />
-                  <span>
-                    ⚠️ {anyOpponentClose.name} is close — only{" "}
-                    {opponentCellsRemaining !== null ? `${opponentCellsRemaining} cells left!` : `${anyOpponentClose.progress}% done!`}
-                  </span>
-                </div>
-              )}
-              {isOpponentWarning && anyOpponentWarning && (
-                <div className="w-full max-w-[460px] mb-2 py-1 px-3 bg-amber-500/10 border border-amber-500/30 text-amber-500 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 select-none shadow-xs">
-                  <span>
-                    ⚡ {anyOpponentWarning.name} is picking up speed ({anyOpponentWarning.progress}% completed)
-                  </span>
+              {/* Single Centralized End-Game Urgency Banner Slot */}
+              {matchUrgency.bannerText && (
+                <div
+                  className={`w-full max-w-[460px] mb-2 py-1.5 px-3 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 select-none shadow-sm transition-all duration-300 ${
+                    matchUrgency.bannerType === 'tier2'
+                      ? 'bg-rose-500/15 border border-rose-500/40 text-rose-500 animate-pulse'
+                      : 'bg-amber-500/10 border border-amber-500/30 text-amber-500'
+                  }`}
+                >
+                  {matchUrgency.bannerType === 'tier2' ? (
+                    <AlertTriangle size={14} className="shrink-0" />
+                  ) : (
+                    <Zap size={14} className="shrink-0 text-amber-400" />
+                  )}
+                  <span>{matchUrgency.bannerText}</span>
                 </div>
               )}
 
               {/* Sudoku Board Grid Wrapper with active spectator outline and spectator eye count badge */}
               <div
                 ref={boardAreaRef}
-                className={`relative w-full max-w-[460px] p-1 rounded-2xl transition-all duration-500 ${isOpponentClose
-                  ? "ring-4 ring-rose-500 heartbeat-border"
-                  : isOpponentWarning
-                    ? "ring-4 ring-amber-500/70 shadow-[0_0_20px_rgba(245,158,11,0.3)]"
-                    : spectatingPlayerId
-                      ? hasSpectatedPlayerLeft
-                        ? "ring-4 ring-zinc-500/20 bg-zinc-500/5"
-                        : "ring-4 ring-rose-500/30 bg-rose-500/5"
-                      : (myActiveSpectators || []).length > 0
-                        ? "ring-4 ring-emerald-500/30 bg-emerald-500/5"
-                        : ""
-                  }`}
+                className={`relative w-full max-w-[460px] p-1 rounded-2xl transition-all duration-500 ${
+                  matchUrgency.level === 'climax'
+                    ? "ring-4 ring-rose-500 heartbeat-border"
+                    : matchUrgency.level === 'warning'
+                      ? "ring-4 ring-amber-500/70 shadow-[0_0_20px_rgba(245,158,11,0.3)]"
+                      : spectatingPlayerId
+                        ? hasSpectatedPlayerLeft
+                          ? "ring-4 ring-zinc-500/20 bg-zinc-500/5"
+                          : "ring-4 ring-rose-500/30 bg-rose-500/5"
+                        : (myActiveSpectators || []).length > 0
+                          ? "ring-4 ring-emerald-500/30 bg-emerald-500/5"
+                          : ""
+                }`}
               >
                 {/* Active Spectator Eye Badge inside corner of the grid */}
                 {(myActiveSpectators || []).length > 0 && !spectatingPlayerId && (
@@ -6031,8 +6300,8 @@ export default function App() {
         </div>
       )}
 
-      {/* MOBILE CHAT FLOATING PILL BUTTON */}
-      {room && (activePlayers.length > 1 || spectators.length > 0) && (
+      {/* MOBILE CHAT FLOATING PILL BUTTON (Excluded in game view to prevent occluding digit pad and board) */}
+      {room && activeView !== "game" && (activePlayers.length > 1 || spectators.length > 0) && (
         <button
           onClick={() => {
             setIsMobileChatOpen(true);

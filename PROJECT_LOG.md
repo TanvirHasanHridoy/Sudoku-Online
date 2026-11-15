@@ -1,6 +1,56 @@
 # Project log
 
-## 2026-11-09 · Multiplayer recovery and gameplay
+## 2026-11-15 · Multiplayer Polish, Continuous Timer, Mobile UX & Single-Source Urgency
+
+On branch `feature/multiplayer-timer-and-mobile-ux`:
+
+### Player-Facing Behavior & System Architecture
+
+1. **Continuous Server-Authoritative Match Clock:**
+   - Temporary disconnects (e.g. 7-second network drops) no longer stop or freeze match time for either player. The server records `gameStartedAt`, `totalPausedMs`, and `lastPausedAt` and broadcasts authoritative time.
+   - Reconnecting clients synchronize to `(now - gameStartedAt - totalPausedMs)` so all competitors always share the exact same elapsed seconds. Only explicit mutual pause votes freeze the clock.
+   - Removed aggressive auto-pause on temporary disconnects.
+
+2. **Mobile Two-Row Header (<640px):**
+   - Reorganized header on mobile displays to eliminate horizontal button and toolbar overflow.
+   - Row 1 renders brand identity (Logo, "Co-doku", Room code) on the left, and User Profile / Google Auth on the right.
+   - Row 2 renders a sleek, touch-friendly utility toolbar (`Theme`, `Sound SFX`, `Game Guide`, and `Settings`) across the full width with zero clipping.
+
+3. **In-Game Action Bar Communication Hub (Zero Board Occlusion):**
+   - Eliminated the floating mobile chat pill button that previously sat at `bottom-20 right-4` and occluded digits 7–9 and game board cells during active play.
+   - Integrated quick reactions and room chat into the in-game action bar above the board (`Smile/MessageSquare`) with an unread badge indicator.
+   - Tapping it on mobile opens the bottom sheet drawer with quick emoji macros, full chat log, and text input.
+
+4. **Swipable Multi-Player Opponent HUD on Small Displays:**
+   - In 3+ player races (e.g. A, B, C, D), mobile players can now swipe left/right across the opponent HUD above the board to cycle through all opponents' progress bars, cells left, ELO, and strikes.
+   - Includes micro pagination dots (`● ○ ○`) and subtle chevron indicators.
+   - Automatically switches focus to whichever opponent surges into Tier 2 (≥75% / ≤5 cells left) or Tier 1 (55%–74%).
+
+5. **Single-Source Centralized Urgency Evaluator & Unified Aura:**
+   - All banner text, milestone toasts, screen aura, and board border styles are now derived from a centralized selector (`matchUrgency = getMatchUrgencyState(...)`).
+   - Multiple opponents finishing simultaneously no longer trigger conflicting, stacked, or overwhelming border animations; the player's board applies exactly one unified pulsing ring.
+   - Single consolidated banner slot replaces Tier 1 with Tier 2 (`⚠️ Cells left: B:1, C:2, D:4` or `⚠️ [Name] is so close — only [N] cells left!`).
+   - Milestone toasts fire when opponents cross 55% and 75% in 3+ player games.
+
+6. **Amplified Heartbeat Synth Audio:**
+   - Boosted baseline Web Audio synthesizer volume gain from `0.25` to `0.60` (peaking at `0.75` for the second "dub" thump).
+   - Tuned lowpass filter cutoffs to 145Hz / 165Hz with resonance ($Q = 2.0$) to guarantee tactile presence and tension on mobile and laptop speakers without digital distortion.
+
+7. **Friend Rivalry Tracking Guard:**
+   - Head-to-head rivalry statistics are now strictly recorded when `racers.length === 2` AND both racers are verified friends (direct lobby invitation or mutual friend lists). Random matchmaking games are excluded.
+
+### Verification Performed
+
+- `npm test`: All 38 automated tests passed with 0 failures across multiplayer and audio test suites.
+- Verified continuous clock synchronization and sanitized room payloads (`gameStartedAt`, `totalPausedMs`, `serverTime`).
+- Verified friend-only rivalry recording guard and rejection of random match recording.
+- Verified single-source urgency evaluator state transitions and mobile two-row header JSX.
+- `npm run build --prefix client`: Production Vite build succeeded in 1.83s with 0 errors.
+
+### Remaining Limitations
+
+- Physical touch gestures are validated in automated tests and mobile responsive views; actual haptic feedback depends on device Web Vibration API support.
+
 
 Branch `codex/multiplayer-recovery-and-play` began from `feature/robust-stats-system`. Keep this log current with future project changes, verification and outstanding limitations, as recorded in AGENTS.md.
 

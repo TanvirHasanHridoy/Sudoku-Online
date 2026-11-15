@@ -1,18 +1,19 @@
 let audioCtx = null;
 let heartbeatTimer = null;
 
-function playSingleHeartbeat(ctx, volume = 0.25) {
+function playSingleHeartbeat(ctx, volume = 0.60) {
   const now = ctx.currentTime;
   // S1 ("Lub")
   const osc1 = ctx.createOscillator();
   const gain1 = ctx.createGain();
   const filter1 = ctx.createBiquadFilter();
   filter1.type = 'lowpass';
-  filter1.frequency.setValueAtTime(115, now);
+  filter1.frequency.setValueAtTime(145, now);
+  filter1.Q.setValueAtTime(2.0, now);
 
   osc1.type = 'sine';
-  osc1.frequency.setValueAtTime(65, now);
-  osc1.frequency.exponentialRampToValueAtTime(42, now + 0.12);
+  osc1.frequency.setValueAtTime(70, now);
+  osc1.frequency.exponentialRampToValueAtTime(45, now + 0.12);
 
   osc1.connect(filter1);
   filter1.connect(gain1);
@@ -20,10 +21,10 @@ function playSingleHeartbeat(ctx, volume = 0.25) {
 
   gain1.gain.setValueAtTime(0, now);
   gain1.gain.linearRampToValueAtTime(volume, now + 0.02);
-  gain1.gain.exponentialRampToValueAtTime(0.0001, now + 0.14);
+  gain1.gain.exponentialRampToValueAtTime(0.0001, now + 0.15);
 
   osc1.start(now);
-  osc1.stop(now + 0.15);
+  osc1.stop(now + 0.16);
 
   // S2 ("Dub") - 240ms later
   const s2Time = now + 0.24;
@@ -31,22 +32,23 @@ function playSingleHeartbeat(ctx, volume = 0.25) {
   const gain2 = ctx.createGain();
   const filter2 = ctx.createBiquadFilter();
   filter2.type = 'lowpass';
-  filter2.frequency.setValueAtTime(135, s2Time);
+  filter2.frequency.setValueAtTime(165, s2Time);
+  filter2.Q.setValueAtTime(2.0, s2Time);
 
   osc2.type = 'sine';
-  osc2.frequency.setValueAtTime(80, s2Time);
-  osc2.frequency.exponentialRampToValueAtTime(48, s2Time + 0.10);
+  osc2.frequency.setValueAtTime(85, s2Time);
+  osc2.frequency.exponentialRampToValueAtTime(50, s2Time + 0.10);
 
   osc2.connect(filter2);
   filter2.connect(gain2);
   gain2.connect(ctx.destination);
 
   gain2.gain.setValueAtTime(0, s2Time);
-  gain2.gain.linearRampToValueAtTime(volume * 1.15, s2Time + 0.018);
-  gain2.gain.exponentialRampToValueAtTime(0.0001, s2Time + 0.12);
+  gain2.gain.linearRampToValueAtTime(Math.min(1.0, volume * 1.25), s2Time + 0.018);
+  gain2.gain.exponentialRampToValueAtTime(0.0001, s2Time + 0.13);
 
   osc2.start(s2Time);
-  osc2.stop(s2Time + 0.13);
+  osc2.stop(s2Time + 0.14);
 }
 
 // Lazy initialization of the Web Audio API Context
