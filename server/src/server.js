@@ -1181,7 +1181,23 @@ wss.on('connection', (ws) => {
 
           if (!currentPlayer.isSpectator && !currentPlayer.hasFinishedGame) return;
           if (!room.players.some(p => p.id === targetPlayerId && !p.isSpectator && p !== currentPlayer)) return;
+
+          const oldTargetPlayerId = currentPlayer.spectatingPlayerId;
           currentPlayer.spectatingPlayerId = targetPlayerId;
+
+          // If switching from another player, alert the previous target that this spectator switched away
+          if (oldTargetPlayerId && oldTargetPlayerId !== targetPlayerId) {
+            const oldTarget = room.players.find(p => p.id === oldTargetPlayerId);
+            if (oldTarget && oldTarget.socket && oldTarget.socket.readyState === 1) {
+              oldTarget.socket.send(JSON.stringify({
+                type: 'SPECTATOR_ALERT',
+                payload: {
+                  spectatorName: currentPlayer.name,
+                  isSpectating: false
+                }
+              }));
+            }
+          }
 
           // Notify everyone of room registration changes
           broadcastToRoom(currentRoomCode, {
@@ -1189,7 +1205,7 @@ wss.on('connection', (ws) => {
             payload: { room: getSanitizedRoom(room) }
           });
 
-          // Send spectator alert directly to the target player
+          // Send spectator alert directly to the new target player
           const targetPlayer = room.players.find(p => p.id === targetPlayerId);
           if (targetPlayer && targetPlayer.socket && targetPlayer.socket.readyState === 1) {
             targetPlayer.socket.send(JSON.stringify({
@@ -1197,6 +1213,19 @@ wss.on('connection', (ws) => {
               payload: {
                 spectatorName: currentPlayer.name,
                 isSpectating: true
+              }
+            }));
+          }
+
+          // Immediately transmit target player's latest board snapshot to spectator so they don't have to wait for next move
+          if (targetPlayer && targetPlayer.snapshot && ws.readyState === 1) {
+            ws.send(JSON.stringify({
+              type: 'GAMEPLAY_SYNCED',
+              payload: {
+                playerId: targetPlayer.id,
+                board: targetPlayer.snapshot.board,
+                notes: targetPlayer.snapshot.notes,
+                selectedCell: targetPlayer.snapshot.selectedCell
               }
             }));
           }

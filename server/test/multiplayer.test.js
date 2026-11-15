@@ -546,6 +546,70 @@ test('lobby invitation transmits difficulty, coop, and enableAbilities metadata'
   assert.equal(invitation.enableAbilities, true);
 });
 
+test('multiplayer spectator target switching alerts old and new targets and sends gameplay snapshot immediately', async () => {
+  const a = await client();
+  const b = await client();
+  const c = await client();
+
+  a.send('CREATE_ROOM', { playerId: a.id, name: 'Alice' });
+  const created = await a.next('ROOM_CREATED');
+  const code = created.room.code;
+
+  b.send('JOIN_ROOM', { code, playerId: b.id, name: 'Bob' });
+  await b.next('ROOM_JOINED');
+
+  c.send('JOIN_ROOM', { code, playerId: c.id, name: 'Charlie' });
+  await c.next('ROOM_JOINED');
+
+  b.send('TOGGLE_READY'); await b.next('ROOM_UPDATED');
+  c.send('TOGGLE_READY'); await c.next('ROOM_UPDATED');
+  a.send('TOGGLE_READY');
+  a.send('START_GAME', { board: puzzle, solution });
+
+  await a.next('GAME_STARTED');
+  await b.next('GAME_STARTED');
+  const startedC = await c.next('GAME_STARTED');
+  const matchId = startedC.room.matchId;
+
+  // Alice and Bob send gameplay sync snapshots
+  a.send('SYNC_GAMEPLAY', { matchId, board: puzzle, notes: { '0,0': [1] }, elapsedSeconds: 5 });
+  await b.next('GAMEPLAY_SYNCED');
+
+  b.send('SYNC_GAMEPLAY', { matchId, board: puzzle, notes: { '0,1': [2] }, elapsedSeconds: 6 });
+  await a.next('GAMEPLAY_SYNCED');
+
+  // Charlie finishes the game early (won)
+  c.send('UPDATE_PROGRESS', { matchId, progress: 100, strikes: 0 });
+  await c.next('MATCH_RESULT');
+
+  // Charlie chooses to spectate Alice
+  c.send('START_SPECTATING', { targetPlayerId: a.id });
+  const aAlert = await a.next('SPECTATOR_ALERT');
+  assert.equal(aAlert.isSpectating, true);
+
+  // Charlie immediately receives Alice's snapshot via GAMEPLAY_SYNCED without waiting for Alice to move
+  const syncedA = await c.next('GAMEPLAY_SYNCED');
+  assert.equal(syncedA.playerId, a.id);
+  assert.deepEqual(syncedA.notes, { '0,0': [1] });
+
+  // Now Charlie switches to spectate Bob
+  c.send('START_SPECTATING', { targetPlayerId: b.id });
+
+  // Alice should receive SPECTATOR_ALERT isSpectating: false
+  const aAlertOff = await a.next('SPECTATOR_ALERT');
+  assert.equal(aAlertOff.isSpectating, false);
+
+  // Bob should receive SPECTATOR_ALERT isSpectating: true
+  const bAlert = await b.next('SPECTATOR_ALERT');
+  assert.equal(bAlert.isSpectating, true);
+
+  // Charlie immediately receives Bob's snapshot via GAMEPLAY_SYNCED
+  const syncedB = await c.next('GAMEPLAY_SYNCED');
+  assert.equal(syncedB.playerId, b.id);
+  assert.deepEqual(syncedB.notes, { '0,1': [2] });
+});
+
+
 
 
 

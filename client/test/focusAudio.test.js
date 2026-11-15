@@ -344,3 +344,31 @@ test('App.jsx single-source matchUrgency evaluator derives banners and unified b
     'Mobile floating chat button must not render in game view'
   );
 });
+
+test('In-game controls container removes difficulty select and supports multi-player spectator switching and post-game spectate lists', async () => {
+  const fs = await import('fs');
+  const appContent = fs.readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf-8');
+
+  // Verify difficulty <select> is removed from game controls header
+  assert.ok(
+    !appContent.includes('<select\n                      value={room ? room.difficulty : difficulty}'),
+    'In-game controls header must not contain a difficulty select dropdown'
+  );
+
+  // Verify in-game spectator switcher row exists for switching between active racers
+  assert.ok(
+    appContent.includes('Switch:') && appContent.includes('otherActiveRacers.map((racer)'),
+    'In-game spectator bar must provide switcher buttons for all active racers'
+  );
+
+  // Verify both Won and Lost modals filter active opponents instead of stopping at first opponent
+  assert.ok(
+    appContent.includes('const activeOpponentsToSpectate = room.players.filter('),
+    'Post-game modals must filter all active opponents still solving'
+  );
+  assert.ok(
+    appContent.includes('activeOpponentsToSpectate.map((opp) => ('),
+    'Post-game modals must render spectate buttons for all active opponents'
+  );
+});
+

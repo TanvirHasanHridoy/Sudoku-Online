@@ -1,5 +1,43 @@
 # Project log
 
+## 2026-11-15 · Multi-Player Spectator Selection & In-Game Controls Polish
+
+On branch `feature/spectate-selection-and-controls-polish`:
+
+### Player-Facing Behavior & Architecture
+
+1. **Multi-Player Spectator Selection (Won & Lost Post-Game Modals):**
+   - In 3+ player games (e.g. A, B, and C) where player C finishes early (either by winning or striking out), C is no longer restricted to only spectating Player A.
+   - The post-game completion modals (both Won and Lost) now filter and display dedicated spectate action buttons for *all* active racers still solving (e.g., A and B), displaying their current progress percentage and remaining cells.
+   - For eliminated players, the "✏️ Keep Solving (Practice Mode)" button is retained alongside the spectator options.
+   - Fixed the auto-spectate hook condition in `App.jsx` (`if (activePlayer && !spectatingPlayerId)`) so it does not override user-selected spectator targets.
+
+2. **In-Game Spectator Racer Switcher:**
+   - When spectating in a multiplayer match with multiple active racers, an inline switcher row (`Switch: [Name (progress)]`) is displayed in the spectator top bar.
+   - Spectators can switch between racers with a single tap/click without having to leave the game view or re-enter the lobby.
+
+3. **Instant Gameplay Snapshot on Spectate Switch:**
+   - When a spectator joins or switches targets via `START_SPECTATING`, the server immediately pushes the target player's latest board snapshot (`board`, `notes`, `selectedCell`) via `GAMEPLAY_SYNCED`, eliminating any delay while waiting for the target player's next move.
+   - Server notifies the previous target player with `SPECTATOR_ALERT` (`isSpectating: false`) and the new target player with `isSpectating: true`.
+
+4. **In-Game Controls Header Clean-Up & Zero-Overflow Responsiveness:**
+   - Removed the `<select>` difficulty dropdown completely from the active game view (`activeView === "game"`), freeing over 90px of horizontal space.
+   - On desktop screens, difficulty is displayed as a subtle, non-interactive tag pill; on mobile screens (<640px), it is cleanly omitted so `Timer`, `Lives`, `Chat`, `Pause`, and `Exit` fit comfortably on displays down to 320px with zero horizontal overflow.
+   - Compacted the Exit button label on small displays (`hidden sm:inline`), retaining the crisp `<X />` icon.
+
+### Verification Performed
+
+- `npm test`: All 40 automated unit and integration tests passed with 0 failures, including new tests:
+  - `multiplayer spectator target switching alerts old and new targets and sends gameplay snapshot immediately` in `server/test/multiplayer.test.js`.
+  - `In-game controls container removes difficulty select and supports multi-player spectator switching and post-game spectate lists` in `client/test/focusAudio.test.js`.
+- `npm run build --prefix client`: Production Vite build succeeded in 1.65s with 0 errors.
+
+### Remaining Limitations
+
+- Spectating targets are active racers in the current room; eliminated players who are in local practice mode do not broadcast remote snapshots.
+
+
+
 ## 2026-11-15 · Multiplayer Polish, Continuous Timer, Mobile UX & Single-Source Urgency
 
 On branch `feature/multiplayer-timer-and-mobile-ux`:

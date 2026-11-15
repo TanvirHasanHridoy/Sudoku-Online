@@ -1156,11 +1156,11 @@ export default function App() {
     }
   }, [room, myPlayerId, startGame]);
 
-  // Auto-spectate active player if I am a spectator in the room
+  // Auto-spectate active player if I am a spectator in the room and not yet spectating anyone
   useEffect(() => {
     if (isMeSpectator && room && gameStatus === "playing") {
-      const activePlayer = room.players.find((p) => !p.isSpectator);
-      if (activePlayer && spectatingPlayerId !== activePlayer.id) {
+      const activePlayer = room.players.find((p) => !p.isSpectator && !p.hasFinishedGame);
+      if (activePlayer && !spectatingPlayerId) {
         console.log(
           `[Spectator Auto-Join] Spectating active player: ${activePlayer.name}`,
         );
@@ -2737,7 +2737,31 @@ export default function App() {
               {room && Object.values(room.playAgainVotes || {}).some(Boolean) && <p className="game-status" role="status">
                 {room.players.filter(p => room.playAgainVotes[p.id]).map(p => p.name).join(", ")} requested a rematch.
               </p>}
-              {room?.isGameStarted && stayedMatch === room.matchId && activeOpponent && <button className="game-action" onClick={() => { startSpectating(activeOpponent.id); setActiveView("game"); }}>Spectate {activeOpponent.name}</button>}
+              {room?.isGameStarted && stayedMatch === room.matchId && (() => {
+                const activeOpponentsToSpectate = room.players.filter(
+                  (p) => !p.isSpectator && p.id !== myPlayerId && !p.hasFinishedGame
+                );
+                if (activeOpponentsToSpectate.length === 0) return null;
+                return (
+                  <div className="flex flex-col gap-1.5 my-2 w-full">
+                    {activeOpponentsToSpectate.map((opp) => (
+                      <button
+                        key={opp.id}
+                        className="game-action flex items-center justify-between"
+                        onClick={() => {
+                          startSpectating(opp.id);
+                          setActiveView("game");
+                        }}
+                      >
+                        <span className="flex items-center gap-1.5">
+                          <Eye size={14} /> Spectate {opp.name}
+                        </span>
+                        <span className="text-xs opacity-75 font-mono">{opp.progress}%</span>
+                      </button>
+                    ))}
+                  </div>
+                );
+              })()}
               {room?.isGameStarted && bothFinished && <button className="game-action" onClick={() => votePlayAgain(true)}>Rematch</button>}
               {/* Lobby Tab */}
               {activeTab === "lobby" && (
@@ -3755,7 +3779,7 @@ export default function App() {
 
               {/* Game controls header */}
               <div className="w-full max-w-[460px] flex items-center justify-between gap-2 mb-2 lg:mb-4 px-2">
-                {/* Left Group: Info (Diff, Timer) */}
+                {/* Left Group: Info (Timer, Daily Date) */}
                 <div className="flex items-center gap-1.5">
                   {dailyDate ? (
                     <button
@@ -3771,18 +3795,9 @@ export default function App() {
                       )}
                     </button>
                   ) : (
-                    <select
-                      value={room ? room.difficulty : difficulty}
-                      disabled={!!room}
-                      onChange={(e) => startNewGame(e.target.value)}
-                      className="text-[11px] lg:text-xs font-bold px-2 py-1 bg-accent-glow border border-border-custom rounded-lg focus:outline-none cursor-pointer text-text-custom disabled:opacity-75 disabled:cursor-not-allowed transition-all"
-                    >
-                      <option value="beginner">Beginner</option>
-                      <option value="easy">Easy</option>
-                      <option value="medium">Medium</option>
-                      <option value="hard">Hard</option>
-                      <option value="expert">Expert</option>
-                    </select>
+                    <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-1 bg-accent-glow/50 border border-border-custom/40 rounded-lg text-accent-custom opacity-80 hidden sm:inline-block">
+                      {room ? room.difficulty : difficulty}
+                    </span>
                   )}
 
                   <span className="text-[11px] lg:text-xs font-bold px-2 py-1 bg-accent-glow border border-border-custom rounded-lg flex items-center gap-1 min-w-[55px] justify-center tabular-nums">
@@ -3926,7 +3941,7 @@ export default function App() {
                     title="Exit to Home"
                   >
                     <X size={11} />
-                    Exit
+                    <span className="hidden sm:inline">Exit</span>
                   </button>
                 </div>
               </div>
@@ -4089,82 +4104,112 @@ export default function App() {
               {/* Spectator Top Bar Indicator */}
               {spectatingPlayerId && (
                 <div
-                  className={`w-full max-w-[460px] glass-panel px-4 py-2.5 rounded-2xl mb-3 border flex flex-col sm:flex-row items-center justify-between gap-2.5 shadow-lg transition-all ${isSpectatedPlayerFinished
+                  className={`w-full max-w-[460px] glass-panel px-4 py-2.5 rounded-2xl mb-3 border flex flex-col gap-2.5 shadow-lg transition-all ${isSpectatedPlayerFinished
                     ? "border-emerald-500/50 bg-emerald-950/20 shadow-emerald-500/10"
                     : hasSpectatedPlayerLeft
                       ? "border-zinc-500/30 shadow-zinc-500/5 bg-zinc-500/5 opacity-80"
                       : "border-rose-500/30 animate-pulse shadow-rose-500/10 bg-rose-500/5"
                     }`}
                 >
-                  <div className="flex items-center gap-2.5">
-                    {isSpectatedPlayerFinished ? (
-                      <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-sm shadow-emerald-400" />
-                    ) : hasSpectatedPlayerLeft ? (
-                      <div className="w-2.5 h-2.5 rounded-full bg-zinc-500" />
-                    ) : (
-                      <div className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping" />
-                    )}
-                    <div>
-                      <div className="flex items-center gap-1.5">
-                        <span
-                          className={`text-xs font-black uppercase tracking-wider ${isSpectatedPlayerFinished
-                            ? "text-emerald-400"
-                            : hasSpectatedPlayerLeft
-                              ? "text-zinc-500"
-                              : "text-rose-500"
-                            }`}
-                        >
-                          {isSpectatedPlayerFinished
-                            ? hasSpectatedVotedRematch
-                              ? "🏁 Opponent Finished & Wants Rematch!"
-                              : "🏁 Opponent Finished!"
-                            : hasSpectatedPlayerLeft
-                              ? "⏹️ Spectating Ended"
-                              : "🔴 Live Spectating"}
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-2.5 w-full">
+                    <div className="flex items-center gap-2.5">
+                      {isSpectatedPlayerFinished ? (
+                        <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-sm shadow-emerald-400" />
+                      ) : hasSpectatedPlayerLeft ? (
+                        <div className="w-2.5 h-2.5 rounded-full bg-zinc-500" />
+                      ) : (
+                        <div className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping" />
+                      )}
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className={`text-xs font-black uppercase tracking-wider ${isSpectatedPlayerFinished
+                              ? "text-emerald-400"
+                              : hasSpectatedPlayerLeft
+                                ? "text-zinc-500"
+                                : "text-rose-500"
+                              }`}
+                          >
+                            {isSpectatedPlayerFinished
+                              ? hasSpectatedVotedRematch
+                                ? "🏁 Opponent Finished & Wants Rematch!"
+                                : "🏁 Opponent Finished!"
+                              : hasSpectatedPlayerLeft
+                                ? "⏹️ Spectating Ended"
+                                : "🔴 Live Spectating"}
+                          </span>
+                        </div>
+                        <span className="text-[11px] font-bold text-text-custom opacity-85 block">
+                          {spectatedPlayer?.name || "Opponent"}
+                          {spectatedFinisher?.formattedTime ? ` • ${spectatedFinisher.formattedTime}` : ""}
                         </span>
                       </div>
-                      <span className="text-[11px] font-bold text-text-custom opacity-85 block">
-                        {spectatedPlayer?.name || "Opponent"}
-                        {spectatedFinisher?.formattedTime ? ` • ${spectatedFinisher.formattedTime}` : ""}
-                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {isSpectatedPlayerFinished && (
+                        <button
+                          onClick={() => {
+                            votePlayAgain(true);
+                            addToast(
+                              "Voted for Rematch! Waiting for next match to start...",
+                              "success",
+                            );
+                          }}
+                          className={`text-xs font-bold px-3 py-1.5 rounded-xl shadow-md active:scale-95 transition-all flex items-center gap-1 cursor-pointer ${haveIVotedRematch
+                            ? "bg-amber-500 text-slate-950 font-black cursor-default"
+                            : hasSpectatedVotedRematch
+                              ? "bg-emerald-500 hover:bg-emerald-400 text-white animate-pulse"
+                              : "bg-accent-custom hover:bg-accent-hover text-white"
+                            }`}
+                        >
+                          <RefreshCw
+                            size={12}
+                            className={haveIVotedRematch ? "animate-spin" : ""}
+                          />
+                          {haveIVotedRematch
+                            ? "Voted (Waiting)"
+                            : hasSpectatedVotedRematch
+                              ? "Accept Rematch"
+                              : "Rematch"}
+                        </button>
+                      )}
+                      <button
+                        onClick={stopSpectating}
+                        className="text-xs font-bold bg-panel-custom hover:bg-panel-custom/80 border border-border-custom text-text-custom px-3 py-1.5 rounded-xl transition-colors active:scale-95 cursor-pointer flex items-center gap-1"
+                      >
+                        {isSpectatedPlayerFinished ? "View Results" : "Stop"}
+                      </button>
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2">
-                    {isSpectatedPlayerFinished && (
-                      <button
-                        onClick={() => {
-                          votePlayAgain(true);
-                          addToast(
-                            "Voted for Rematch! Waiting for next match to start...",
-                            "success",
+                  {/* Switch Spectator Target (When 2+ active opponents exist in match) */}
+                  {(() => {
+                    const otherActiveRacers = (room?.players || []).filter(
+                      (p) => !p.isSpectator && p.id !== myPlayerId && p.id !== spectatingPlayerId
+                    );
+                    if (otherActiveRacers.length === 0) return null;
+                    return (
+                      <div className="w-full flex items-center gap-1.5 pt-1.5 border-t border-border-custom/30 overflow-x-auto text-[11px]">
+                        <span className="text-[10px] font-bold opacity-60 shrink-0">Switch:</span>
+                        {otherActiveRacers.map((racer) => {
+                          const isDone = isPlayerDone(racer);
+                          return (
+                            <button
+                              key={racer.id}
+                              onClick={() => startSpectating(racer.id)}
+                              className="px-2.5 py-1 rounded-lg bg-accent-glow hover:bg-accent-custom hover:text-white border border-border-custom/50 font-bold transition-all shrink-0 flex items-center gap-1.5 text-[10px] cursor-pointer"
+                              title={`Switch to spectate ${racer.name}`}
+                            >
+                              <Eye size={11} />
+                              <span>{racer.name}</span>
+                              <span className="opacity-75 font-mono">({isDone ? "Done" : `${racer.progress}%`})</span>
+                            </button>
                           );
-                        }}
-                        className={`text-xs font-bold px-3 py-1.5 rounded-xl shadow-md active:scale-95 transition-all flex items-center gap-1 cursor-pointer ${haveIVotedRematch
-                          ? "bg-amber-500 text-slate-950 font-black cursor-default"
-                          : hasSpectatedVotedRematch
-                            ? "bg-emerald-500 hover:bg-emerald-400 text-white animate-pulse"
-                            : "bg-accent-custom hover:bg-accent-hover text-white"
-                          }`}
-                      >
-                        <RefreshCw
-                          size={12}
-                          className={haveIVotedRematch ? "animate-spin" : ""}
-                        />
-                        {haveIVotedRematch
-                          ? "Voted (Waiting)"
-                          : hasSpectatedVotedRematch
-                            ? "Accept Rematch"
-                            : "Rematch"}
-                      </button>
-                    )}
-                    <button
-                      onClick={stopSpectating}
-                      className="text-xs font-bold bg-panel-custom hover:bg-panel-custom/80 border border-border-custom text-text-custom px-3 py-1.5 rounded-xl transition-colors active:scale-95 cursor-pointer flex items-center gap-1"
-                    >
-                      {isSpectatedPlayerFinished ? "View Results" : "Stop"}
-                    </button>
-                  </div>
+                        })}
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
 
@@ -5777,25 +5822,39 @@ export default function App() {
             {/* Post-Game Multiplayer Actions */}
             {room && room.players.filter(p => !p.isSpectator).length > 1 ? (
               <div className="space-y-2.5 pt-1">
-                {/* State 1: Match still in progress (Opponent hasn't finished yet) */}
+                {/* State 1: Match still in progress (Opponents haven't finished yet) */}
                 {!bothFinished && (
                   <>
                     {(() => {
-                      const activeOpponentToSpectate = room.players.find(
+                      const activeOpponentsToSpectate = room.players.filter(
                         (p) => !p.isSpectator && p.id !== myPlayerId && !p.hasFinishedGame
                       );
-                      if (activeOpponentToSpectate) {
+                      if (activeOpponentsToSpectate.length > 0) {
                         return (
                           <div className="space-y-2">
                             <div className="p-2.5 bg-accent-glow/30 border border-accent-custom/30 rounded-xl text-xs font-bold text-accent-custom flex items-center justify-center gap-1.5 animate-pulse">
-                              <span>⏱️ {activeOpponentToSpectate.name} is still solving...</span>
+                              <span>
+                                ⏱️ {activeOpponentsToSpectate.length === 1
+                                  ? `${activeOpponentsToSpectate[0].name} is still solving...`
+                                  : `${activeOpponentsToSpectate.length} players are still solving...`}
+                              </span>
                             </div>
-                            <button
-                              onClick={() => startSpectating(activeOpponentToSpectate.id)}
-                              className="w-full py-3.5 bg-accent-custom hover:bg-accent-hover text-white font-extrabold rounded-xl active:scale-[0.98] transition-all flex items-center justify-center gap-2 shadow-lg shadow-accent-custom/25 cursor-pointer text-sm"
-                            >
-                              <Eye size={16} /> Spectate {activeOpponentToSpectate.name}
-                            </button>
+                            <div className="flex flex-col gap-1.5">
+                              {activeOpponentsToSpectate.map((opp) => (
+                                <button
+                                  key={opp.id}
+                                  onClick={() => startSpectating(opp.id)}
+                                  className="w-full py-2.5 px-3 bg-accent-custom hover:bg-accent-hover text-white font-extrabold rounded-xl active:scale-[0.98] transition-all flex items-center justify-between shadow-md shadow-accent-custom/25 cursor-pointer text-xs"
+                                >
+                                  <span className="flex items-center gap-1.5">
+                                    <Eye size={14} /> Spectate {opp.name}
+                                  </span>
+                                  <span className="text-[11px] opacity-80 font-mono">
+                                    {opp.progress}% ({opp.cellsLeft !== undefined ? `${opp.cellsLeft} left` : ''})
+                                  </span>
+                                </button>
+                              ))}
+                            </div>
                           </div>
                         );
                       }
@@ -6023,21 +6082,35 @@ export default function App() {
                 {!bothFinished && (
                   <>
                     {(() => {
-                      const activeOpponentToSpectate = room.players.find(
+                      const activeOpponentsToSpectate = room.players.filter(
                         (p) => !p.isSpectator && p.id !== myPlayerId && !p.hasFinishedGame
                       );
-                      if (activeOpponentToSpectate) {
+                      if (activeOpponentsToSpectate.length > 0) {
                         return (
                           <div className="space-y-2">
                             <div className="p-2.5 bg-accent-glow/30 border border-accent-custom/30 rounded-xl text-xs font-bold text-accent-custom flex items-center justify-center gap-1.5 animate-pulse">
-                              <span>⏱️ {activeOpponentToSpectate.name} is still solving...</span>
+                              <span>
+                                ⏱️ {activeOpponentsToSpectate.length === 1
+                                  ? `${activeOpponentsToSpectate[0].name} is still solving...`
+                                  : `${activeOpponentsToSpectate.length} players are still solving...`}
+                              </span>
                             </div>
-                            <button
-                              onClick={() => startSpectating(activeOpponentToSpectate.id)}
-                              className="w-full py-3.5 bg-accent-custom hover:bg-accent-hover text-white font-extrabold rounded-xl active:scale-[0.98] transition-all flex items-center justify-center gap-2 shadow-lg shadow-accent-custom/25 cursor-pointer text-sm"
-                            >
-                              <Eye size={16} /> Spectate {activeOpponentToSpectate.name}
-                            </button>
+                            <div className="flex flex-col gap-1.5">
+                              {activeOpponentsToSpectate.map((opp) => (
+                                <button
+                                  key={opp.id}
+                                  onClick={() => startSpectating(opp.id)}
+                                  className="w-full py-2.5 px-3 bg-accent-custom hover:bg-accent-hover text-white font-extrabold rounded-xl active:scale-[0.98] transition-all flex items-center justify-between shadow-md shadow-accent-custom/25 cursor-pointer text-xs"
+                                >
+                                  <span className="flex items-center gap-1.5">
+                                    <Eye size={14} /> Spectate {opp.name}
+                                  </span>
+                                  <span className="text-[11px] opacity-80 font-mono">
+                                    {opp.progress}% ({opp.cellsLeft !== undefined ? `${opp.cellsLeft} left` : ''})
+                                  </span>
+                                </button>
+                              ))}
+                            </div>
                             <button
                               onClick={startLocalPractice}
                               className="w-full py-3 bg-panel-custom hover:bg-panel-custom/80 border border-border-custom text-text-custom font-bold rounded-xl active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer text-xs"
