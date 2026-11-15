@@ -1,5 +1,40 @@
 # Project log
 
+## 2026-11-16 · In-Game Cloud Chat Toast, Button Pulse & Mute Controls
+
+On branch `feature/cloud-chat-toast-and-pulse`:
+
+### Player-Facing Behavior & Architecture
+
+1. **Single Chat Button Pulse on Remote Messages:**
+   - When an opponent or spectator sends a chat message or quick emote during an active multiplayer match, the in-game Chat button (`Smile`/`MessageSquare`) in the top controls bar executes a single, clean pulse animation (`animate-chat-pulse`: scale 1.22 + cyan glow ring over 650ms).
+   - Only remote messages trigger the pulse; self-sent messages do not trigger it.
+
+2. **Compact Cloud-Like In-Game Chat Toast:**
+   - An incoming chat message triggers a floating, pillowy cloud toast anchored directly below the in-game Chat button with an upward caret pointing toward the button.
+   - Styled with soft cloud curves (`rounded-full`), dark translucent glassmorphism (`bg-slate-900/90 backdrop-blur-md`), cyan border glow (`border-cyan-400/50 shadow-[0_4px_18px_rgba(56,189,248,0.35)]`), and a pulsing `<Cloud />` icon.
+   - Displays sender name in cyan, message text, and an instant `×` dismiss button.
+   - Fluid entrance and exit animations: floats up to the resting position from a few pixels down (`animate-cloud-in`: `translateY(14px)` to `0`), remains visible for exactly 2.0s, and dissolves upward (`animate-cloud-out`).
+   - Tapping the cloud opens the room chat drawer/menu immediately and dismisses the toast.
+   - Positioned in the natural headroom below the controls bar, completely away from the digit keypad and board cells to prevent misclicks.
+
+3. **In-Chat & Settings Mute Controls:**
+   - **Mobile Chat Drawer:** Added a 1-tap `Bell`/`BellOff` toggle (`Popups On` / `Muted`) in the drawer header to mute/unmute cloud toasts on the fly.
+   - **Desktop Emote Menu:** Added a 1-tap `Bell`/`BellOff` toggle in the menu header next to the close button.
+   - **Settings Modal:** Added a dedicated `In-Game Chat Popups` toggle saved in `localStorage.sudoku_show_chat_toasts` (defaults to ON).
+   - When muted: The floating cloud toast is suppressed, while the Chat button still pulses once and increments its unread badge so players stay informed with zero screen obstruction.
+
+### Verification Performed
+
+- `npm run build --prefix client`: Production Vite build completed in 1.46s with 0 errors.
+- `npm test`: All 40 unit and integration tests passed cleanly with 0 regressions.
+
+### Remaining Limitations
+
+- None.
+
+
+
 ## 2026-11-15 · Multi-Player Spectator Selection & In-Game Controls Polish
 
 On branch `feature/spectate-selection-and-controls-polish`:

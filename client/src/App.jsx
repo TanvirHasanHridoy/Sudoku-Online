@@ -38,6 +38,9 @@ import {
   Music,
   Home,
   HelpCircle,
+  Cloud,
+  Bell,
+  BellOff,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import SudokuGrid from "./components/SudokuGrid";
@@ -704,19 +707,76 @@ export default function App() {
   const [spectatorChatInput, setSpectatorChatInput] = useState("");
   const [isMobileChatOpen, setIsMobileChatOpen] = useState(false);
   const [unreadChatCount, setUnreadChatCount] = useState(0);
+  const [isChatPulsing, setIsChatPulsing] = useState(false);
+  const [cloudToast, setCloudToast] = useState(null);
+  const [cloudToastExiting, setCloudToastExiting] = useState(false);
+  const cloudTimerRef = useRef(null);
+  const chatPulseTimerRef = useRef(null);
+  const [showChatToasts, setShowChatToasts] = useState(() => {
+    const saved = localStorage.getItem("sudoku_show_chat_toasts");
+    return saved !== null ? saved === "true" : true;
+  });
   const prevChatCountRef = useRef(0);
+  const hasInitializedChatRef = useRef(false);
   const lobbyChatEndRef = useRef(null);
+
+  const dismissCloudToast = () => {
+    if (cloudTimerRef.current) clearTimeout(cloudTimerRef.current);
+    setCloudToastExiting(true);
+    setTimeout(() => {
+      setCloudToast(null);
+      setCloudToastExiting(false);
+    }, 220);
+  };
+
+  const triggerCloudToast = (msg) => {
+    if (cloudTimerRef.current) clearTimeout(cloudTimerRef.current);
+    setCloudToastExiting(false);
+    setCloudToast({
+      id: Date.now() + Math.random(),
+      name: msg.name || "Player",
+      text: msg.text || "",
+      isSpectator: !!msg.isSpectator,
+    });
+
+    // Auto-dismiss in 2.0s per user preference
+    cloudTimerRef.current = setTimeout(() => {
+      setCloudToastExiting(true);
+      setTimeout(() => {
+        setCloudToast(null);
+        setCloudToastExiting(false);
+      }, 220);
+    }, 2000);
+  };
 
   useEffect(() => {
     if (lobbyChatEndRef.current) {
       lobbyChatEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
     const currentLen = chatMessages?.length || 0;
-    if (currentLen > prevChatCountRef.current && !isMobileChatOpen) {
-      setUnreadChatCount((prev) => prev + (currentLen - prevChatCountRef.current));
+    if (!hasInitializedChatRef.current) {
+      hasInitializedChatRef.current = true;
+      prevChatCountRef.current = currentLen;
+      return;
+    }
+    if (currentLen > prevChatCountRef.current) {
+      const latestMsg = chatMessages[currentLen - 1];
+      // Only pulse chat button and trigger in-game cloud toast if sent by someone else
+      if (latestMsg && latestMsg.playerId !== myPlayerId) {
+        setIsChatPulsing(true);
+        if (chatPulseTimerRef.current) clearTimeout(chatPulseTimerRef.current);
+        chatPulseTimerRef.current = setTimeout(() => setIsChatPulsing(false), 650);
+
+        if (showChatToasts && activeView === "game" && !isMobileChatOpen && !showEmoteMenu) {
+          triggerCloudToast(latestMsg);
+        }
+      }
+      if (!isMobileChatOpen) {
+        setUnreadChatCount((prev) => prev + (currentLen - prevChatCountRef.current));
+      }
     }
     prevChatCountRef.current = currentLen;
-  }, [chatMessages, isMobileChatOpen]);
+  }, [chatMessages, isMobileChatOpen, myPlayerId, showChatToasts, activeView, showEmoteMenu]);
 
   // Countdown tick for pause countdown (3... 2... 1... GO!)
   useEffect(() => {
@@ -3831,6 +3891,7 @@ export default function App() {
                     <div className="relative">
                       <button
                         onClick={() => {
+                          dismissCloudToast();
                           if (window.innerWidth < 768) {
                             setIsMobileChatOpen(true);
                             setUnreadChatCount(0);
@@ -3839,6 +3900,8 @@ export default function App() {
                           }
                         }}
                         className={`relative p-1 rounded-lg border text-text-custom transition-all active:scale-95 ${
+                          isChatPulsing ? "animate-chat-pulse" : ""
+                        } ${
                           showEmoteMenu || isMobileChatOpen
                             ? "bg-accent-custom text-white border-accent-custom"
                             : "bg-accent-glow border-border-custom hover:border-accent-custom"
@@ -3852,6 +3915,53 @@ export default function App() {
                           </span>
                         )}
                       </button>
+
+                      {/* Cloud-Like In-Game Chat Toast */}
+                      {cloudToast && (
+                        <div
+                          onClick={() => {
+                            dismissCloudToast();
+                            if (window.innerWidth < 768) {
+                              setIsMobileChatOpen(true);
+                              setUnreadChatCount(0);
+                            } else {
+                              setShowEmoteMenu(true);
+                            }
+                          }}
+                          className={`absolute right-0 top-full mt-2 z-50 cursor-pointer select-none ${
+                            cloudToastExiting ? "animate-cloud-out" : "animate-cloud-in"
+                          }`}
+                          title="Tap to open chat"
+                        >
+                          <div className="relative flex items-center gap-1.5 px-3 py-1.5 bg-slate-900/90 hover:bg-slate-900 text-slate-100 rounded-full border border-cyan-400/50 shadow-[0_4px_18px_rgba(56,189,248,0.35)] backdrop-blur-md max-w-[260px] whitespace-nowrap overflow-hidden transition-all">
+                            {/* Cloud pointer tail pointing up to chat button */}
+                            <div className="absolute -top-1.5 right-2.5 w-3 h-3 bg-slate-900/90 border-t border-l border-cyan-400/50 rotate-45" />
+
+                            <Cloud size={12} className="text-cyan-400 shrink-0 animate-pulse" />
+
+                            <span className="text-[11px] font-extrabold text-cyan-300 shrink-0 max-w-[80px] truncate">
+                              {cloudToast.name}:
+                            </span>
+
+                            <span className="text-[11px] font-medium text-white truncate max-w-[130px]">
+                              {cloudToast.text}
+                            </span>
+
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                dismissCloudToast();
+                              }}
+                              className="p-0.5 ml-0.5 rounded-full hover:bg-white/20 text-white/60 hover:text-white shrink-0 cursor-pointer transition-colors"
+                              title="Dismiss"
+                            >
+                              <X size={10} />
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
                       {showEmoteMenu && (
                         <div className="absolute right-0 top-full mt-1.5 z-50 glass-panel p-2.5 rounded-2xl border border-border-custom shadow-2xl flex flex-col gap-2 w-64 select-none animate-scale-in">
                           {/* Top header */}
@@ -3859,12 +3969,29 @@ export default function App() {
                             <span className="flex items-center gap-1">
                               <MessageSquare size={11} /> {room.coop ? "Co-op Signals" : "Race Reactions"}
                             </span>
-                            <button
-                              onClick={() => setShowEmoteMenu(false)}
-                              className="text-text-custom opacity-60 hover:opacity-100 p-0.5"
-                            >
-                              ✕
-                            </button>
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const next = !showChatToasts;
+                                  setShowChatToasts(next);
+                                  localStorage.setItem("sudoku_show_chat_toasts", String(next));
+                                  addToast(next ? "💬 Chat cloud toasts enabled" : "🔕 Chat cloud toasts muted", "info");
+                                }}
+                                className={`p-0.5 rounded transition-colors cursor-pointer ${
+                                  showChatToasts ? "text-cyan-400 hover:text-cyan-300" : "text-text-custom/40 hover:text-text-custom"
+                                }`}
+                                title={showChatToasts ? "Mute floating chat clouds" : "Unmute floating chat clouds"}
+                              >
+                                {showChatToasts ? <Bell size={11} /> : <BellOff size={11} />}
+                              </button>
+                              <button
+                                onClick={() => setShowEmoteMenu(false)}
+                                className="text-text-custom opacity-60 hover:opacity-100 p-0.5 cursor-pointer"
+                              >
+                                ✕
+                              </button>
+                            </div>
                           </div>
 
                           {/* Quick Emoji / Macro buttons */}
@@ -6408,12 +6535,32 @@ export default function App() {
                 <h3 className="font-bold text-sm">Room Chat</h3>
                 <span className="text-[10px] opacity-60">({chatMessages?.length || 0})</span>
               </div>
-              <button
-                onClick={() => setIsMobileChatOpen(false)}
-                className="p-1 rounded-full hover:bg-accent-glow text-text-custom opacity-70 hover:opacity-100 cursor-pointer"
-              >
-                <X size={16} />
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = !showChatToasts;
+                    setShowChatToasts(next);
+                    localStorage.setItem("sudoku_show_chat_toasts", String(next));
+                    addToast(next ? "💬 Chat cloud toasts enabled" : "🔕 Chat cloud toasts muted", "info");
+                  }}
+                  className={`px-2 py-1 rounded-lg border text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer ${
+                    showChatToasts
+                      ? "bg-accent-glow text-accent-custom border-accent-custom/40"
+                      : "bg-panel-custom text-text-custom/50 border-border-custom hover:text-text-custom"
+                  }`}
+                  title={showChatToasts ? "Mute in-game chat cloud popups" : "Unmute in-game chat cloud popups"}
+                >
+                  {showChatToasts ? <Bell size={12} /> : <BellOff size={12} />}
+                  <span>{showChatToasts ? "Popups On" : "Muted"}</span>
+                </button>
+                <button
+                  onClick={() => setIsMobileChatOpen(false)}
+                  className="p-1 rounded-full hover:bg-accent-glow text-text-custom opacity-70 hover:opacity-100 cursor-pointer"
+                >
+                  <X size={16} />
+                </button>
+              </div>
             </div>
 
             {/* Quick Emote Presets */}
@@ -6593,6 +6740,27 @@ export default function App() {
                   type="checkbox"
                   checked={soundEnabled}
                   onChange={(e) => setSoundEnabled(e.target.checked)}
+                  className="w-4 h-4 rounded border-border-custom text-accent-custom bg-accent-glow/20 focus:ring-accent-custom focus:ring-offset-0 cursor-pointer animate-scale-in"
+                />
+              </div>
+
+              {/* In-Game Chat Cloud Popups preference */}
+              <div className="flex items-center justify-between py-2 border-b border-border-custom/20 text-left">
+                <div className="flex flex-col text-left">
+                  <span className="text-[10px] uppercase font-bold opacity-80 tracking-wider">
+                    In-Game Chat Popups
+                  </span>
+                  <span className="text-[8px] opacity-60">
+                    Show quick floating cloud message toasts during active play
+                  </span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={showChatToasts}
+                  onChange={(e) => {
+                    setShowChatToasts(e.target.checked);
+                    localStorage.setItem("sudoku_show_chat_toasts", String(e.target.checked));
+                  }}
                   className="w-4 h-4 rounded border-border-custom text-accent-custom bg-accent-glow/20 focus:ring-accent-custom focus:ring-offset-0 cursor-pointer animate-scale-in"
                 />
               </div>
