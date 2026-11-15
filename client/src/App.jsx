@@ -2006,8 +2006,8 @@ return (
           <button
             onClick={() => setIsLofiMenuOpen(!isLofiMenuOpen)}
             className={`p-2 rounded-xl border transition-all flex items-center gap-1.5 text-xs font-semibold active:scale-95 cursor-pointer ${lofiEnabled
-                ? "border-accent-custom bg-accent-glow text-accent-custom shadow-xs"
-                : "border-border-custom hover:bg-accent-glow hover:border-accent-custom hover:text-accent-custom"
+              ? "border-accent-custom bg-accent-glow text-accent-custom shadow-xs"
+              : "border-border-custom hover:bg-accent-glow hover:border-accent-custom hover:text-accent-custom"
               }`}
             title="Focus Lo-Fi Soundscape (Ambient & Generative)"
           >
@@ -2066,8 +2066,8 @@ return (
                         key={p.id}
                         onClick={() => handleLofiPresetChange(p.id)}
                         className={`w-full text-left p-2 rounded-xl text-xs font-medium border transition-all cursor-pointer flex items-center justify-between ${isSelected
-                            ? "border-accent-custom bg-accent-custom/15 text-accent-custom font-bold shadow-xs"
-                            : "border-border-custom/30 hover:border-border-custom hover:bg-accent-glow/30 opacity-80 hover:opacity-100"
+                          ? "border-accent-custom bg-accent-custom/15 text-accent-custom font-bold shadow-xs"
+                          : "border-border-custom/30 hover:border-border-custom hover:bg-accent-glow/30 opacity-80 hover:opacity-100"
                           }`}
                       >
                         <div className="flex items-center gap-2">
@@ -2490,7 +2490,6 @@ return (
               </button>
             </div>
 
-            {room?.coop && <p className="game-status">Co-op · two players, one board · untimed</p>}
             {room?.coop && <p className="game-status">Co-op · two players, one board · team solve</p>}
             {room && Object.values(room.playAgainVotes || {}).some(Boolean) && <p className="game-status" role="status">
               {room.players.filter(p => room.playAgainVotes[p.id]).map(p => p.name).join(", ")} requested a rematch.
@@ -3177,8 +3176,8 @@ return (
                 type="button"
                 onClick={() => setSocialDrawerTab("friends")}
                 className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer font-sans ${socialDrawerTab === "friends"
-                    ? "bg-accent-custom text-white shadow-xs"
-                    : "opacity-60 hover:opacity-100 text-text-custom"
+                  ? "bg-accent-custom text-white shadow-xs"
+                  : "opacity-60 hover:opacity-100 text-text-custom"
                   }`}
               >
                 <Users size={12} />
@@ -3196,8 +3195,8 @@ return (
                   fetchRivalries();
                 }}
                 className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer font-sans ${socialDrawerTab === "rivalries"
-                    ? "bg-accent-custom text-white shadow-xs"
-                    : "opacity-60 hover:opacity-100 text-text-custom"
+                  ? "bg-accent-custom text-white shadow-xs"
+                  : "opacity-60 hover:opacity-100 text-text-custom"
                   }`}
               >
                 <Trophy size={12} />
@@ -3292,12 +3291,12 @@ return (
                           <div className="flex items-center gap-2 min-w-0">
                             <div
                               className={`w-2 h-2 rounded-full shrink-0 ${f.status === "online"
-                                  ? "bg-emerald-500 animate-pulse"
-                                  : f.status === "in-lobby"
-                                    ? "bg-cyan-500 animate-pulse"
-                                    : f.status === "in-game"
-                                      ? "bg-rose-500 animate-pulse"
-                                      : "bg-slate-300 dark:bg-slate-700"
+                                ? "bg-emerald-500 animate-pulse"
+                                : f.status === "in-lobby"
+                                  ? "bg-cyan-500 animate-pulse"
+                                  : f.status === "in-game"
+                                    ? "bg-rose-500 animate-pulse"
+                                    : "bg-slate-300 dark:bg-slate-700"
                                 }`}
                             />
                             <div className="min-w-0">
@@ -3333,8 +3332,8 @@ return (
                                 onClick={() => inviteFriend(f.id)}
                                 disabled={f.status !== "online"}
                                 className={`px-2 py-1 border transition-all rounded-md text-[9px] font-bold ${f.status === "online"
-                                    ? "bg-accent-glow border-border-custom hover:border-accent-custom hover:text-accent-custom active:scale-95 cursor-pointer"
-                                    : "bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700 cursor-not-allowed opacity-50"
+                                  ? "bg-accent-glow border-border-custom hover:border-accent-custom hover:text-accent-custom active:scale-95 cursor-pointer"
+                                  : "bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700 cursor-not-allowed opacity-50"
                                   }`}
                                 title={
                                   f.status !== "online"
@@ -3383,8 +3382,8 @@ return (
                                     onClick={() => inviteFriend(f.id)}
                                     disabled={f.status !== "online"}
                                     className={`px-2 py-1 border transition-all rounded-md text-[9px] font-bold ${f.status === "online"
-                                        ? "bg-accent-glow border-border-custom hover:border-accent-custom hover:text-accent-custom active:scale-95 cursor-pointer"
-                                        : "bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700 cursor-not-allowed opacity-50"
+                                      ? "bg-accent-glow border-border-custom hover:border-accent-custom hover:text-accent-custom active:scale-95 cursor-pointer"
+                                      : "bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700 cursor-not-allowed opacity-50"
                                       }`}
                                     title={
                                       f.status !== "online"
@@ -3549,7 +3548,6 @@ return (
 
                 <span className="text-[11px] lg:text-xs font-bold px-2 py-1 bg-accent-glow border border-border-custom rounded-lg flex items-center gap-1 min-w-[55px] justify-center tabular-nums">
                   <Timer size={11} className="text-accent-custom shrink-0" />
-                  {room?.coop ? "Untimed" : formatTime(seconds)}
                   {formatTime(seconds)}
                 </span>
 
@@ -4824,8 +4822,8 @@ return (
                       type="button"
                       onClick={() => setSocialDrawerTab("friends")}
                       className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer font-sans ${socialDrawerTab === "friends"
-                          ? "bg-accent-custom text-white shadow-xs"
-                          : "opacity-60 hover:opacity-100 text-text-custom"
+                        ? "bg-accent-custom text-white shadow-xs"
+                        : "opacity-60 hover:opacity-100 text-text-custom"
                         }`}
                     >
                       <Users size={12} />
@@ -4843,8 +4841,8 @@ return (
                         fetchRivalries();
                       }}
                       className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer font-sans ${socialDrawerTab === "rivalries"
-                          ? "bg-accent-custom text-white shadow-xs"
-                          : "opacity-60 hover:opacity-100 text-text-custom"
+                        ? "bg-accent-custom text-white shadow-xs"
+                        : "opacity-60 hover:opacity-100 text-text-custom"
                         }`}
                     >
                       <Trophy size={12} />
@@ -4947,12 +4945,12 @@ return (
                               <div className="flex items-center gap-2 min-w-0">
                                 <div
                                   className={`w-2 h-2 rounded-full shrink-0 ${f.status === "online"
-                                      ? "bg-emerald-500 animate-pulse"
-                                      : f.status === "in-lobby"
-                                        ? "bg-cyan-500 animate-pulse"
-                                        : f.status === "in-game"
-                                          ? "bg-rose-500 animate-pulse"
-                                          : "bg-slate-300 dark:bg-slate-700"
+                                    ? "bg-emerald-500 animate-pulse"
+                                    : f.status === "in-lobby"
+                                      ? "bg-cyan-500 animate-pulse"
+                                      : f.status === "in-game"
+                                        ? "bg-rose-500 animate-pulse"
+                                        : "bg-slate-300 dark:bg-slate-700"
                                     }`}
                                 />
                                 <div className="min-w-0">
@@ -4989,8 +4987,8 @@ return (
                                     onClick={() => inviteFriend(f.id)}
                                     disabled={f.status !== "online"}
                                     className={`px-2 py-1 border transition-all rounded-md text-[9px] font-bold ${f.status === "online"
-                                        ? "bg-accent-glow border-border-custom hover:border-accent-custom hover:text-accent-custom active:scale-95 cursor-pointer"
-                                        : "bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700 cursor-not-allowed opacity-50"
+                                      ? "bg-accent-glow border-border-custom hover:border-accent-custom hover:text-accent-custom active:scale-95 cursor-pointer"
+                                      : "bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700 cursor-not-allowed opacity-50"
                                       }`}
                                     title={
                                       f.status !== "online"
@@ -5039,8 +5037,8 @@ return (
                                         onClick={() => inviteFriend(f.id)}
                                         disabled={f.status !== "online"}
                                         className={`px-2 py-1 border transition-all rounded-md text-[9px] font-bold ${f.status === "online"
-                                            ? "bg-accent-glow border-border-custom hover:border-accent-custom hover:text-accent-custom active:scale-95 cursor-pointer"
-                                            : "bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700 cursor-not-allowed opacity-50"
+                                          ? "bg-accent-glow border-border-custom hover:border-accent-custom hover:text-accent-custom active:scale-95 cursor-pointer"
+                                          : "bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700 cursor-not-allowed opacity-50"
                                           }`}
                                         title={
                                           f.status !== "online"
@@ -5246,7 +5244,6 @@ return (
             <div className="text-left">
               <span className="opacity-60 block">Solve Time:</span>
               <span className="text-base font-bold text-accent-custom">
-                {room?.coop ? "Untimed" : formatTime(seconds)}
                 {formatTime(seconds)}
               </span>
             </div>
@@ -5679,7 +5676,6 @@ return (
             <div className="text-left">
               <span className="opacity-60 block">Solve Time:</span>
               <span className="text-base font-bold text-accent-custom">
-                {room?.coop ? "Untimed" : formatTime(seconds)}
                 {formatTime(seconds)}
               </span>
             </div>
@@ -6064,8 +6060,8 @@ return (
                                 type="button"
                                 onClick={() => handleLofiPresetChange(p.id)}
                                 className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-all cursor-pointer flex items-center justify-between ${isSelected
-                                    ? "border-accent-custom bg-accent-custom/20 text-accent-custom font-bold"
-                                    : "border-border-custom/30 hover:bg-accent-glow/20 opacity-80"
+                                  ? "border-accent-custom bg-accent-custom/20 text-accent-custom font-bold"
+                                  : "border-border-custom/30 hover:bg-accent-glow/20 opacity-80"
                                   }`}
                               >
                                 <span className="flex items-center gap-1.5">

@@ -386,6 +386,7 @@ On branch `feature/coop-voice-chat-and-multiplayer-polish`:
     - Cleaned up mobile chat drawer tags and duplicate handler bindings.
     - Removed redundant redeclarations of `isGamePaused`, `prog`, and `cellsDisplay`.
     - Cleaned up leftover fullscreen modal wrapper on the compact floating invitation toast.
+  - Fixed timer display format on top of the board and in victory modals: removed duplicate/stacked `{room?.coop ? "Untimed" : formatTime(seconds)}` and `{formatTime(seconds)}` expressions which were concatenating times (e.g. `00:0500:05`), restoring standard `MM:SS` format.
 * **Verification:**
   - Added new integration tests in `server/test/multiplayer.test.js`:
     - `co-op tracks shared teamProgress and cellsContributed per player`
