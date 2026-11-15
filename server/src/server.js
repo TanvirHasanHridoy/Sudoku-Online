@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { openMatchData, flushProfileResults, recordResult, resultsFor, readChallenge, saveChallenge, recordDailyScore, getDailyLeaderboard } from './matchData.js';
+import { openMatchData, flushProfileResults, recordResult, resultsFor, readChallenge, saveChallenge, recordDailyScore, getDailyLeaderboard, recordRivalry, getRivalriesFor } from './matchData.js';
 import express from 'express';
 import { createServer } from 'http';
 import { WebSocketServer } from 'ws';
@@ -257,6 +257,9 @@ function getSanitizedRoom(room) {
     playAgainVotes: room.playAgainVotes,
     isMatchmakingRoom: !!room.isMatchmakingRoom,
     finishers: room.finishers || [],
+    seriesScore: room.seriesScore || {},
+    currentStreak: room.currentStreak || { playerId: null, count: 0 },
+    seriesCount: room.seriesCount || 1,
     players: room.players.map(p => ({
       id: p.id,
       name: p.name,
@@ -330,12 +333,16 @@ wss.on('connection', (ws) => {
             pauseRequesterId: null,        // tracks who asked for the current pause vote
             lastPauseRequestTime: 0,       // unix ms — enforces 20s server-side cooldown
             playAgainVotes: {},
-            players: [currentPlayer]
+            players: [currentPlayer],
+            seriesScore: {},
+            currentStreak: { playerId: null, count: 0 },
+            seriesCount: 1,
+            matchWinnerRecorded: false
           };
 
           rooms.set(code, room);
           currentRoomCode = code;
-          broadcastOnlineStatusChange(playerId, 'in-game');
+          broadcastOnlineStatusChange(playerId, 'in-lobby');
 
           ws.send(JSON.stringify({
             type: 'ROOM_CREATED',
@@ -440,7 +447,7 @@ wss.on('connection', (ws) => {
           }
 
           currentRoomCode = room.code;
-          broadcastOnlineStatusChange(playerId, 'in-game');
+          broadcastOnlineStatusChange(playerId, room.isGameStarted ? 'in-game' : 'in-lobby');
 
           // Notify player of successful join
           ws.send(JSON.stringify({
@@ -522,6 +529,7 @@ wss.on('connection', (ws) => {
           room.finishers = [];
           room.pauseVotes = {};
           room.playAgainVotes = {};
+          room.matchWinnerRecorded = false;
           room.players.forEach(p => { p.progress = 0; p.cellsLeft = undefined; p.total = undefined; p.strikes = 0; p.mana = 0; p.hasFinishedGame = false; p.gameResult = null; });
 
           broadcastToRoom(currentRoomCode, {
@@ -586,6 +594,43 @@ wss.on('connection', (ws) => {
               cellsLeft: 0
             };
             room.finishers.push(finisherInfo);
+
+            if (place === 1 && !room.matchWinnerRecorded) {
+              room.matchWinnerRecorded = true;
+              const winnerId = currentPlayer.id;
+              room.seriesScore = room.seriesScore || {};
+              room.seriesScore[winnerId] = (room.seriesScore[winnerId] || 0) + 1;
+
+              if (room.currentStreak?.playerId === winnerId) {
+                room.currentStreak.count += 1;
+              } else {
+                room.currentStreak = { playerId: winnerId, count: 1 };
+              }
+
+              const racers = room.players.filter(p => !p.isSpectator);
+              if (racers.length === 2) {
+                recordRivalry(racers[0], racers[1], winnerId);
+              }
+            }
+          } else if (wasEliminated && !room.matchWinnerRecorded) {
+            const racers = room.players.filter(p => !p.isSpectator);
+            if (racers.length === 2) {
+              const other = racers.find(p => p.id !== currentPlayer.id);
+              if (other && other.strikes < 3) {
+                room.matchWinnerRecorded = true;
+                const winnerId = other.id;
+                room.seriesScore = room.seriesScore || {};
+                room.seriesScore[winnerId] = (room.seriesScore[winnerId] || 0) + 1;
+
+                if (room.currentStreak?.playerId === winnerId) {
+                  room.currentStreak.count += 1;
+                } else {
+                  room.currentStreak = { playerId: winnerId, count: 1 };
+                }
+
+                recordRivalry(racers[0], racers[1], winnerId);
+              }
+            }
           }
 
           broadcastToRoom(currentRoomCode, {
@@ -598,7 +643,10 @@ wss.on('connection', (ws) => {
               hasFinishedGame: !!currentPlayer.hasFinishedGame || strikes >= 3,
               result: currentPlayer.gameResult || (strikes >= 3 ? 'lost' : (currentPlayer.hasFinishedGame ? 'won' : null)),
               cellsLeft: wasFinished ? 0 : currentPlayer.cellsLeft,
-              total: currentPlayer.total
+              total: currentPlayer.total,
+              seriesScore: room.seriesScore,
+              currentStreak: room.currentStreak,
+              seriesCount: room.seriesCount
             }
           });
 
@@ -799,6 +847,8 @@ wss.on('connection', (ws) => {
               room.isGameStarted = false;
               room.players.forEach(p => { p.isReady = !p.isSpectator; });
               room.playAgainVotes = {};
+              room.seriesCount = (room.seriesCount || 1) + 1;
+              room.matchWinnerRecorded = false;
               broadcastToRoom(room.code, { type: 'PLAY_AGAIN_APPROVED', payload: { room: getSanitizedRoom(room) } });
             } else {
               // Reset votes
@@ -1445,18 +1495,30 @@ wss.on('connection', (ws) => {
 
         case 'SET_FRIENDS_LIST': {
           const { friendIds } = payload;
-          if (!currentPlayer) return;
-          
-          currentPlayer.friendsList = new Set(friendIds || []);
+          const friendSet = new Set(friendIds || []);
+          const targetClient = connectedClients.get(registeredPlayerId || currentPlayer?.id);
+          if (targetClient) targetClient.friendsList = friendSet;
+          if (currentPlayer) currentPlayer.friendsList = friendSet;
           
           const statuses = {};
-          for (const friendId of currentPlayer.friendsList) {
+          for (const friendId of friendSet) {
             statuses[friendId] = getPlayerDetailedStatus(friendId);
           }
           
           ws.send(JSON.stringify({
             type: 'FRIENDS_STATUS_LIST',
             payload: { statuses }
+          }));
+          break;
+        }
+
+        case 'GET_RIVALRIES': {
+          const { playerId } = payload;
+          if (!playerId) return;
+          const rivalries = getRivalriesFor(playerId);
+          ws.send(JSON.stringify({
+            type: 'RIVALRIES_DATA',
+            payload: { rivalries }
           }));
           break;
         }
@@ -1712,7 +1774,38 @@ wss.on('connection', (ws) => {
 });
 
 // Server-side ELO Matchmaking Queue Sweep Loop
+const matchmakingTimeoutMs = parseInt(process.env.SUDOKU_MATCHMAKING_TIMEOUT_MS || '45000', 10);
+const matchmakingSweepMs = parseInt(process.env.SUDOKU_MATCHMAKING_SWEEP_MS || '1500', 10);
+
 setInterval(() => {
+  if (matchmakingQueue.length === 0) return;
+
+  const now = Date.now();
+
+  // 1. Prune disconnected sockets and players exceeding 45-second queue timeout
+  for (let i = 0; i < matchmakingQueue.length; i++) {
+    const player = matchmakingQueue[i];
+    if (!player.socket || player.socket.readyState !== 1) {
+      matchmakingQueue.splice(i, 1);
+      i--;
+      continue;
+    }
+
+    if (now - player.queuedAt >= matchmakingTimeoutMs) {
+      matchmakingQueue.splice(i, 1);
+      i--;
+      try {
+        player.socket.send(JSON.stringify({
+          type: 'MATCHMAKING_TIMEOUT',
+          payload: { playerId: player.playerId }
+        }));
+      } catch (err) {
+        console.warn('[Queue Timeout] Failed sending message to player', err);
+      }
+      console.log(`[Queue Timeout] Player ${player.name} (${player.playerId}) timed out after 45s`);
+    }
+  }
+
   if (matchmakingQueue.length < 2) return;
 
   for (let i = 0; i < matchmakingQueue.length; i++) {
@@ -1797,12 +1890,16 @@ setInterval(() => {
           lastPauseRequestTime: 0,
           playAgainVotes: {},
           players: [playerAConnection, playerBConnection],
-          isMatchmakingRoom: true
+          isMatchmakingRoom: true,
+          seriesScore: {},
+          currentStreak: { playerId: null, count: 0 },
+          seriesCount: 1,
+          matchWinnerRecorded: false
         };
 
         rooms.set(roomCode, room);
-        broadcastOnlineStatusChange(playerA.playerId, 'in-game');
-        broadcastOnlineStatusChange(playerB.playerId, 'in-game');
+        broadcastOnlineStatusChange(playerA.playerId, 'in-lobby');
+        broadcastOnlineStatusChange(playerB.playerId, 'in-lobby');
 
         const matchPayloadA = {
           room: getSanitizedRoom(room),
@@ -1823,7 +1920,7 @@ setInterval(() => {
       }
     }
   }
-}, 1500);
+}, matchmakingSweepMs);
 
 
 

@@ -457,6 +457,18 @@ export const useLobbyStore = create((set, get) => ({
             });
             break;
           }
+          case 'MATCHMAKING_TIMEOUT': {
+            import('./useSocialStore').then(({ useSocialStore }) => {
+              useSocialStore.getState().handleMatchmakingTimeout();
+            });
+            break;
+          }
+          case 'RIVALRIES_DATA': {
+            import('./useSocialStore').then(({ useSocialStore }) => {
+              useSocialStore.getState().setRivalries(payload.rivalries || []);
+            });
+            break;
+          }
 
           case 'ROOM_CREATED':
           case 'ROOM_JOINED': {

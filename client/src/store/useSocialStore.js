@@ -22,6 +22,18 @@ export const useSocialStore = create((set, get) => ({
   matchOpponent: null,
   matchSearchInterval: null,
   searchTimer: 0,
+  showMatchmakingTimeoutModal: false,
+  lastQueueDifficulty: 'medium',
+  lastQueueAbilities: false,
+  rivalries: (() => {
+    try {
+      const saved = localStorage.getItem('sudoku_h2h_records');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  })(),
+  setShowMatchmakingTimeoutModal: (val) => set({ showMatchmakingTimeoutModal: !!val }),
   leaderboard: [],
   loadingLeaderboard: false,
 
@@ -498,7 +510,16 @@ export const useSocialStore = create((set, get) => ({
       return;
     }
 
-    set({ matchmakingStatus: 'searching', searchTimer: 0 });
+    const { matchSearchInterval } = get();
+    if (matchSearchInterval) clearInterval(matchSearchInterval);
+
+    set({
+      matchmakingStatus: 'searching',
+      searchTimer: 0,
+      showMatchmakingTimeoutModal: false,
+      lastQueueDifficulty: difficulty,
+      lastQueueAbilities: enableAbilities
+    });
     lobby.addToast('Searching for ELO-matched opponents...', 'info');
 
     lobby.ws.send(JSON.stringify({
@@ -510,9 +531,36 @@ export const useSocialStore = create((set, get) => ({
     const interval = setInterval(() => {
       duration += 1;
       set({ searchTimer: duration });
+      if (duration >= 45) {
+        clearInterval(interval);
+        get().handleMatchmakingTimeout();
+      }
     }, 1000);
 
     set({ matchSearchInterval: interval });
+  },
+
+  handleMatchmakingTimeout: () => {
+    const { matchSearchInterval, matchmakingStatus } = get();
+    if (matchSearchInterval) {
+      clearInterval(matchSearchInterval);
+    }
+    if (matchmakingStatus !== 'searching') return;
+
+    const lobby = useLobbyStore.getState();
+    if (lobby.ws && lobby.isConnected && lobby.ws.readyState === 1) {
+      lobby.ws.send(JSON.stringify({
+        type: 'LEAVE_MATCHMAKING_QUEUE',
+        payload: { playerId: lobby.myPlayerId }
+      }));
+    }
+
+    set({
+      matchmakingStatus: 'idle',
+      searchTimer: 0,
+      showMatchmakingTimeoutModal: true,
+      matchSearchInterval: null
+    });
   },
 
   cancelMatchmaking: () => {
@@ -529,7 +577,7 @@ export const useSocialStore = create((set, get) => ({
       }));
     }
 
-    set({ matchmakingStatus: 'idle', searchTimer: 0, matchOpponent: null });
+    set({ matchmakingStatus: 'idle', searchTimer: 0, matchOpponent: null, matchSearchInterval: null });
     lobby.addToast('Matchmaking search canceled.', 'info');
   },
 
@@ -542,7 +590,9 @@ export const useSocialStore = create((set, get) => ({
 
     set({ 
       matchmakingStatus: 'matched', 
-      matchOpponent: opponent 
+      matchOpponent: opponent,
+      showMatchmakingTimeoutModal: false,
+      matchSearchInterval: null
     });
 
     const lobby = useLobbyStore.getState();
@@ -551,6 +601,23 @@ export const useSocialStore = create((set, get) => ({
     setTimeout(() => {
       set({ matchmakingStatus: 'idle', matchOpponent: null });
     }, 2500);
+  },
+
+  fetchRivalries: () => {
+    const lobby = useLobbyStore.getState();
+    if (lobby.ws && lobby.isConnected && lobby.ws.readyState === 1 && lobby.myPlayerId) {
+      lobby.ws.send(JSON.stringify({
+        type: 'GET_RIVALRIES',
+        payload: { playerId: lobby.myPlayerId }
+      }));
+    }
+  },
+
+  setRivalries: (rivalries) => {
+    set({ rivalries: rivalries || [] });
+    try {
+      localStorage.setItem('sudoku_h2h_records', JSON.stringify(rivalries || []));
+    } catch {}
   },
 
   fetchLeaderboard: async () => {

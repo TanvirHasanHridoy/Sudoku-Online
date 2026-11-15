@@ -8,8 +8,9 @@ let file, data;
 export function openMatchData() {
   const directory = path.resolve(process.env.SUDOKU_DATA_DIR || fileURLToPath(new URL('../data/', import.meta.url)));
   file = path.join(directory, 'matches.json');
-  data = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : { results: {}, challenges: {}, dailyScores: {} };
+  data = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : { results: {}, challenges: {}, dailyScores: {}, rivalries: {} };
   if (!data.dailyScores) data.dailyScores = {};
+  if (!data.rivalries) data.rivalries = {};
 }
 
 function commit(next) {
@@ -70,6 +71,75 @@ export function getDailyLeaderboard(dateStr) {
     ...item,
     rank: idx + 1,
   }));
+}
+
+export function recordRivalry(playerA, playerB, winnerId) {
+  if (!playerA || !playerB || !winnerId) return null;
+  if (!data.rivalries) data.rivalries = {};
+
+  const idA = playerA.id;
+  const idB = playerB.id;
+  const isAFirst = idA < idB;
+  const key = isAFirst ? `${idA}:${idB}` : `${idB}:${idA}`;
+
+  const existing = data.rivalries[key] || {
+    playerA: { id: isAFirst ? idA : idB, name: isAFirst ? playerA.name : playerB.name, wins: 0 },
+    playerB: { id: isAFirst ? idB : idA, name: isAFirst ? playerB.name : playerA.name, wins: 0 },
+    totalMatches: 0,
+    currentStreak: { playerId: null, count: 0 },
+    lastMatchAt: 0,
+  };
+
+  if (isAFirst) {
+    existing.playerA.name = playerA.name || existing.playerA.name;
+    existing.playerB.name = playerB.name || existing.playerB.name;
+  } else {
+    existing.playerA.name = playerB.name || existing.playerA.name;
+    existing.playerB.name = playerA.name || existing.playerB.name;
+  }
+
+  if (winnerId === existing.playerA.id) {
+    existing.playerA.wins += 1;
+  } else if (winnerId === existing.playerB.id) {
+    existing.playerB.wins += 1;
+  }
+
+  existing.totalMatches += 1;
+  existing.lastMatchAt = Date.now();
+
+  if (existing.currentStreak && existing.currentStreak.playerId === winnerId) {
+    existing.currentStreak.count += 1;
+  } else {
+    existing.currentStreak = { playerId: winnerId, count: 1 };
+  }
+
+  const updatedRivalries = { ...data.rivalries, [key]: existing };
+  commit({ ...data, rivalries: updatedRivalries });
+  return existing;
+}
+
+export function getRivalriesFor(playerId) {
+  if (!data.rivalries) data.rivalries = {};
+  return Object.values(data.rivalries)
+    .filter(r => r.playerA.id === playerId || r.playerB.id === playerId)
+    .map(r => {
+      const isMeA = r.playerA.id === playerId;
+      const opponent = isMeA ? r.playerB : r.playerA;
+      const myWins = isMeA ? r.playerA.wins : r.playerB.wins;
+      const opponentWins = isMeA ? r.playerB.wins : r.playerA.wins;
+      return {
+        key: `${r.playerA.id}:${r.playerB.id}`,
+        opponentId: opponent.id,
+        opponentName: opponent.name,
+        myWins,
+        opponentWins,
+        totalMatches: r.totalMatches,
+        currentStreak: r.currentStreak,
+        isMyStreak: r.currentStreak?.playerId === playerId,
+        lastMatchAt: r.lastMatchAt,
+      };
+    })
+    .sort((a, b) => b.lastMatchAt - a.lastMatchAt);
 }
 
 // Durable pending deliveries survive process restart. The database function deduplicates retries.

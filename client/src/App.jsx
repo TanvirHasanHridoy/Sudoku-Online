@@ -42,6 +42,7 @@ import SudokuGrid from "./components/SudokuGrid";
 import Keypad from "./components/Keypad";
 import SabotageOverlay from "./components/SabotageOverlay";
 import DailyCalendarModal from "./components/DailyCalendarModal";
+import MatchmakingTimeoutModal from "./components/MatchmakingTimeoutModal";
 import {
   generateDailySudoku,
   formatDateKey,
@@ -275,6 +276,12 @@ export default function App() {
     matchmakingStatus,
     matchOpponent,
     searchTimer,
+    showMatchmakingTimeoutModal,
+    setShowMatchmakingTimeoutModal,
+    lastQueueDifficulty,
+    lastQueueAbilities,
+    rivalries,
+    fetchRivalries,
     initSocial,
     adjustElo,
     addFriend,
@@ -287,6 +294,8 @@ export default function App() {
     loadingLeaderboard,
     fetchLeaderboard,
   } = useSocialStore();
+
+  const [socialDrawerTab, setSocialDrawerTab] = useState("friends"); // "friends" | "rivalries"
 
   // Zustand Store - Auth State
   const {
@@ -431,6 +440,49 @@ export default function App() {
   );
 
   const boardUrgency = isOpponentClose ? 'critical' : isOpponentWarning ? 'warning' : null;
+
+  // 1v1 Series Rivalry & Streaks state
+  const is1v1Multiplayer = Boolean(
+    room &&
+    !room.coop &&
+    (room.players?.filter(p => !p.isSpectator).length === 2)
+  );
+
+  const seriesOpponent = is1v1Multiplayer
+    ? room.players.find(p => p.id !== myPlayerId && !p.isSpectator)
+    : null;
+
+  const mySeriesWins = is1v1Multiplayer && room.seriesScore
+    ? (room.seriesScore[myPlayerId] || 0)
+    : 0;
+
+  const oppSeriesWins = is1v1Multiplayer && seriesOpponent && room.seriesScore
+    ? (room.seriesScore[seriesOpponent.id] || 0)
+    : 0;
+
+  const streakCount = is1v1Multiplayer && room.currentStreak
+    ? (room.currentStreak.count || 0)
+    : 0;
+
+  const isMyStreak = is1v1Multiplayer && room.currentStreak
+    ? (room.currentStreak.playerId === myPlayerId)
+    : false;
+
+  const handleSpectateFriend = (roomCode, friendPlayerId) => {
+    if (!roomCode) return;
+    joinRoom(roomCode, true);
+    if (friendPlayerId) {
+      startSpectating(friendPlayerId);
+    }
+    setActiveView("game");
+    addToast(`Connecting to spectate room #${roomCode}...`, "info");
+  };
+
+  useEffect(() => {
+    if (isConnected && ws?.readyState === 1 && myPlayerId) {
+      fetchRivalries();
+    }
+  }, [isConnected, ws, myPlayerId, fetchRivalries]);
 
   const deadline = localReconnectBy || activeOpponent?.reconnectBy;
   useEffect(() => {
@@ -2877,15 +2929,15 @@ export default function App() {
                           Searching for Match...
                         </h3>
                         <p className="text-xs opacity-60">
-                          Elapsed time: {searchTimer}s
+                          Elapsed time: {searchTimer}s / 45s
                         </p>
                         <p className="text-[10px] text-accent-custom uppercase font-semibold tracking-wider">
-                          Matching ELO range ±{searchTimer * 25}
+                          Matching ELO range ±{Math.min(500, Math.max(50, searchTimer * 25))}
                         </p>
                       </div>
                       <button
                         onClick={cancelMatchmaking}
-                        className="px-5 py-2 border border-border-custom hover:border-red-400 hover:text-red-500 text-xs font-bold rounded-xl active:scale-95 transition-all"
+                        className="px-5 py-2 border border-border-custom hover:border-red-400 hover:text-red-500 text-xs font-bold rounded-xl active:scale-95 transition-all cursor-pointer"
                       >
                         Cancel Queue
                       </button>
@@ -3050,93 +3102,192 @@ export default function App() {
             </div>
           </section>
 
-          {/* RIGHT PANEL: Friends List */}
+          {/* RIGHT PANEL: Friends & Rivalries */}
           <section className="lg:col-span-3 flex flex-col gap-6">
             <div className="glass-card rounded-2xl p-5">
-              <h3 className="text-xs uppercase font-bold opacity-50 tracking-wider mb-3 flex items-center gap-1.5">
-                <UserPlus size={13} />
-                Friends List &amp; Status
-              </h3>
-              <form
-                onSubmit={handleAddFriendSubmit}
-                className="flex gap-1.5 mb-4 w-full min-w-0"
-              >
-                <input
-                  type="text"
-                  placeholder="Friend Username"
-                  value={friendNameInput}
-                  onChange={(e) => setFriendNameInput(e.target.value)}
-                  disabled={isAddingFriend}
-                  className="flex-1 min-w-0 px-2.5 py-1.5 bg-accent-glow border border-border-custom rounded-lg text-xs focus:outline-none focus:border-accent-custom disabled:opacity-60"
-                />
+              {/* Tab Selector: Friends vs Rivalries */}
+              <div className="flex items-center gap-1 p-1 bg-accent-glow/20 rounded-xl mb-3 border border-border-custom/30">
                 <button
-                  type="submit"
-                  disabled={isAddingFriend}
-                  className="shrink-0 px-3 bg-accent-custom hover:bg-accent-hover text-white font-bold rounded-lg text-[10px] active:scale-95 transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  type="button"
+                  onClick={() => setSocialDrawerTab("friends")}
+                  className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer font-sans ${
+                    socialDrawerTab === "friends"
+                      ? "bg-accent-custom text-white shadow-xs"
+                      : "opacity-60 hover:opacity-100 text-text-custom"
+                  }`}
                 >
-                  {isAddingFriend ? (
-                    <RefreshCw size={10} className="animate-spin" />
-                  ) : (
-                    "Add"
-                  )}
+                  <Users size={12} />
+                  <span>Friends ({friends.length})</span>
                 </button>
-              </form>
-              <div className="space-y-2.5 max-h-[160px] overflow-y-auto pr-1">
-                {friends.map((f) => (
-                  <div
-                    key={f.id}
-                    className="flex items-center justify-between text-xs border-b border-border-custom/30 pb-2 last:border-0 last:pb-0"
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSocialDrawerTab("rivalries");
+                    fetchRivalries();
+                  }}
+                  className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer font-sans ${
+                    socialDrawerTab === "rivalries"
+                      ? "bg-accent-custom text-white shadow-xs"
+                      : "opacity-60 hover:opacity-100 text-text-custom"
+                  }`}
+                >
+                  <Trophy size={12} />
+                  <span>Rivalries ({rivalries.length})</span>
+                </button>
+              </div>
+
+              {socialDrawerTab === "friends" ? (
+                <>
+                  <form
+                    onSubmit={handleAddFriendSubmit}
+                    className="flex gap-1.5 mb-4 w-full min-w-0"
                   >
-                    <div className="flex items-center gap-2">
-                      <div
-                        className={`w-2 h-2 rounded-full ${f.status === "online"
-                          ? "bg-emerald-500 animate-pulse"
-                          : f.status === "in-lobby"
-                            ? "bg-cyan-500 animate-pulse"
-                            : f.status === "in-game"
-                              ? "bg-amber-500 animate-pulse"
-                              : "bg-slate-300 dark:bg-slate-700"
-                          }`}
-                      />
-                      <div>
-                        <p className="font-bold leading-tight">{f.name}</p>
-                        <span className="text-[9px] opacity-60">
-                          {f.elo} ELO
-                        </span>
-                      </div>
-                    </div>
-                    {room ? (
-                      <button
-                        onClick={() => inviteFriend(f.id)}
-                        disabled={f.status !== "online"}
-                        className={`px-2 py-1 border transition-all rounded-md text-[9px] font-bold ${f.status === "online"
-                          ? "bg-accent-glow border-border-custom hover:border-accent-custom hover:text-accent-custom active:scale-95 cursor-pointer"
-                          : "bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700 cursor-not-allowed opacity-50"
-                          }`}
-                        title={
-                          f.status !== "online"
-                            ? `Friend must be online (currently: ${f.status})`
-                            : "Invite to Room"
-                        }
-                      >
-                        Invite
-                      </button>
-                    ) : f.status === "in-lobby" && f.roomCode ? (
-                      <button
-                        onClick={() => joinRoom(f.roomCode)}
-                        className="px-2 py-1 border transition-all rounded-md text-[9px] font-bold bg-emerald-500/10 border-emerald-500/30 hover:border-emerald-500 hover:text-emerald-500 hover:bg-emerald-500/20 active:scale-95 cursor-pointer text-emerald-500"
-                        title="Join Friend's Lobby Room"
-                      >
-                        Join Room
-                      </button>
+                    <input
+                      type="text"
+                      placeholder="Friend Username"
+                      value={friendNameInput}
+                      onChange={(e) => setFriendNameInput(e.target.value)}
+                      disabled={isAddingFriend}
+                      className="flex-1 min-w-0 px-2.5 py-1.5 bg-accent-glow border border-border-custom rounded-lg text-xs focus:outline-none focus:border-accent-custom disabled:opacity-60"
+                    />
+                    <button
+                      type="submit"
+                      disabled={isAddingFriend}
+                      className="shrink-0 px-3 bg-accent-custom hover:bg-accent-hover text-white font-bold rounded-lg text-[10px] active:scale-95 transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                    >
+                      {isAddingFriend ? (
+                        <RefreshCw size={10} className="animate-spin" />
+                      ) : (
+                        "Add"
+                      )}
+                    </button>
+                  </form>
+                  <div className="space-y-2.5 max-h-[180px] overflow-y-auto pr-1">
+                    {friends.length === 0 ? (
+                      <p className="text-center text-xs opacity-50 py-4">No friends added yet.</p>
                     ) : (
-                      <span className="text-[9px] uppercase font-bold opacity-45 px-1">
-                        {f.status === "in-lobby" ? "lobby" : f.status}
-                      </span>
+                      friends.map((f) => (
+                        <div
+                          key={f.id}
+                          className="flex items-center justify-between text-xs border-b border-border-custom/30 pb-2 last:border-0 last:pb-0 gap-2"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <div
+                              className={`w-2 h-2 rounded-full shrink-0 ${
+                                f.status === "online"
+                                  ? "bg-emerald-500 animate-pulse"
+                                  : f.status === "in-lobby"
+                                    ? "bg-cyan-500 animate-pulse"
+                                    : f.status === "in-game"
+                                      ? "bg-rose-500 animate-pulse"
+                                      : "bg-slate-300 dark:bg-slate-700"
+                              }`}
+                            />
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <p className="font-bold leading-tight truncate">{f.name}</p>
+                                {f.status === "in-game" && (
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded-full text-[8px] font-bold bg-rose-500/15 text-rose-500 border border-rose-500/30 animate-pulse">
+                                    In Match
+                                  </span>
+                                )}
+                                {f.status === "in-lobby" && (
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded-full text-[8px] font-bold bg-cyan-500/15 text-cyan-500 border border-cyan-500/30">
+                                    In Lobby
+                                  </span>
+                                )}
+                              </div>
+                              <span className="text-[9px] opacity-60">
+                                {f.elo} ELO
+                              </span>
+                            </div>
+                          </div>
+                          <div className="shrink-0 flex items-center gap-1">
+                            {f.status === "in-game" && f.roomCode ? (
+                              <button
+                                onClick={() => handleSpectateFriend(f.roomCode, f.id)}
+                                className="px-2 py-1 bg-rose-500 hover:bg-rose-600 text-white font-bold text-[9px] rounded-lg shadow-sm active:scale-95 transition-all flex items-center gap-1 cursor-pointer font-sans"
+                                title="Spectate friend's live match"
+                              >
+                                <Eye size={11} /> Spectate
+                              </button>
+                            ) : room ? (
+                              <button
+                                onClick={() => inviteFriend(f.id)}
+                                disabled={f.status !== "online"}
+                                className={`px-2 py-1 border transition-all rounded-md text-[9px] font-bold ${
+                                  f.status === "online"
+                                    ? "bg-accent-glow border-border-custom hover:border-accent-custom hover:text-accent-custom active:scale-95 cursor-pointer"
+                                    : "bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700 cursor-not-allowed opacity-50"
+                                }`}
+                                title={
+                                  f.status !== "online"
+                                    ? `Friend is currently: ${f.status}`
+                                    : "Invite to Room"
+                                }
+                              >
+                                Invite
+                              </button>
+                            ) : f.status === "in-lobby" && f.roomCode ? (
+                              <button
+                                onClick={() => joinRoom(f.roomCode)}
+                                className="px-2 py-1 border transition-all rounded-md text-[9px] font-bold bg-emerald-500/10 border-emerald-500/30 hover:border-emerald-500 hover:text-emerald-500 hover:bg-emerald-500/20 active:scale-95 cursor-pointer text-emerald-500"
+                                title="Join Friend's Lobby Room"
+                              >
+                                Join Room
+                              </button>
+                            ) : (
+                              <span className="text-[9px] uppercase font-bold opacity-45 px-1">
+                                {f.status || "offline"}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ))
                     )}
                   </div>
-                ))}
-              </div>
+                </>
+              ) : (
+                /* Rivalries Tab Content */
+                <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
+                  {rivalries.length === 0 ? (
+                    <div className="text-center py-6 px-2">
+                      <Trophy size={24} className="mx-auto mb-2 opacity-30 text-accent-custom" />
+                      <p className="text-xs font-semibold opacity-75">No Rivalries Yet</p>
+                      <p className="text-[10px] opacity-50 mt-1">
+                        Play 1v1 multiplayer matches or rematches to record your head-to-head records!
+                      </p>
+                    </div>
+                  ) : (
+                    rivalries.map((r) => (
+                      <div
+                        key={r.key || r.opponentId}
+                        className="p-2.5 rounded-xl border border-border-custom/30 bg-accent-glow/15 space-y-1.5 text-left"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-xs font-bold leading-tight">{r.opponentName}</span>
+                            {r.currentStreak?.count >= 2 && (
+                              <span className="px-1.5 py-0.2 rounded-full text-[8px] bg-amber-500/15 border border-amber-500/30 text-amber-500 font-bold animate-pulse">
+                                🔥 {r.currentStreak.count}-Streak ({r.isMyStreak ? "You" : r.opponentName})
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-xs font-extrabold">
+                            <span className="text-emerald-500">{r.myWins}W</span>
+                            <span className="opacity-40 mx-1">-</span>
+                            <span className="text-rose-500">{r.opponentWins}L</span>
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between text-[9px] opacity-60">
+                          <span>{r.totalMatches} match{r.totalMatches !== 1 ? "es" : ""} played</span>
+                          <span>{r.totalMatches > 0 ? Math.round((r.myWins / r.totalMatches) * 100) : 0}% Win Rate</span>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
             </div>
           </section>
         </main>
@@ -3358,6 +3509,23 @@ export default function App() {
                   <span className="font-extrabold text-accent-custom text-xs">{profile?.elo || 1450}</span>
                 </div>
               </div> */}
+
+              {/* 1v1 Series Rivalry HUD Badge */}
+              {is1v1Multiplayer && room?.isGameStarted && (
+                <div className="w-full max-w-[460px] mb-2 px-3 py-1.5 bg-accent-glow/20 border border-border-custom/30 rounded-xl flex items-center justify-between text-xs font-semibold shadow-xs">
+                  <div className="flex items-center gap-1.5 text-accent-custom font-bold">
+                    <span>⚔️ Match {room.seriesCount || 1}</span>
+                    <span className="text-[10px] text-text-custom/75 font-normal">
+                      (Series: {mySeriesWins} - {oppSeriesWins})
+                    </span>
+                  </div>
+                  {streakCount >= 2 && (
+                    <span className="px-1.5 py-0.5 rounded-full text-[9px] bg-amber-500/15 text-amber-500 border border-amber-500/30 font-bold animate-pulse">
+                      🔥 {streakCount}-Streak ({isMyStreak ? "You" : seriesOpponent?.name})
+                    </span>
+                  )}
+                </div>
+              )}
 
               {/* Mobile Opponent HUD (only shown on mobile/tablet when in a multiplayer match) */}
               {room && room.isGameStarted && activeOpponent && (
@@ -4352,16 +4520,16 @@ export default function App() {
                                 Searching for Match...
                               </h3>
                               <p className="text-xs opacity-60">
-                                Elapsed time: {searchTimer}s
+                                Elapsed time: {searchTimer}s / 45s
                               </p>
                               <p className="text-[10px] text-accent-custom uppercase font-semibold tracking-wider">
-                                Matching ELO range ±{searchTimer * 25}
+                                Matching ELO range ±{Math.min(500, Math.max(50, searchTimer * 25))}
                               </p>
                             </div>
 
                             <button
                               onClick={cancelMatchmaking}
-                              className="px-5 py-2 border border-border-custom hover:border-red-400 hover:text-red-500 text-xs font-bold rounded-xl active:scale-95 transition-all"
+                              className="px-5 py-2 border border-border-custom hover:border-red-400 hover:text-red-500 text-xs font-bold rounded-xl active:scale-95 transition-all cursor-pointer"
                             >
                               Cancel Queue
                             </button>
@@ -4426,141 +4594,249 @@ export default function App() {
                     )}
                   </div>
 
-                  {/* Social Friends Sidebar Panel */}
+                  {/* Social Friends & Rivalries Sidebar Panel */}
                   <div className="glass-card rounded-2xl p-5">
-                    <h3 className="text-xs uppercase font-bold opacity-50 tracking-wider mb-3 flex items-center gap-1.5">
-                      <UserPlus size={13} />
-                      Friends List & Status
-                    </h3>
-
-                    {/* Friend requests search input */}
-                    <form
-                      onSubmit={handleAddFriendSubmit}
-                      className="flex gap-1.5 mb-4 w-full min-w-0"
-                    >
-                      <input
-                        type="text"
-                        placeholder="Friend Username"
-                        value={friendNameInput}
-                        onChange={(e) => setFriendNameInput(e.target.value)}
-                        disabled={isAddingFriend}
-                        className="flex-1 min-w-0 px-2.5 py-1.5 bg-accent-glow border border-border-custom rounded-lg text-xs focus:outline-none focus:border-accent-custom disabled:opacity-60"
-                      />
+                    {/* Tab Selector: Friends vs Rivalries */}
+                    <div className="flex items-center gap-1 p-1 bg-accent-glow/20 rounded-xl mb-3 border border-border-custom/30">
                       <button
-                        type="submit"
-                        disabled={isAddingFriend}
-                        className="shrink-0 px-3 bg-accent-custom hover:bg-accent-hover text-white font-bold rounded-lg text-[10px] active:scale-95 transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                        type="button"
+                        onClick={() => setSocialDrawerTab("friends")}
+                        className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer font-sans ${
+                          socialDrawerTab === "friends"
+                            ? "bg-accent-custom text-white shadow-xs"
+                            : "opacity-60 hover:opacity-100 text-text-custom"
+                        }`}
                       >
-                        {isAddingFriend ? (
-                          <RefreshCw size={10} className="animate-spin" />
-                        ) : (
-                          "Add"
-                        )}
+                        <Users size={12} />
+                        <span>Friends ({friends.length})</span>
                       </button>
-                    </form>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSocialDrawerTab("rivalries");
+                          fetchRivalries();
+                        }}
+                        className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer font-sans ${
+                          socialDrawerTab === "rivalries"
+                            ? "bg-accent-custom text-white shadow-xs"
+                            : "opacity-60 hover:opacity-100 text-text-custom"
+                        }`}
+                      >
+                        <Trophy size={12} />
+                        <span>Rivalries ({rivalries.length})</span>
+                      </button>
+                    </div>
 
-                    {/* Pending Friend Requests */}
-                    {friendRequests.length > 0 && (
-                      <div className="mb-4 bg-accent-glow/10 border border-border-custom/50 rounded-xl p-3 space-y-2">
-                        <h4 className="text-[9px] uppercase font-bold opacity-50 tracking-wider flex items-center gap-1">
-                          <UserPlus size={10} /> Pending Requests (
-                          {friendRequests.length})
-                        </h4>
-                        <div className="space-y-2">
-                          {friendRequests.map((req) => (
-                            <div
-                              key={req.id}
-                              className="flex items-center gap-2 text-xs"
-                            >
-                              <div className="w-6 h-6 rounded-full bg-accent-glow border border-border-custom flex items-center justify-center font-bold text-[9px]">
-                                {req.name?.charAt(0)?.toUpperCase() || "F"}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <p className="font-bold truncate leading-tight text-[11px]">
-                                  {req.name}
-                                </p>
-                                <p className="text-[8px] opacity-50">{req.elo} ELO</p>
-                              </div>
-                              <div className="flex gap-0.5">
-                                <button
-                                  onClick={() => handleAcceptFriendRequest(req.id)}
-                                  disabled={actionPendingRequests.has(req.id)}
-                                  className="w-5 h-5 rounded-md bg-emerald-500/20 text-emerald-500 hover:bg-emerald-500 hover:text-white transition-all flex items-center justify-center cursor-pointer disabled:opacity-50"
-                                  title="Accept"
-                                >
-                                  {actionPendingRequests.has(req.id) ? (
-                                    <RefreshCw size={8} className="animate-spin" />
-                                  ) : (
-                                    <Check size={10} />
-                                  )}
-                                </button>
-                                <button
-                                  onClick={() => handleDeclineFriendRequest(req.id)}
-                                  disabled={actionPendingRequests.has(req.id)}
-                                  className="w-5 h-5 rounded-md bg-rose-500/20 text-rose-500 hover:bg-rose-500 hover:text-white transition-all flex items-center justify-center cursor-pointer disabled:opacity-50"
-                                  title="Decline"
-                                >
-                                  {actionPendingRequests.has(req.id) ? (
-                                    <RefreshCw size={8} className="animate-spin" />
-                                  ) : (
-                                    <X size={10} />
-                                  )}
-                                </button>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Friends lists mapping */}
-                    <div className="space-y-2.5 max-h-[160px] overflow-y-auto pr-1">
-                      {friends.map((f) => (
-                        <div
-                          key={f.id}
-                          className="flex items-center justify-between text-xs border-b border-border-custom/30 pb-2 last:border-0 last:pb-0"
+                    {socialDrawerTab === "friends" ? (
+                      <>
+                        {/* Friend requests search input */}
+                        <form
+                          onSubmit={handleAddFriendSubmit}
+                          className="flex gap-1.5 mb-4 w-full min-w-0"
                         >
-                          <div className="flex items-center gap-2">
-                            <div
-                              className={`w-2 h-2 rounded-full ${f.status === "online"
-                                ? "bg-emerald-500 animate-pulse"
-                                : f.status === "in-game"
-                                  ? "bg-amber-500 animate-pulse"
-                                  : "bg-slate-300 dark:bg-slate-700"
-                                }`}
-                            />
-                            <div>
-                              <p className="font-bold leading-tight">{f.name}</p>
-                              <span className="text-[9px] opacity-60">
-                                {f.elo} ELO
-                              </span>
+                          <input
+                            type="text"
+                            placeholder="Friend Username"
+                            value={friendNameInput}
+                            onChange={(e) => setFriendNameInput(e.target.value)}
+                            disabled={isAddingFriend}
+                            className="flex-1 min-w-0 px-2.5 py-1.5 bg-accent-glow border border-border-custom rounded-lg text-xs focus:outline-none focus:border-accent-custom disabled:opacity-60"
+                          />
+                          <button
+                            type="submit"
+                            disabled={isAddingFriend}
+                            className="shrink-0 px-3 bg-accent-custom hover:bg-accent-hover text-white font-bold rounded-lg text-[10px] active:scale-95 transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                          >
+                            {isAddingFriend ? (
+                              <RefreshCw size={10} className="animate-spin" />
+                            ) : (
+                              "Add"
+                            )}
+                          </button>
+                        </form>
+
+                        {/* Pending Friend Requests */}
+                        {friendRequests.length > 0 && (
+                          <div className="mb-4 bg-accent-glow/10 border border-border-custom/50 rounded-xl p-3 space-y-2">
+                            <h4 className="text-[9px] uppercase font-bold opacity-50 tracking-wider flex items-center gap-1">
+                              <UserPlus size={10} /> Pending Requests (
+                              {friendRequests.length})
+                            </h4>
+                            <div className="space-y-2">
+                              {friendRequests.map((req) => (
+                                <div
+                                  key={req.id}
+                                  className="flex items-center gap-2 text-xs"
+                                >
+                                  <div className="w-6 h-6 rounded-full bg-accent-glow border border-border-custom flex items-center justify-center font-bold text-[9px]">
+                                    {req.name?.charAt(0)?.toUpperCase() || "F"}
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <p className="font-bold truncate leading-tight text-[11px]">
+                                      {req.name}
+                                    </p>
+                                    <p className="text-[8px] opacity-50">{req.elo} ELO</p>
+                                  </div>
+                                  <div className="flex gap-0.5">
+                                    <button
+                                      onClick={() => handleAcceptFriendRequest(req.id)}
+                                      disabled={actionPendingRequests.has(req.id)}
+                                      className="w-5 h-5 rounded-md bg-emerald-500/20 text-emerald-500 hover:bg-emerald-500 hover:text-white transition-all flex items-center justify-center cursor-pointer disabled:opacity-50"
+                                      title="Accept"
+                                    >
+                                      {actionPendingRequests.has(req.id) ? (
+                                        <RefreshCw size={8} className="animate-spin" />
+                                      ) : (
+                                        <Check size={10} />
+                                      )}
+                                    </button>
+                                    <button
+                                      onClick={() => handleDeclineFriendRequest(req.id)}
+                                      disabled={actionPendingRequests.has(req.id)}
+                                      className="w-5 h-5 rounded-md bg-rose-500/20 text-rose-500 hover:bg-rose-500 hover:text-white transition-all flex items-center justify-center cursor-pointer disabled:opacity-50"
+                                      title="Decline"
+                                    >
+                                      {actionPendingRequests.has(req.id) ? (
+                                        <RefreshCw size={8} className="animate-spin" />
+                                      ) : (
+                                        <X size={10} />
+                                      )}
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
                             </div>
                           </div>
+                        )}
 
-                          {room ? (
-                            <button
-                              onClick={() => inviteFriend(f.id)}
-                              disabled={f.status !== "online"}
-                              className={`px-2 py-1 border transition-all rounded-md text-[9px] font-bold ${f.status === "online"
-                                ? "bg-accent-glow border-border-custom hover:border-accent-custom hover:text-accent-custom active:scale-95 cursor-pointer"
-                                : "bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700 cursor-not-allowed opacity-50"
-                                }`}
-                              title={
-                                f.status !== "online"
-                                  ? `Friend must be online (currently: ${f.status})`
-                                  : "Invite to Room"
-                              }
-                            >
-                              Invite
-                            </button>
+                        {/* Friends lists mapping */}
+                        <div className="space-y-2.5 max-h-[160px] overflow-y-auto pr-1">
+                          {friends.length === 0 ? (
+                            <p className="text-center text-xs opacity-50 py-4">No friends added yet.</p>
                           ) : (
-                            <span className="text-[9px] uppercase font-bold opacity-45 px-1">
-                              {f.status}
-                            </span>
+                            friends.map((f) => (
+                              <div
+                                key={f.id}
+                                className="flex items-center justify-between text-xs border-b border-border-custom/30 pb-2 last:border-0 last:pb-0 gap-2"
+                              >
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <div
+                                    className={`w-2 h-2 rounded-full shrink-0 ${
+                                      f.status === "online"
+                                        ? "bg-emerald-500 animate-pulse"
+                                        : f.status === "in-lobby"
+                                          ? "bg-cyan-500 animate-pulse"
+                                          : f.status === "in-game"
+                                            ? "bg-rose-500 animate-pulse"
+                                            : "bg-slate-300 dark:bg-slate-700"
+                                    }`}
+                                  />
+                                  <div className="min-w-0">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <p className="font-bold leading-tight truncate">{f.name}</p>
+                                      {f.status === "in-game" && (
+                                        <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded-full text-[8px] font-bold bg-rose-500/15 text-rose-500 border border-rose-500/30 animate-pulse">
+                                          In Match
+                                        </span>
+                                      )}
+                                      {f.status === "in-lobby" && (
+                                        <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded-full text-[8px] font-bold bg-cyan-500/15 text-cyan-500 border border-cyan-500/30">
+                                          In Lobby
+                                        </span>
+                                      )}
+                                    </div>
+                                    <span className="text-[9px] opacity-60">
+                                      {f.elo} ELO
+                                    </span>
+                                  </div>
+                                </div>
+
+                                <div className="shrink-0 flex items-center gap-1">
+                                  {f.status === "in-game" && f.roomCode ? (
+                                    <button
+                                      onClick={() => handleSpectateFriend(f.roomCode, f.id)}
+                                      className="px-2 py-1 bg-rose-500 hover:bg-rose-600 text-white font-bold text-[9px] rounded-lg shadow-sm active:scale-95 transition-all flex items-center gap-1 cursor-pointer font-sans"
+                                      title="Spectate friend's live match"
+                                    >
+                                      <Eye size={11} /> Spectate
+                                    </button>
+                                  ) : room ? (
+                                    <button
+                                      onClick={() => inviteFriend(f.id)}
+                                      disabled={f.status !== "online"}
+                                      className={`px-2 py-1 border transition-all rounded-md text-[9px] font-bold ${
+                                        f.status === "online"
+                                          ? "bg-accent-glow border-border-custom hover:border-accent-custom hover:text-accent-custom active:scale-95 cursor-pointer"
+                                          : "bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700 cursor-not-allowed opacity-50"
+                                      }`}
+                                      title={
+                                        f.status !== "online"
+                                          ? `Friend is currently: ${f.status}`
+                                          : "Invite to Room"
+                                      }
+                                    >
+                                      Invite
+                                    </button>
+                                  ) : f.status === "in-lobby" && f.roomCode ? (
+                                    <button
+                                      onClick={() => joinRoom(f.roomCode)}
+                                      className="px-2 py-1 border transition-all rounded-md text-[9px] font-bold bg-emerald-500/10 border-emerald-500/30 hover:border-emerald-500 hover:text-emerald-500 hover:bg-emerald-500/20 active:scale-95 cursor-pointer text-emerald-500"
+                                      title="Join Friend's Lobby Room"
+                                    >
+                                      Join Room
+                                    </button>
+                                  ) : (
+                                    <span className="text-[9px] uppercase font-bold opacity-45 px-1">
+                                      {f.status}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            ))
                           )}
                         </div>
-                      ))}
-                    </div>
+                      </>
+                    ) : (
+                      /* Rivalries Tab Content */
+                      <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
+                        {rivalries.length === 0 ? (
+                          <div className="text-center py-6 px-2">
+                            <Trophy size={24} className="mx-auto mb-2 opacity-30 text-accent-custom" />
+                            <p className="text-xs font-semibold opacity-75">No Rivalries Yet</p>
+                            <p className="text-[10px] opacity-50 mt-1">
+                              Play 1v1 multiplayer matches or rematches to record your head-to-head records!
+                            </p>
+                          </div>
+                        ) : (
+                          rivalries.map((r) => (
+                            <div
+                              key={r.key || r.opponentId}
+                              className="p-2.5 rounded-xl border border-border-custom/30 bg-accent-glow/15 space-y-1.5 text-left"
+                            >
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="text-xs font-bold leading-tight">{r.opponentName}</span>
+                                  {r.currentStreak?.count >= 2 && (
+                                    <span className="px-1.5 py-0.2 rounded-full text-[8px] bg-amber-500/15 border border-amber-500/30 text-amber-500 font-bold animate-pulse">
+                                      🔥 {r.currentStreak.count}-Streak ({r.isMyStreak ? "You" : r.opponentName})
+                                    </span>
+                                  )}
+                                </div>
+                                <span className="text-xs font-extrabold">
+                                  <span className="text-emerald-500">{r.myWins}W</span>
+                                  <span className="opacity-40 mx-1">-</span>
+                                  <span className="text-rose-500">{r.opponentWins}L</span>
+                                </span>
+                              </div>
+                              <div className="flex items-center justify-between text-[9px] opacity-60">
+                                <span>{r.totalMatches} match{r.totalMatches !== 1 ? "es" : ""} played</span>
+                                <span>{r.totalMatches > 0 ? Math.round((r.myWins / r.totalMatches) * 100) : 0}% Win Rate</span>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
                   </div>
                 </>
               ) : (
@@ -4825,6 +5101,34 @@ export default function App() {
                 )}
               </div>
             )}
+            {is1v1Multiplayer && (
+              <div className="p-3 bg-accent-glow/20 border border-border-custom/40 rounded-xl space-y-1.5 text-center my-1">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-accent-custom flex items-center justify-center gap-1.5">
+                  <span>⚔️ Match {room.seriesCount || 1} of Series</span>
+                  {streakCount >= 2 && (
+                    <span className="px-1.5 py-0.5 rounded-full text-[8px] bg-amber-500/15 border border-amber-500/30 text-amber-500 font-bold animate-pulse">
+                      🔥 {streakCount}-Streak ({isMyStreak ? "You" : seriesOpponent?.name})
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center justify-center gap-3 text-sm font-extrabold">
+                  <span className={mySeriesWins > oppSeriesWins ? "text-emerald-500" : "text-text-custom"}>
+                    You: {mySeriesWins}
+                  </span>
+                  <span className="opacity-40">—</span>
+                  <span className={oppSeriesWins > mySeriesWins ? "text-emerald-500" : "text-text-custom"}>
+                    {seriesOpponent?.name || "Opponent"}: {oppSeriesWins}
+                  </span>
+                </div>
+                <p className="text-[10px] opacity-60">
+                  {mySeriesWins > oppSeriesWins
+                    ? `You lead the series ${mySeriesWins}-${oppSeriesWins}`
+                    : oppSeriesWins > mySeriesWins
+                      ? `${seriesOpponent?.name} leads the series ${oppSeriesWins}-${mySeriesWins}`
+                      : `Series is tied ${mySeriesWins}-${oppSeriesWins}`}
+                </p>
+              </div>
+            )}
             {room && Object.values(room.playAgainVotes || {}).some(Boolean) && <p className="game-status" role="status">
               {room.players.filter(p => room.playAgainVotes[p.id]).map(p => p.name).join(", ")} requested a rematch.
             </p>}
@@ -4840,7 +5144,7 @@ export default function App() {
                 }}
                 className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl active:scale-[0.98] transition-all flex items-center justify-center gap-1.5 shadow-md shadow-emerald-500/20"
               >
-                Rematch
+                Rematch {room?.seriesCount ? `(Match ${room.seriesCount + 1})` : ""}
               </button>
             )}
 
@@ -4980,6 +5284,34 @@ export default function App() {
               ✏️ Keep Solving (Practice Mode)
             </button>
 
+            {is1v1Multiplayer && (
+              <div className="p-3 bg-accent-glow/20 border border-border-custom/40 rounded-xl space-y-1.5 text-center my-1">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-accent-custom flex items-center justify-center gap-1.5">
+                  <span>⚔️ Match {room.seriesCount || 1} of Series</span>
+                  {streakCount >= 2 && (
+                    <span className="px-1.5 py-0.5 rounded-full text-[8px] bg-amber-500/15 border border-amber-500/30 text-amber-500 font-bold animate-pulse">
+                      🔥 {streakCount}-Streak ({isMyStreak ? "You" : seriesOpponent?.name})
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center justify-center gap-3 text-sm font-extrabold">
+                  <span className={mySeriesWins > oppSeriesWins ? "text-emerald-500" : "text-text-custom"}>
+                    You: {mySeriesWins}
+                  </span>
+                  <span className="opacity-40">—</span>
+                  <span className={oppSeriesWins > mySeriesWins ? "text-emerald-500" : "text-text-custom"}>
+                    {seriesOpponent?.name || "Opponent"}: {oppSeriesWins}
+                  </span>
+                </div>
+                <p className="text-[10px] opacity-60">
+                  {mySeriesWins > oppSeriesWins
+                    ? `You lead the series ${mySeriesWins}-${oppSeriesWins}`
+                    : oppSeriesWins > mySeriesWins
+                      ? `${seriesOpponent?.name} leads the series ${oppSeriesWins}-${mySeriesWins}`
+                      : `Series is tied ${mySeriesWins}-${oppSeriesWins}`}
+                </p>
+              </div>
+            )}
             {room && Object.values(room.playAgainVotes || {}).some(Boolean) && <p className="game-status" role="status">
               {room.players.filter(p => room.playAgainVotes[p.id]).map(p => p.name).join(", ")} requested a rematch.
             </p>}
@@ -4995,7 +5327,7 @@ export default function App() {
                 }}
                 className="w-full py-3 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl active:scale-[0.98] transition-all flex items-center justify-center gap-1.5 shadow-md shadow-rose-500/20"
               >
-                Rematch
+                Rematch {room?.seriesCount ? `(Match ${room.seriesCount + 1})` : ""}
               </button>
             )}
 
@@ -5436,6 +5768,30 @@ export default function App() {
         }}
         solvedDates={solvedDailyDates}
         leaderboardForDate={dailyLeaderboards[selectedCalendarDate] || []}
+      />
+
+      {/* 45-Second ELO Matchmaking Timeout Fallback Modal */}
+      <MatchmakingTimeoutModal
+        isOpen={showMatchmakingTimeoutModal}
+        onClose={() => setShowMatchmakingTimeoutModal(false)}
+        onTryAgain={() => {
+          setShowMatchmakingTimeoutModal(false);
+          startMatchmaking(lastQueueDifficulty, lastQueueAbilities);
+        }}
+        onPlaySolo={() => {
+          setShowMatchmakingTimeoutModal(false);
+          startNewGame(lastQueueDifficulty);
+        }}
+        onCreateRoom={() => {
+          setShowMatchmakingTimeoutModal(false);
+          createRoom({
+            name: inputName,
+            difficulty: lastQueueDifficulty,
+            avatar: selectedAvatar,
+            enableAbilities: lastQueueAbilities,
+          });
+        }}
+        difficulty={lastQueueDifficulty}
       />
     </div>
   );

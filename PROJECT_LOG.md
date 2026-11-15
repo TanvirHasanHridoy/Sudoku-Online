@@ -289,3 +289,41 @@ On branch `feature/lofi-audio-and-board-focus`:
   - Dev server confirmed via Vite HMR update without errors.
 * **Remaining limitations:**
   - Web Audio playback requires an initial user interaction (such as tapping start, clicking a cell, or toggling the audio button) to satisfy browser autoplay security policies.
+
+## 2026-11-15 · 45-Second ELO Matchmaking Queue Timeout, Head-to-Head Rivalry & Rematch Streaks, and 1-Click Spectate Social Hub
+
+On branch `feature/matchmaking-timeout-and-social-rivalry`:
+* **45-Second ELO Matchmaking Queue Timeout:**
+  - Server-side sweep loop (`server/src/server.js`) periodically evaluates queued matchmaking players; any player in queue for $\ge 45000\text{ms}$ is pruned from `matchmakingQueue` and sent a `MATCHMAKING_TIMEOUT` notification. Timing is configurable via `SUDOKU_MATCHMAKING_TIMEOUT_MS` and `SUDOKU_MATCHMAKING_SWEEP_MS`.
+  - Client-side countdown and auto-cancel timer in `useSocialStore.js` shows elapsed time (`{searchTimer}s / 45s`) and ensures UI synchronization if connection drops.
+  - Added `client/src/components/MatchmakingTimeoutModal.jsx` offering 4 actionable one-tap fallback choices:
+    - 🔄 **Try Again:** Re-queues the player with the previously chosen difficulty and abilities configuration.
+    - 🧩 **Play Solo:** Immediately starts a solo game at the same queued difficulty.
+    - 👥 **Create Private Room:** Opens a private multiplayer lobby configured to the same difficulty.
+    - ✖️ **Return Home:** Dismisses modal and clears queue state.
+* **Live Head-to-Head Rivalry & Rematch Streaks:**
+  - **Durable Server Storage:** Records head-to-head matches in `server/data/matches.json` under `rivalries: {}` via `recordRivalry(playerA, playerB, winnerId)` using canonical lexicographical player ID pairs (`minId:maxId`). Tracks total matches, individual wins, last match timestamp, and active streak (`currentStreak: { playerId, count }`).
+  - **Client Persistence & Offline Cache:** Retrieved via WebSocket message `GET_RIVALRIES` (`RIVALRIES_DATA`) and cached in `localStorage` under `sudoku_h2h_records`.
+  - **Social Drawer Dual-Tab UI:** Added 2-tab navigation in the Social Drawer (both home screen and lobby): **Friends** and **Rivalries**. The Rivalries tab renders opponent cards with head-to-head match records (e.g. `4W - 2L (67% Win Rate)`), active streak badges (`🔥 3-Streak`), and last played date.
+  - **In-Game Series HUD & Post-Match Rematch Tracking:**
+    - 1v1 multiplayer rooms track in-room series scores (`seriesScore: { [playerId]: wins }`), streak, and `seriesCount`.
+    - Live in-game HUD displays active series pill (`⚔️ Match N: X - Y (🔥 N-Streak)`).
+    - Post-match victory and defeat screens display current series standings and an updated `Rematch (Match N+1)` button.
+    - Rematches via `VOTE_PLAY_AGAIN` increment series count and retain the head-to-head tally.
+* **Robust Friends Activity Hub & 1-Click Spectate:**
+  - Real-time friend status indicators dynamically reflect room states:
+    - 🔴 `In Match (#XXXXXX)` with an immediate **`[👁️ Spectate]`** button.
+    - 🟢 `In Lobby (#XXXXXX)` with a **`[Join Room]`** button.
+    - 🟢 `Online` with an **`[Invite]`** button.
+    - ⚫ `Offline`.
+  - 1-Click Spectate allows any friend to join a live match immediately without asking for a room code; entering as spectator automatically selects the friend as the spectated target and navigates straight to the board view.
+* **Verification:**
+  - Unit and integration tests added in `server/test/multiplayer.test.js`:
+    - `matchmaking queue prunes player and sends MATCHMAKING_TIMEOUT after timeout`
+    - `head-to-head rivalry records match, updates series streak, and responds to GET_RIVALRIES`
+    - `friend status updates broadcast in-lobby, in-game with roomCode, and enable 1-click spectate`
+  - Full automated test suite passed all 24/24 tests (`npm test`).
+  - Client production build succeeded cleanly in 1.24s with zero errors (`npm run build --prefix client`).
+  - Active server restarted on port 3001 with verified WebSocket connectivity.
+* **Remaining limitations:**
+  - Live friend presence and real-time activity status require both clients to connect to the same server deployment. Offline players or players across disconnected instances synchronize friend activity upon next reconnect.

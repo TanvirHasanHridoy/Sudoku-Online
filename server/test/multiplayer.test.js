@@ -22,6 +22,7 @@ puzzle[0][0] = puzzle[0][1] = null;
 async function startServer() {
   server = spawn(process.execPath, [fileURLToPath(new URL('../src/server.js',import.meta.url))], {
     env:{...process.env, PORT:'0', SUDOKU_GRACE_MS:String(grace), SUDOKU_DATA_DIR:directory,
+      SUDOKU_MATCHMAKING_TIMEOUT_MS: '350', SUDOKU_MATCHMAKING_SWEEP_MS: '50',
       SUPABASE_URL:'', SUPABASE_SERVICE_ROLE_KEY:''}, stdio:['ignore','pipe','inherit']
   });
   port = await new Promise((resolve, reject) => {
@@ -364,5 +365,91 @@ test('daily challenge leaderboard retrieval and score submission', async () => {
   assert.equal(res2.leaderboard[1].name, 'Speedster');
   assert.equal(res2.leaderboard[1].rank, 2);
 });
+
+test('matchmaking queue prunes player and sends MATCHMAKING_TIMEOUT after timeout', async () => {
+  const c = await client();
+  c.send('JOIN_MATCHMAKING_QUEUE', { playerId: c.id, difficulty: 'medium', enableAbilities: true });
+  const timeoutPayload = await c.next('MATCHMAKING_TIMEOUT');
+  assert.equal(timeoutPayload.playerId, c.id);
+});
+
+test('head-to-head rivalry records match, updates series streak, and responds to GET_RIVALRIES', async () => {
+  const { a, b, matchId } = await room();
+
+  // Player A completes puzzle first (progress 100)
+  a.send('UPDATE_PROGRESS', { progress: 100, strikes: 0, matchId });
+  const aResult = await a.next('MATCH_RESULT');
+  assert.equal(aResult.outcome, 'won');
+
+  // Player B finishes / eliminated
+  b.send('UPDATE_PROGRESS', { progress: 80, strikes: 3, matchId });
+  const bResult = await b.next('MATCH_RESULT');
+  assert.equal(bResult.outcome, 'lost');
+
+  // Verify Player A can request and inspect rivalries
+  a.send('GET_RIVALRIES', { playerId: a.id });
+  const aRivalries = await a.next('RIVALRIES_DATA');
+  assert.ok(Array.isArray(aRivalries.rivalries));
+  const rivalryForA = aRivalries.rivalries.find(r => r.opponentId === b.id);
+  assert.ok(rivalryForA);
+  assert.equal(rivalryForA.myWins, 1);
+  assert.equal(rivalryForA.opponentWins, 0);
+  assert.equal(rivalryForA.isMyStreak, true);
+  assert.equal(rivalryForA.currentStreak.count, 1);
+
+  // Verify Player B can request and inspect rivalries
+  b.send('GET_RIVALRIES', { playerId: b.id });
+  const bRivalries = await b.next('RIVALRIES_DATA');
+  const rivalryForB = bRivalries.rivalries.find(r => r.opponentId === a.id);
+  assert.ok(rivalryForB);
+  assert.equal(rivalryForB.myWins, 0);
+  assert.equal(rivalryForB.opponentWins, 1);
+  assert.equal(rivalryForB.isMyStreak, false);
+
+  // Verify series score and count on rematch vote
+  a.send('VOTE_PLAY_AGAIN', { vote: true });
+  b.send('VOTE_PLAY_AGAIN', { vote: true });
+  const approvedA = await a.next('PLAY_AGAIN_APPROVED');
+  assert.equal(approvedA.room.seriesCount, 2);
+  assert.equal(approvedA.room.seriesScore[a.id], 1);
+  assert.equal(approvedA.room.currentStreak.playerId, a.id);
+  assert.equal(approvedA.room.currentStreak.count, 1);
+});
+
+test('friend status updates broadcast in-lobby, in-game with roomCode, and enable 1-click spectate', async () => {
+  const friendUser = await client();
+  const watcher = await client();
+
+  // Watcher registers friendUser in friends list
+  watcher.send('SET_FRIENDS_LIST', { friendIds: [friendUser.id] });
+  const initialStatusList = await watcher.next('FRIENDS_STATUS_LIST');
+  assert.ok(initialStatusList.statuses);
+
+  // Friend creates room -> Watcher receives in-lobby status with roomCode
+  friendUser.send('CREATE_ROOM', { playerId: friendUser.id, difficulty: 'medium', name: 'FriendOne' });
+  const created = await friendUser.next('ROOM_CREATED');
+  const code = created.room.code;
+
+  const lobbyStatus = await watcher.next('FRIEND_STATUS_UPDATE');
+  assert.equal(lobbyStatus.friendId, friendUser.id);
+  assert.equal(lobbyStatus.status, 'in-lobby');
+  assert.equal(lobbyStatus.roomCode, code);
+
+  // Friend starts game -> Watcher receives in-game status
+  friendUser.send('START_GAME', { board: puzzle, solution });
+  await friendUser.next('GAME_STARTED');
+
+  const gameStatus = await watcher.next('FRIEND_STATUS_UPDATE');
+  assert.equal(gameStatus.friendId, friendUser.id);
+  assert.equal(gameStatus.status, 'in-game');
+  assert.equal(gameStatus.roomCode, code);
+
+  // Watcher can 1-click spectate by joining the room as spectator using the roomCode
+  watcher.send('JOIN_ROOM', { code: gameStatus.roomCode, playerId: watcher.id, isSpectator: true });
+  const spectatorJoined = await watcher.next('ROOM_JOINED');
+  assert.equal(spectatorJoined.room.code, code);
+  assert.ok(spectatorJoined.room.players.some(p => p.id === watcher.id && p.isSpectator));
+});
+
 
 
