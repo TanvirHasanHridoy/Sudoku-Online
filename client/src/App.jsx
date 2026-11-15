@@ -232,6 +232,7 @@ export default function App() {
     addToast,
     // WebRTC states & actions
     remoteAudioStream,
+    remoteAudioStreams,
     isMicMuted,
     isVoiceJoined,
     joinVoice,
@@ -240,6 +241,9 @@ export default function App() {
     voicePromptActive,
     voiceDebugLogs,
     voiceConnectionState,
+    pauseCountdown,
+    teamProgress,
+    cellsContributed,
     // Spectating states & actions
     spectatingPlayerId,
     spectatedPlayerBoardState,
@@ -400,23 +404,15 @@ export default function App() {
   // Derived opponent state — must be declared before any useEffect that references it
   const activeOpponent = room?.players?.find((p) => !isPlayerDone(p));
 
-  // Opponent nearing completion triggers Climax Peripheral Aura and end-game urgency
+  // Opponent nearing completion triggers Climax Heartbeat Aura strictly after 90% completed
   const anyOpponentClose = room?.players?.find((p) => {
-    if (isPlayerDone(p)) return false;
-    const oppTotal = p.total || 32;
-    const oppLeft = p.cellsLeft !== undefined
-      ? p.cellsLeft
-      : Math.max(0, oppTotal - Math.round((oppTotal * (p.progress || 0)) / 100));
-    return (p.progress >= 85 || (oppLeft <= 5 && oppLeft > 0));
+    if (p.id === myPlayerId || p.isSpectator || isPlayerDone(p)) return false;
+    return (p.progress >= 90);
   });
 
   const anyOpponentWarning = !anyOpponentClose && room?.players?.find((p) => {
-    if (isPlayerDone(p)) return false;
-    const oppTotal = p.total || 32;
-    const oppLeft = p.cellsLeft !== undefined
-      ? p.cellsLeft
-      : Math.max(0, oppTotal - Math.round((oppTotal * (p.progress || 0)) / 100));
-    return (p.progress >= 60 || (oppLeft <= 10 && oppLeft > 0));
+    if (p.id === myPlayerId || p.isSpectator || isPlayerDone(p)) return false;
+    return (p.progress >= 70 && p.progress < 90);
   });
 
   const opponentCellsRemaining = anyOpponentClose
@@ -589,13 +585,34 @@ export default function App() {
   const [lobbyInputText, setLobbyInputText] = useState("");
   const [inGameChatInput, setInGameChatInput] = useState("");
   const [spectatorChatInput, setSpectatorChatInput] = useState("");
+  const [isMobileChatOpen, setIsMobileChatOpen] = useState(false);
+  const [unreadChatCount, setUnreadChatCount] = useState(0);
+  const prevChatCountRef = useRef(0);
   const lobbyChatEndRef = useRef(null);
 
   useEffect(() => {
     if (lobbyChatEndRef.current) {
       lobbyChatEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [chatMessages]);
+    const currentLen = chatMessages?.length || 0;
+    if (currentLen > prevChatCountRef.current && !isMobileChatOpen) {
+      setUnreadChatCount((prev) => prev + (currentLen - prevChatCountRef.current));
+    }
+    prevChatCountRef.current = currentLen;
+  }, [chatMessages, isMobileChatOpen]);
+
+  // Countdown tick for pause countdown (3... 2... 1... GO!)
+  useEffect(() => {
+    if (pauseCountdown === null) return;
+    if (pauseCountdown <= 0) {
+      useLobbyStore.setState({ pauseCountdown: null });
+      return;
+    }
+    const timer = setTimeout(() => {
+      useLobbyStore.setState({ pauseCountdown: pauseCountdown - 1 });
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [pauseCountdown]);
 
   // Trigger visual reactions in top banner
   function triggerEmoteVisual(data) {
@@ -821,10 +838,10 @@ export default function App() {
   }, [theme]);
 
   // Timer Effect: stop timer if game is paused!
-  const isGamePaused = room?.isPaused || (room && !isConnected);
+  const isGamePaused = room?.isPaused || (room && !isConnected) || (pauseCountdown !== null && pauseCountdown > 0);
 
   useEffect(() => {
-    if (gameStatus === "playing" && !isGamePaused && !room?.coop) {
+    if (gameStatus === "playing" && !isGamePaused) {
       timerRef.current = setInterval(() => {
         setSeconds((prev) => {
           const next = prev + 1;
@@ -846,7 +863,7 @@ export default function App() {
       clearInterval(timerRef.current);
     }
     return () => clearInterval(timerRef.current);
-  }, [gameStatus, isGamePaused, room?.coop]);
+  }, [gameStatus, isGamePaused]);
 
   // Switch to game view when playing starts
   useEffect(() => {
@@ -896,6 +913,18 @@ export default function App() {
       focusAudio.triggerWin();
     }
   }, [gameStatus, lofiEnabled]);
+
+  // Heartbeat sound synchronization when opponent is at >= 90%
+  useEffect(() => {
+    if (isOpponentClose && soundEnabled) {
+      playSound.startHeartbeat(soundEnabled);
+    } else {
+      playSound.stopHeartbeat();
+    }
+    return () => {
+      playSound.stopHeartbeat();
+    };
+  }, [isOpponentClose, soundEnabled]);
 
   // Auto-open friend challenge from URL and enter game immediately
   useEffect(() => {
@@ -2450,7 +2479,7 @@ export default function App() {
                 </button>
               </div>
 
-              {room?.coop && <p className="game-status">Co-op · two players, one board · untimed</p>}
+              {room?.coop && <p className="game-status">Co-op · two players, one board · team solve</p>}
               {room && Object.values(room.playAgainVotes || {}).some(Boolean) && <p className="game-status" role="status">
                 {room.players.filter(p => room.playAgainVotes[p.id]).map(p => p.name).join(", ")} requested a rematch.
               </p>}
@@ -2672,6 +2701,22 @@ export default function App() {
                           <QRCodeSVG value={getJoinUrl()} size={50} />
                         </div>
                       </div>
+
+                      {/* Room Configuration Specs Bar */}
+                      <div className="flex flex-wrap items-center gap-1.5 py-1.5 px-2.5 bg-accent-glow/20 border border-border-custom/40 rounded-xl text-[11px] font-bold">
+                        <span className="px-2 py-0.5 rounded-md bg-accent-custom text-white capitalize shadow-xs">
+                          {room.difficulty || "medium"}
+                        </span>
+                        <span className={`px-2 py-0.5 rounded-md border ${room.coop ? "bg-indigo-500/15 border-indigo-500/30 text-indigo-400" : "bg-emerald-500/15 border-emerald-500/30 text-emerald-400"}`}>
+                          {room.coop ? "🤝 Co-op Mode" : "⚡ Speed Race"}
+                        </span>
+                        {room.enableAbilities && (
+                          <span className="px-2 py-0.5 rounded-md bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center gap-1">
+                            ✨ Abilities ON
+                          </span>
+                        )}
+                      </div>
+
                       <div>
                         <h3 className="text-xs uppercase font-bold opacity-50 tracking-wider mb-2 flex items-center justify-between">
                           <span>Lobby Connections</span>
@@ -2727,6 +2772,15 @@ export default function App() {
                                         <p className="text-xs font-bold leading-tight">
                                           {p.name} {isMe && "(You)"}
                                         </p>
+                                        {!isMe && !friends?.some((f) => f.id === p.id || f.name?.toLowerCase() === p.name?.toLowerCase()) && (
+                                          <button
+                                            onClick={() => addFriend(p.name)}
+                                            className="p-1 hover:bg-accent-glow rounded-md text-accent-custom transition-all active:scale-95 cursor-pointer"
+                                            title={`Add ${p.name} as friend`}
+                                          >
+                                            <UserPlus size={11} />
+                                          </button>
+                                        )}
                                         {voiceJoined &&
                                           (voiceMuted ? (
                                             <MicOff
@@ -3118,6 +3172,11 @@ export default function App() {
                 >
                   <Users size={12} />
                   <span>Friends ({friends.length})</span>
+                  {friendRequests.length > 0 && (
+                    <span className="px-1.5 py-0.2 rounded-full text-[9px] bg-rose-500 text-white font-extrabold animate-pulse">
+                      {friendRequests.length}
+                    </span>
+                  )}
                 </button>
                 <button
                   type="button"
@@ -3162,7 +3221,56 @@ export default function App() {
                       )}
                     </button>
                   </form>
-                  <div className="space-y-2.5 max-h-[180px] overflow-y-auto pr-1">
+
+                  {/* Pending Friend Requests */}
+                  {friendRequests.length > 0 && (
+                    <div className="mb-4 bg-accent-glow/10 border border-border-custom/50 rounded-xl p-3 space-y-2">
+                      <h4 className="text-[9px] uppercase font-bold opacity-50 tracking-wider flex items-center gap-1">
+                        <UserPlus size={10} /> Pending Requests ({friendRequests.length})
+                      </h4>
+                      <div className="space-y-2">
+                        {friendRequests.map((req) => (
+                          <div key={req.id} className="flex items-center gap-2 text-xs">
+                            <div className="w-6 h-6 rounded-full bg-accent-glow border border-border-custom flex items-center justify-center font-bold text-[9px]">
+                              {req.name?.charAt(0)?.toUpperCase() || "F"}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="font-bold truncate leading-tight text-[11px]">{req.name}</p>
+                              <p className="text-[8px] opacity-50">{req.elo} ELO</p>
+                            </div>
+                            <div className="flex gap-1">
+                              <button
+                                onClick={() => handleAcceptFriendRequest(req.id)}
+                                disabled={actionPendingRequests.has(req.id)}
+                                className="w-6 h-6 rounded-lg bg-emerald-500/20 text-emerald-500 hover:bg-emerald-500 hover:text-white transition-all flex items-center justify-center disabled:opacity-50 cursor-pointer"
+                                title="Accept"
+                              >
+                                {actionPendingRequests.has(req.id) ? (
+                                  <RefreshCw size={10} className="animate-spin" />
+                                ) : (
+                                  <Check size={12} />
+                                )}
+                              </button>
+                              <button
+                                onClick={() => handleDeclineFriendRequest(req.id)}
+                                disabled={actionPendingRequests.has(req.id)}
+                                className="w-6 h-6 rounded-lg bg-rose-500/20 text-rose-500 hover:bg-rose-500 hover:text-white transition-all flex items-center justify-center disabled:opacity-50 cursor-pointer"
+                                title="Decline"
+                              >
+                                {actionPendingRequests.has(req.id) ? (
+                                  <RefreshCw size={10} className="animate-spin" />
+                                ) : (
+                                  <X size={12} />
+                                )}
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="space-y-2.5 max-h-[180px] overflow-y-auto pr-1 scrollbar-thin">
                     {friends.length === 0 ? (
                       <p className="text-center text-xs opacity-50 py-4">No friends added yet.</p>
                     ) : (
@@ -3203,44 +3311,63 @@ export default function App() {
                             </div>
                           </div>
                           <div className="shrink-0 flex items-center gap-1">
-                            {f.status === "in-game" && f.roomCode ? (
-                              <button
-                                onClick={() => handleSpectateFriend(f.roomCode, f.id)}
-                                className="px-2 py-1 bg-rose-500 hover:bg-rose-600 text-white font-bold text-[9px] rounded-lg shadow-sm active:scale-95 transition-all flex items-center gap-1 cursor-pointer font-sans"
-                                title="Spectate friend's live match"
-                              >
-                                <Eye size={11} /> Spectate
-                              </button>
-                            ) : room ? (
-                              <button
-                                onClick={() => inviteFriend(f.id)}
-                                disabled={f.status !== "online"}
-                                className={`px-2 py-1 border transition-all rounded-md text-[9px] font-bold ${
-                                  f.status === "online"
-                                    ? "bg-accent-glow border-border-custom hover:border-accent-custom hover:text-accent-custom active:scale-95 cursor-pointer"
-                                    : "bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700 cursor-not-allowed opacity-50"
-                                }`}
-                                title={
-                                  f.status !== "online"
-                                    ? `Friend is currently: ${f.status}`
-                                    : "Invite to Room"
-                                }
-                              >
-                                Invite
-                              </button>
-                            ) : f.status === "in-lobby" && f.roomCode ? (
-                              <button
-                                onClick={() => joinRoom(f.roomCode)}
-                                className="px-2 py-1 border transition-all rounded-md text-[9px] font-bold bg-emerald-500/10 border-emerald-500/30 hover:border-emerald-500 hover:text-emerald-500 hover:bg-emerald-500/20 active:scale-95 cursor-pointer text-emerald-500"
-                                title="Join Friend's Lobby Room"
-                              >
-                                Join Room
-                              </button>
-                            ) : (
-                              <span className="text-[9px] uppercase font-bold opacity-45 px-1">
-                                {f.status || "offline"}
-                              </span>
-                            )}
+                            {(() => {
+                              const isFriendInSameRoom = room && (room.code === f.roomCode || room.players?.some((p) => p.id === f.id));
+                              if (isFriendInSameRoom) {
+                                return (
+                                  <span className="text-[9px] uppercase font-bold text-accent-custom px-1.5 py-0.5 rounded bg-accent-glow/30 border border-accent-custom/20">
+                                    In Match
+                                  </span>
+                                );
+                              }
+                              if (f.status === "in-game" && f.roomCode) {
+                                return (
+                                  <button
+                                    onClick={() => handleSpectateFriend(f.roomCode, f.id)}
+                                    className="px-2 py-1 bg-rose-500 hover:bg-rose-600 text-white font-bold text-[9px] rounded-lg shadow-sm active:scale-95 transition-all flex items-center gap-1 cursor-pointer font-sans"
+                                    title="Spectate friend's live match"
+                                  >
+                                    <Eye size={11} /> Spectate
+                                  </button>
+                                );
+                              }
+                              if (room) {
+                                return (
+                                  <button
+                                    onClick={() => inviteFriend(f.id)}
+                                    disabled={f.status !== "online"}
+                                    className={`px-2 py-1 border transition-all rounded-md text-[9px] font-bold ${
+                                      f.status === "online"
+                                        ? "bg-accent-glow border-border-custom hover:border-accent-custom hover:text-accent-custom active:scale-95 cursor-pointer"
+                                        : "bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700 cursor-not-allowed opacity-50"
+                                    }`}
+                                    title={
+                                      f.status !== "online"
+                                        ? `Friend is currently: ${f.status}`
+                                        : "Invite to Room"
+                                    }
+                                  >
+                                    Invite
+                                  </button>
+                                );
+                              }
+                              if (f.status === "in-lobby" && f.roomCode) {
+                                return (
+                                  <button
+                                    onClick={() => joinRoom(f.roomCode)}
+                                    className="px-2 py-1 border transition-all rounded-md text-[9px] font-bold bg-emerald-500/10 border-emerald-500/30 hover:border-emerald-500 hover:text-emerald-500 hover:bg-emerald-500/20 active:scale-95 cursor-pointer text-emerald-500"
+                                    title="Join Friend's Lobby Room"
+                                  >
+                                    Join Room
+                                  </button>
+                                );
+                              }
+                              return (
+                                <span className="text-[9px] uppercase font-bold opacity-45 px-1">
+                                  {f.status || "offline"}
+                                </span>
+                              );
+                            })()}
                           </div>
                         </div>
                       ))
@@ -3299,8 +3426,17 @@ export default function App() {
           <main className="max-w-6xl mx-auto px-2 sm:px-4 py-2 lg:py-10 grid grid-cols-1 lg:grid-cols-12 gap-3 lg:gap-8 items-start">
             {/* LEFT COLUMN: The Sudoku Puzzle Area */}
             <section className={`${room ? "lg:col-span-7" : "lg:col-span-8"} flex flex-col items-center relative`}>
-              {/* PAUSED MASK SCREEN */}
-              {isGamePaused && (
+              {/* PAUSE COUNTDOWN OVERLAY (3... 2... 1...) */}
+              {pauseCountdown !== null && pauseCountdown > 0 ? (
+                <div className="absolute inset-0 bg-slate-950/85 backdrop-blur-md rounded-2xl flex flex-col items-center justify-center p-4 z-40 animate-fade-in border border-accent-custom/50">
+                  <div className="text-7xl font-black text-accent-custom animate-ping">
+                    {pauseCountdown}
+                  </div>
+                  <p className="text-sm font-bold uppercase tracking-widest text-text-custom/80 mt-6 animate-pulse">
+                    Resuming Match...
+                  </p>
+                </div>
+              ) : isGamePaused && (
                 <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md rounded-2xl flex flex-col items-center justify-center p-4 z-30 animate-fade-in border border-border-custom/50">
                   <div className="w-16 h-16 rounded-2xl bg-accent-custom/20 text-accent-custom flex items-center justify-center mb-4">
                     <Pause size={36} className="animate-pulse" />
@@ -3312,13 +3448,26 @@ export default function App() {
                     {isConnected ? "All players agreed to pause." : "Your board will resume when the room reconnects."}
                   </p>
 
-                  <button
-                    disabled={!isConnected} onClick={requestPause}
-                    className="mt-6 px-6 py-2.5 bg-accent-custom hover:bg-accent-hover text-white font-bold rounded-xl active:scale-95 transition-all text-xs flex items-center gap-1.5 shadow-md"
-                  >
-                    <PlayIcon size={14} fill="white" />
-                    Resume Game
-                  </button>
+                  <div className="flex items-center gap-3 mt-6">
+                    <button
+                      disabled={!isConnected}
+                      onClick={requestPause}
+                      className="px-5 py-2.5 bg-accent-custom hover:bg-accent-hover text-white font-bold rounded-xl active:scale-95 transition-all text-xs flex items-center gap-1.5 shadow-md cursor-pointer"
+                    >
+                      <PlayIcon size={14} fill="white" />
+                      Resume Game
+                    </button>
+                    <button
+                      onClick={() => {
+                        leaveRoom();
+                        setActiveView("home");
+                      }}
+                      className="px-4 py-2.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-400 border border-rose-500/30 font-bold rounded-xl active:scale-95 transition-all text-xs flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <LogOut size={14} />
+                      Exit Match
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -3356,7 +3505,7 @@ export default function App() {
 
                   <span className="text-[11px] lg:text-xs font-bold px-2 py-1 bg-accent-glow border border-border-custom rounded-lg flex items-center gap-1 min-w-[55px] justify-center tabular-nums">
                     <Timer size={11} className="text-accent-custom shrink-0" />
-                    {room?.coop ? "Untimed" : formatTime(seconds)}
+                    {formatTime(seconds)}
                   </span>
 
                   {challenge && (
@@ -3682,7 +3831,7 @@ export default function App() {
               <div
                 ref={boardAreaRef}
                 className={`relative w-full max-w-[460px] p-1 rounded-2xl transition-all duration-500 ${isOpponentClose
-                  ? "ring-4 ring-rose-500 shadow-[0_0_35px_rgba(244,63,94,0.5)] animate-pulse"
+                  ? "ring-4 ring-rose-500 heartbeat-border"
                   : isOpponentWarning
                     ? "ring-4 ring-amber-500/70 shadow-[0_0_20px_rgba(245,158,11,0.3)]"
                     : spectatingPlayerId
@@ -4104,6 +4253,21 @@ export default function App() {
                               </div>
                             </div>
 
+                            {/* Room Configuration Specs Bar */}
+                            <div className="flex flex-wrap items-center gap-1.5 py-1.5 px-2.5 bg-accent-glow/20 border border-border-custom/40 rounded-xl text-[11px] font-bold">
+                              <span className="px-2 py-0.5 rounded-md bg-accent-custom text-white capitalize shadow-xs">
+                                {room.difficulty || "medium"}
+                              </span>
+                              <span className={`px-2 py-0.5 rounded-md border ${room.coop ? "bg-indigo-500/15 border-indigo-500/30 text-indigo-400" : "bg-emerald-500/15 border-emerald-500/30 text-emerald-400"}`}>
+                                {room.coop ? "🤝 Co-op Mode" : "⚡ Speed Race"}
+                              </span>
+                              {room.enableAbilities && (
+                                <span className="px-2 py-0.5 rounded-md bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center gap-1">
+                                  ✨ Abilities ON
+                                </span>
+                              )}
+                            </div>
+
                             {/* Lobby Connections list */}
                             <div>
                               <h3 className="text-xs uppercase font-bold opacity-50 tracking-wider mb-2 flex items-center justify-between">
@@ -4168,6 +4332,15 @@ export default function App() {
                                               <p className="text-xs font-bold leading-tight">
                                                 {p.name} {isMe && "(You)"}
                                               </p>
+                                              {!isMe && !friends?.some((f) => f.id === p.id || f.name?.toLowerCase() === p.name?.toLowerCase()) && (
+                                                <button
+                                                  onClick={() => addFriend(p.name)}
+                                                  className="p-1 hover:bg-accent-glow rounded-md text-accent-custom transition-all active:scale-95 cursor-pointer"
+                                                  title={`Add ${p.name} as friend`}
+                                                >
+                                                  <UserPlus size={11} />
+                                                </button>
+                                              )}
                                               {voiceJoined &&
                                                 (voiceMuted ? (
                                                   <MicOff
@@ -4242,16 +4415,20 @@ export default function App() {
                                               </div>
                                             );
                                           }
-                                          const prog = isMe ? myProgress : p.progress;
-                                          const cellsDisplay = isMe
-                                            ? `${myCellsLeft}/${total || 32} left`
-                                            : p.cellsLeft !== undefined
-                                              ? `${p.cellsLeft}/${p.total || 32} left`
-                                              : `${Math.max(0, (p.total || 32) - Math.round(((p.total || 32) * p.progress) / 100))}/${p.total || 32} left`;
+                                          const isCoop = !!room.coop;
+                                          const prog = isCoop ? (teamProgress || p.progress || 0) : (isMe ? myProgress : p.progress);
+                                          const contrib = cellsContributed?.[p.id] || p.cellsContributed || 0;
+                                          const cellsDisplay = isCoop
+                                            ? `${contrib} cell${contrib === 1 ? '' : 's'} placed`
+                                            : isMe
+                                              ? `${myCellsLeft}/${total || 32} left`
+                                              : p.cellsLeft !== undefined
+                                                ? `${p.cellsLeft}/${p.total || 32} left`
+                                                : `${Math.max(0, (p.total || 32) - Math.round(((p.total || 32) * p.progress) / 100))}/${p.total || 32} left`;
                                           return (
                                             <>
                                               <div className="flex items-center justify-between text-[10px] mb-1 font-semibold opacity-85">
-                                                <span>Board Progress</span>
+                                                <span>{isCoop ? "Team Progress" : "Board Progress"}</span>
                                                 <span className="tabular-nums font-mono text-[9px]">
                                                   {prog}% • {cellsDisplay}
                                                 </span>
@@ -4609,6 +4786,11 @@ export default function App() {
                       >
                         <Users size={12} />
                         <span>Friends ({friends.length})</span>
+                        {friendRequests.length > 0 && (
+                          <span className="px-1.5 py-0.2 rounded-full text-[9px] bg-rose-500 text-white font-extrabold animate-pulse">
+                            {friendRequests.length}
+                          </span>
+                        )}
                       </button>
                       <button
                         type="button"
@@ -4752,44 +4934,63 @@ export default function App() {
                                 </div>
 
                                 <div className="shrink-0 flex items-center gap-1">
-                                  {f.status === "in-game" && f.roomCode ? (
-                                    <button
-                                      onClick={() => handleSpectateFriend(f.roomCode, f.id)}
-                                      className="px-2 py-1 bg-rose-500 hover:bg-rose-600 text-white font-bold text-[9px] rounded-lg shadow-sm active:scale-95 transition-all flex items-center gap-1 cursor-pointer font-sans"
-                                      title="Spectate friend's live match"
-                                    >
-                                      <Eye size={11} /> Spectate
-                                    </button>
-                                  ) : room ? (
-                                    <button
-                                      onClick={() => inviteFriend(f.id)}
-                                      disabled={f.status !== "online"}
-                                      className={`px-2 py-1 border transition-all rounded-md text-[9px] font-bold ${
-                                        f.status === "online"
-                                          ? "bg-accent-glow border-border-custom hover:border-accent-custom hover:text-accent-custom active:scale-95 cursor-pointer"
-                                          : "bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700 cursor-not-allowed opacity-50"
-                                      }`}
-                                      title={
-                                        f.status !== "online"
-                                          ? `Friend is currently: ${f.status}`
-                                          : "Invite to Room"
-                                      }
-                                    >
-                                      Invite
-                                    </button>
-                                  ) : f.status === "in-lobby" && f.roomCode ? (
-                                    <button
-                                      onClick={() => joinRoom(f.roomCode)}
-                                      className="px-2 py-1 border transition-all rounded-md text-[9px] font-bold bg-emerald-500/10 border-emerald-500/30 hover:border-emerald-500 hover:text-emerald-500 hover:bg-emerald-500/20 active:scale-95 cursor-pointer text-emerald-500"
-                                      title="Join Friend's Lobby Room"
-                                    >
-                                      Join Room
-                                    </button>
-                                  ) : (
-                                    <span className="text-[9px] uppercase font-bold opacity-45 px-1">
-                                      {f.status}
-                                    </span>
-                                  )}
+                                  {(() => {
+                                    const isFriendInSameRoom = room && (room.code === f.roomCode || room.players?.some((p) => p.id === f.id));
+                                    if (isFriendInSameRoom) {
+                                      return (
+                                        <span className="text-[9px] uppercase font-bold text-accent-custom px-1.5 py-0.5 rounded bg-accent-glow/30 border border-accent-custom/20">
+                                          In Match
+                                        </span>
+                                      );
+                                    }
+                                    if (f.status === "in-game" && f.roomCode) {
+                                      return (
+                                        <button
+                                          onClick={() => handleSpectateFriend(f.roomCode, f.id)}
+                                          className="px-2 py-1 bg-rose-500 hover:bg-rose-600 text-white font-bold text-[9px] rounded-lg shadow-sm active:scale-95 transition-all flex items-center gap-1 cursor-pointer font-sans"
+                                          title="Spectate friend's live match"
+                                        >
+                                          <Eye size={11} /> Spectate
+                                        </button>
+                                      );
+                                    }
+                                    if (room) {
+                                      return (
+                                        <button
+                                          onClick={() => inviteFriend(f.id)}
+                                          disabled={f.status !== "online"}
+                                          className={`px-2 py-1 border transition-all rounded-md text-[9px] font-bold ${
+                                            f.status === "online"
+                                              ? "bg-accent-glow border-border-custom hover:border-accent-custom hover:text-accent-custom active:scale-95 cursor-pointer"
+                                              : "bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700 cursor-not-allowed opacity-50"
+                                          }`}
+                                          title={
+                                            f.status !== "online"
+                                              ? `Friend is currently: ${f.status}`
+                                              : "Invite to Room"
+                                          }
+                                        >
+                                          Invite
+                                        </button>
+                                      );
+                                    }
+                                    if (f.status === "in-lobby" && f.roomCode) {
+                                      return (
+                                        <button
+                                          onClick={() => joinRoom(f.roomCode)}
+                                          className="px-2 py-1 border transition-all rounded-md text-[9px] font-bold bg-emerald-500/10 border-emerald-500/30 hover:border-emerald-500 hover:text-emerald-500 hover:bg-emerald-500/20 active:scale-95 cursor-pointer text-emerald-500"
+                                          title="Join Friend's Lobby Room"
+                                        >
+                                          Join Room
+                                        </button>
+                                      );
+                                    }
+                                    return (
+                                      <span className="text-[9px] uppercase font-bold opacity-45 px-1">
+                                        {f.status}
+                                      </span>
+                                    );
+                                  })()}
                                 </div>
                               </div>
                             ))
@@ -4967,7 +5168,7 @@ export default function App() {
               <div className="text-left">
                 <span className="opacity-60 block">Solve Time:</span>
                 <span className="text-base font-bold text-accent-custom">
-                  {room?.coop ? "Untimed" : formatTime(seconds)}
+                  {formatTime(seconds)}
                 </span>
               </div>
               <div className="text-left border-l border-border-custom pl-3">
@@ -4977,6 +5178,23 @@ export default function App() {
                 </span>
               </div>
             </div>
+
+            {room?.coop && (
+              <div className="bg-indigo-500/10 border border-indigo-500/20 rounded-xl p-3 text-xs space-y-1.5 text-left">
+                <div className="flex items-center justify-between font-bold text-indigo-400">
+                  <span>🤝 Co-op Team Synergy</span>
+                  <span>{teamProgress || 100}% Board Solved</span>
+                </div>
+                <div className="flex items-center justify-between text-[11px] opacity-80 flex-wrap gap-2 pt-1 border-t border-indigo-500/20">
+                  {room.players.map((p) => (
+                    <span key={p.id} className="flex items-center gap-1 font-semibold">
+                      <span>{p.name}:</span>
+                      <strong className="text-indigo-300">{cellsContributed?.[p.id] || p.cellsContributed || 0} cells</strong>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div className="border border-border-custom p-3 rounded-xl bg-accent-glow/5 text-xs text-emerald-500 font-bold flex items-center justify-center gap-1">
               <Trophy size={14} /> {room?.coop || challenge ? "Unrated" : `Rating: ${elo} · ${rank}`}
@@ -5382,7 +5600,7 @@ export default function App() {
               <div className="text-left">
                 <span className="opacity-60 block">Solve Time:</span>
                 <span className="text-base font-bold text-accent-custom">
-                  {room?.coop ? "Untimed" : formatTime(seconds)}
+                  {formatTime(seconds)}
                 </span>
               </div>
               <div className="text-left border-l border-border-custom pl-3">
@@ -5444,41 +5662,175 @@ export default function App() {
         </div>
       )}
 
-      {/* INCOMING LOBBY INVITATION MODAL */}
+      {/* INCOMING LOBBY INVITATION TOAST (Compact Floating Modal) */}
       {activeLobbyInvitation && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-fade-in">
-          <div className="glass-card rounded-2xl p-6 max-w-sm w-full text-center space-y-4 animate-scale-in">
-            <h3 className="text-sm font-bold text-accent-custom">
-              Lobby Invitation
-            </h3>
-            <p className="text-xs text-text-custom opacity-75">
-              <strong>{activeLobbyInvitation.inviterName}</strong> has invited
-              you to join their game.
-            </p>
-            <div className="flex gap-2">
-              <button
-                onClick={() => {
-                  joinRoom(activeLobbyInvitation.roomCode);
-                  useLobbyStore.setState({ activeLobbyInvitation: null });
-                }}
-                className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs active:scale-95 transition-all cursor-pointer"
-              >
-                Accept
-              </button>
-              <button
-                onClick={() => {
-                  useLobbyStore.setState({ activeLobbyInvitation: null });
-                }}
-                className="flex-1 py-2 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs active:scale-95 transition-all cursor-pointer"
-              >
-                Decline
-              </button>
+        <div className="fixed top-5 right-5 z-50 max-w-sm w-[92vw] sm:w-88 glass-card border-2 border-accent-custom/50 shadow-2xl p-4 rounded-2xl animate-slide-in-down pointer-events-auto">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <div className="w-10 h-10 rounded-xl bg-accent-custom/20 border border-accent-custom/30 text-accent-custom flex items-center justify-center font-bold text-sm shrink-0">
+                {activeLobbyInvitation.inviterName?.slice(0, 2)?.toUpperCase() || "VS"}
+              </div>
+              <div className="min-w-0">
+                <span className="text-[10px] uppercase font-bold text-accent-custom tracking-wider block">
+                  Game Invitation
+                </span>
+                <p className="text-xs font-bold truncate text-text-custom">
+                  {activeLobbyInvitation.inviterName}
+                </p>
+              </div>
             </div>
+            <button
+              onClick={() => useLobbyStore.setState({ activeLobbyInvitation: null })}
+              className="p-1 text-text-custom/50 hover:text-text-custom transition-all cursor-pointer"
+            >
+              <X size={14} />
+            </button>
+          </div>
+
+          {/* Invitation Details: Mode, Difficulty, Abilities */}
+          <div className="flex flex-wrap items-center gap-1.5 mt-3 pt-2 border-t border-border-custom/40 text-[10px] font-bold">
+            <span className="px-2 py-0.5 rounded-md bg-accent-custom text-white capitalize shadow-xs">
+              {activeLobbyInvitation.difficulty || "medium"}
+            </span>
+            <span className={`px-2 py-0.5 rounded-md border ${activeLobbyInvitation.coop ? "bg-indigo-500/15 border-indigo-500/30 text-indigo-400" : "bg-emerald-500/15 border-emerald-500/30 text-emerald-400"}`}>
+              {activeLobbyInvitation.coop ? "🤝 Co-op Mode" : "⚡ Speed Race"}
+            </span>
+            {activeLobbyInvitation.enableAbilities && (
+              <span className="px-2 py-0.5 rounded-md bg-amber-500/15 border border-amber-500/30 text-amber-400">
+                ✨ Abilities ON
+              </span>
+            )}
+          </div>
+
+          <div className="flex gap-2 mt-3 pt-1">
+            <button
+              onClick={() => {
+                joinRoom(activeLobbyInvitation.roomCode);
+                useLobbyStore.setState({ activeLobbyInvitation: null });
+              }}
+              className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs active:scale-95 transition-all cursor-pointer flex items-center justify-center gap-1 shadow-sm"
+            >
+              <Check size={13} />
+              Accept
+            </button>
+            <button
+              onClick={() => {
+                useLobbyStore.setState({ activeLobbyInvitation: null });
+              }}
+              className="flex-1 py-1.5 bg-rose-500/15 hover:bg-rose-500/25 text-rose-400 border border-rose-500/30 font-bold rounded-xl text-xs active:scale-95 transition-all cursor-pointer flex items-center justify-center gap-1"
+            >
+              <X size={13} />
+              Decline
+            </button>
           </div>
         </div>
       )}
 
-      {/* Hidden WebRTC Remote Audio Player */}
+      {/* MOBILE CHAT FLOATING PILL BUTTON */}
+      {room && (activePlayers.length > 1 || spectators.length > 0) && (
+        <button
+          onClick={() => {
+            setIsMobileChatOpen(true);
+            setUnreadChatCount(0);
+          }}
+          className="fixed bottom-20 right-4 z-40 md:hidden flex items-center gap-1.5 px-3.5 py-2.5 bg-accent-custom hover:bg-accent-hover text-white rounded-full shadow-2xl active:scale-95 transition-all cursor-pointer font-bold text-xs border border-white/20"
+          title="Open Room Chat"
+        >
+          <MessageSquare size={16} />
+          <span>Chat</span>
+          {unreadChatCount > 0 && (
+            <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-rose-500 text-white font-black animate-pulse shadow-sm">
+              {unreadChatCount}
+            </span>
+          )}
+        </button>
+      )}
+
+      {/* MOBILE CHAT SLIDE-UP BOTTOM SHEET DRAWER */}
+      {isMobileChatOpen && (
+        <div className="fixed inset-0 z-50 md:hidden flex flex-col justify-end bg-slate-950/60 backdrop-blur-xs animate-fade-in">
+          <div
+            className="fixed inset-0"
+            onClick={() => setIsMobileChatOpen(false)}
+          />
+          <div className="relative glass-card border-t border-border-custom rounded-t-3xl p-4 max-h-[75vh] flex flex-col shadow-2xl animate-slide-in-up">
+            <div className="w-12 h-1 bg-border-custom rounded-full mx-auto mb-3 opacity-60" />
+            <div className="flex items-center justify-between pb-2 border-b border-border-custom/40">
+              <div className="flex items-center gap-2">
+                <MessageSquare size={16} className="text-accent-custom" />
+                <h3 className="font-bold text-sm">Room Chat</h3>
+                <span className="text-[10px] opacity-60">({chatMessages?.length || 0})</span>
+              </div>
+              <button
+                onClick={() => setIsMobileChatOpen(false)}
+                className="p-1 rounded-full hover:bg-accent-glow text-text-custom opacity-70 hover:opacity-100 cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Quick Emote Presets */}
+            <div className="flex items-center gap-1.5 py-2 overflow-x-auto scrollbar-thin">
+              {["GG! 🏆", "Nice move! 👏", "Need help! 🆘", "Close one! ⚡", "Wait for me! ⏳"].map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  onClick={() => sendEmote(preset)}
+                  className="px-2.5 py-1 bg-accent-glow hover:bg-accent-custom hover:text-white border border-border-custom/50 rounded-full text-[11px] font-bold whitespace-nowrap active:scale-95 transition-all cursor-pointer"
+                >
+                  {preset}
+                </button>
+              ))}
+            </div>
+
+            {/* Messages Log */}
+            <div className="flex-1 overflow-y-auto space-y-1.5 py-2 pr-1 scrollbar-thin max-h-56 text-xs">
+              {(!chatMessages || chatMessages.length === 0) ? (
+                <p className="text-[11px] opacity-50 italic py-6 text-center">No messages yet. Say hello!</p>
+              ) : (
+                chatMessages.map((msg) => (
+                  <div key={msg.id} className="text-xs flex items-baseline gap-1.5 bg-panel-custom/60 px-2.5 py-1.5 rounded-xl border border-border-custom/30">
+                    {msg.isSpectator && <span className="text-[10px]" title="Spectator">👁️</span>}
+                    <span className="font-bold text-accent-custom text-[11px] shrink-0">{msg.name}:</span>
+                    <span className="text-text-custom font-medium break-words text-[11px]">{msg.text}</span>
+                  </div>
+                ))
+              )}
+              <div ref={lobbyChatEndRef} />
+            </div>
+
+            {/* Chat Input */}
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (inGameChatInput.trim()) {
+                  sendEmote(inGameChatInput.trim());
+                  setInGameChatInput("");
+                }
+              }}
+              className="flex items-center gap-2 pt-2 border-t border-border-custom/40"
+            >
+              <input
+                type="text"
+                maxLength={80}
+                value={inGameChatInput}
+                onChange={(e) => setInGameChatInput(e.target.value)}
+                placeholder="Type message..."
+                className="flex-1 px-3 py-2 bg-panel-custom border border-border-custom rounded-xl text-xs focus:outline-none focus:border-accent-custom text-text-custom placeholder:opacity-50"
+              />
+              <button
+                type="submit"
+                disabled={!inGameChatInput.trim()}
+                className="p-2 bg-accent-custom hover:bg-accent-hover disabled:opacity-40 text-white rounded-xl transition-all active:scale-95 shrink-0 cursor-pointer"
+              >
+                <Send size={14} />
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Hidden WebRTC Remote Audio Players for Multi-Peer Mesh */}
       <audio
         ref={remoteAudioRef}
         autoPlay
@@ -5486,6 +5838,20 @@ export default function App() {
         controls={false}
         style={{ position: 'absolute', opacity: 0, width: '1px', height: '1px', pointerEvents: 'none' }}
       />
+      {Object.entries(remoteAudioStreams || {}).map(([peerId, stream]) => (
+        <audio
+          key={peerId}
+          autoPlay
+          playsInline
+          controls={false}
+          style={{ position: 'absolute', opacity: 0, width: '1px', height: '1px', pointerEvents: 'none' }}
+          ref={(audioEl) => {
+            if (audioEl && stream && audioEl.srcObject !== stream) {
+              audioEl.srcObject = stream;
+            }
+          }}
+        />
+      ))}
 
       {/* USER PREFERENCES SETTINGS MODAL */}
       {showSettingsModal && (

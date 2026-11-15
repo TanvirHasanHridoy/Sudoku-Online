@@ -38,7 +38,7 @@ export default function SudokuGrid({
   };
 
   const borderClasses = urgency === 'critical'
-    ? "border-2 border-rose-500 shadow-[0_0_20px_rgba(244,63,94,0.55)] animate-pulse"
+    ? "border-2 border-rose-500 heartbeat-border"
     : urgency === 'warning'
     ? "border-2 border-amber-500/80 shadow-[0_0_12px_rgba(245,158,11,0.35)]"
     : "border border-border-custom";

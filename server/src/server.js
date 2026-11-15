@@ -260,6 +260,8 @@ function getSanitizedRoom(room) {
     seriesScore: room.seriesScore || {},
     currentStreak: room.currentStreak || { playerId: null, count: 0 },
     seriesCount: room.seriesCount || 1,
+    cellsContributed: room.cellsContributed || {},
+    teamProgress: room.teamProgress || 0,
     players: room.players.map(p => ({
       id: p.id,
       name: p.name,
@@ -267,6 +269,7 @@ function getSanitizedRoom(room) {
       isReady: p.isReady,
       progress: (p.gameResult === 'won' || p.hasFinishedGame) && p.strikes < 3 ? 100 : p.progress,
       cellsLeft: (p.gameResult === 'won' || p.hasFinishedGame) && p.strikes < 3 ? 0 : p.cellsLeft,
+      cellsContributed: room.cellsContributed?.[p.id] || 0,
       total: p.total,
       strikes: p.strikes,
       mana: p.mana || 0,
@@ -529,6 +532,8 @@ wss.on('connection', (ws) => {
           room.finishers = [];
           room.pauseVotes = {};
           room.playAgainVotes = {};
+          room.cellsContributed = {};
+          room.teamProgress = 0;
           room.matchWinnerRecorded = false;
           room.players.forEach(p => { p.progress = 0; p.cellsLeft = undefined; p.total = undefined; p.strikes = 0; p.mana = 0; p.hasFinishedGame = false; p.gameResult = null; });
 
@@ -719,10 +724,10 @@ wss.on('connection', (ws) => {
           const room = rooms.get(currentRoomCode);
           if (!room || !currentPlayer) return;
 
-          // Enforce 20-second server-side cooldown between pause requests
+          // Enforce 3-second server-side cooldown between pause/resume requests
           const now = Date.now();
-          const PAUSE_COOLDOWN_MS = 20_000;
-          if (now - (room.lastPauseRequestTime || 0) < PAUSE_COOLDOWN_MS) {
+          const PAUSE_COOLDOWN_MS = 3_000;
+          if (!room.isPaused && (now - (room.lastPauseRequestTime || 0) < PAUSE_COOLDOWN_MS)) {
             const remaining = Math.ceil((PAUSE_COOLDOWN_MS - (now - room.lastPauseRequestTime)) / 1000);
             ws.send(JSON.stringify({
               type: 'ERROR',
@@ -735,18 +740,39 @@ wss.on('connection', (ws) => {
 
           // 1. Solo room pause behavior
           if (activePlayers.length === 1) {
-            room.isPaused = !room.isPaused; // Toggle pause state
+            const willPause = !room.isPaused;
             room.pauseVotes = {};
             room.pauseRequesterId = null;
             room.lastPauseRequestTime = now;
 
-            broadcastToRoom(currentRoomCode, {
-              type: 'PAUSE_CONSENSUS',
-              payload: {
-                room: getSanitizedRoom(room),
-                isPaused: room.isPaused
-              }
-            });
+            if (willPause) {
+              room.isPaused = true;
+              broadcastToRoom(currentRoomCode, {
+                type: 'PAUSE_CONSENSUS',
+                payload: {
+                  room: getSanitizedRoom(room),
+                  isPaused: true
+                }
+              });
+            } else {
+              broadcastToRoom(currentRoomCode, {
+                type: 'PAUSE_RESUMING',
+                payload: {
+                  room: getSanitizedRoom(room),
+                  countdownSeconds: 3
+                }
+              });
+              setTimeout(() => {
+                const r = rooms.get(currentRoomCode);
+                if (r && r.isPaused) {
+                  r.isPaused = false;
+                  broadcastToRoom(r.code, {
+                    type: 'PAUSE_CONSENSUS',
+                    payload: { room: getSanitizedRoom(r), isPaused: false }
+                  });
+                }
+              }, 3000);
+            }
             return;
           }
 
@@ -786,18 +812,40 @@ wss.on('connection', (ws) => {
           if (allVoted) {
             const requesterId = room.pauseRequesterId;
             if (allApproved) {
-              room.isPaused = !room.isPaused; // Toggle pause state
+              const willPause = !room.isPaused;
               room.pauseVotes = {};
               room.pauseRequesterId = null;
 
-              // Broadcast consensus to ALL (including requester)
-              broadcastToRoom(currentRoomCode, {
-                type: 'PAUSE_CONSENSUS',
-                payload: {
-                  room: getSanitizedRoom(room),
-                  isPaused: room.isPaused
-                }
-              });
+              if (willPause) {
+                room.isPaused = true;
+                room.lastPauseRequestTime = Date.now();
+                broadcastToRoom(currentRoomCode, {
+                  type: 'PAUSE_CONSENSUS',
+                  payload: {
+                    room: getSanitizedRoom(room),
+                    isPaused: true
+                  }
+                });
+              } else {
+                broadcastToRoom(currentRoomCode, {
+                  type: 'PAUSE_RESUMING',
+                  payload: {
+                    room: getSanitizedRoom(room),
+                    countdownSeconds: 3
+                  }
+                });
+                setTimeout(() => {
+                  const r = rooms.get(currentRoomCode);
+                  if (r && r.isPaused) {
+                    r.isPaused = false;
+                    r.lastPauseRequestTime = Date.now();
+                    broadcastToRoom(r.code, {
+                      type: 'PAUSE_CONSENSUS',
+                      payload: { room: getSanitizedRoom(r), isPaused: false }
+                    });
+                  }
+                }, 3000);
+              }
             } else {
               // Failed consensus — notify original requester with the name of who rejected it!
               room.pauseVotes = {};
@@ -1214,9 +1262,43 @@ wss.on('connection', (ws) => {
             return;
           }
           room.sharedBoard[row][col] = digit;
+          room.cellsContributed = room.cellsContributed || {};
+          room.cellsContributed[currentPlayer.id] = (room.cellsContributed[currentPlayer.id] || 0) + 1;
+
+          // Compute shared team progress
+          let filled = 0;
+          let total = 0;
+          for (let r = 0; r < 9; r++) {
+            for (let c = 0; c < 9; c++) {
+              if (room.board && room.board[r]?.[c] === null) {
+                total++;
+                if (room.sharedBoard[r]?.[c] !== null) filled++;
+              }
+            }
+          }
+          const teamProgress = total > 0 ? Math.round((filled / total) * 100) : 100;
+          room.teamProgress = teamProgress;
+          room.players.forEach(p => {
+            if (!p.isSpectator) {
+              p.progress = teamProgress;
+              p.cellsLeft = Math.max(0, total - filled);
+              p.total = total;
+            }
+          });
+
           const complete = room.sharedBoard.every(line => line.every(cell => cell !== null));
           if (complete) room.players.filter(p => !p.isSpectator).forEach(p => { p.hasFinishedGame = true; });
-          broadcastToRoom(room.code, { type: 'COOP_BOARD', payload: { board: room.sharedBoard, complete, room: getSanitizedRoom(room) } });
+          broadcastToRoom(room.code, {
+            type: 'COOP_BOARD',
+            payload: {
+              board: room.sharedBoard,
+              complete,
+              teamProgress,
+              cellsContributed: room.cellsContributed,
+              lastContributorId: currentPlayer.id,
+              room: getSanitizedRoom(room)
+            }
+          });
           break;
         }
         case 'COOP_POINT': {
@@ -1536,11 +1618,17 @@ wss.on('connection', (ws) => {
           }
           
           if (target && target.socket && target.socket.readyState === 1) {
+            const room = rooms.get(roomCode);
+            const senderClient = connectedClients.get(registeredPlayerId || currentPlayer?.id);
             target.socket.send(JSON.stringify({
               type: 'LOBBY_INVITATION',
               payload: {
                 roomCode,
-                inviterName
+                inviterName: inviterName || senderClient?.name || 'A friend',
+                inviterAvatar: senderClient?.avatar || 'apex',
+                difficulty: room ? room.difficulty : 'medium',
+                coop: room ? !!room.coop : false,
+                enableAbilities: room ? !!room.enableAbilities : false
               }
             }));
           }
@@ -1557,7 +1645,7 @@ wss.on('connection', (ws) => {
           // Find target online player
           let target = null;
           for (const client of connectedClients.values()) {
-            if (client.name.toLowerCase() === targetName.toLowerCase()) {
+            if (client.name.toLowerCase() === targetName.toLowerCase() || client.id === targetName) {
               target = client;
               break;
             }

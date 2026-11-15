@@ -1,4 +1,53 @@
 let audioCtx = null;
+let heartbeatTimer = null;
+
+function playSingleHeartbeat(ctx, volume = 0.25) {
+  const now = ctx.currentTime;
+  // S1 ("Lub")
+  const osc1 = ctx.createOscillator();
+  const gain1 = ctx.createGain();
+  const filter1 = ctx.createBiquadFilter();
+  filter1.type = 'lowpass';
+  filter1.frequency.setValueAtTime(115, now);
+
+  osc1.type = 'sine';
+  osc1.frequency.setValueAtTime(65, now);
+  osc1.frequency.exponentialRampToValueAtTime(42, now + 0.12);
+
+  osc1.connect(filter1);
+  filter1.connect(gain1);
+  gain1.connect(ctx.destination);
+
+  gain1.gain.setValueAtTime(0, now);
+  gain1.gain.linearRampToValueAtTime(volume, now + 0.02);
+  gain1.gain.exponentialRampToValueAtTime(0.0001, now + 0.14);
+
+  osc1.start(now);
+  osc1.stop(now + 0.15);
+
+  // S2 ("Dub") - 240ms later
+  const s2Time = now + 0.24;
+  const osc2 = ctx.createOscillator();
+  const gain2 = ctx.createGain();
+  const filter2 = ctx.createBiquadFilter();
+  filter2.type = 'lowpass';
+  filter2.frequency.setValueAtTime(135, s2Time);
+
+  osc2.type = 'sine';
+  osc2.frequency.setValueAtTime(80, s2Time);
+  osc2.frequency.exponentialRampToValueAtTime(48, s2Time + 0.10);
+
+  osc2.connect(filter2);
+  filter2.connect(gain2);
+  gain2.connect(ctx.destination);
+
+  gain2.gain.setValueAtTime(0, s2Time);
+  gain2.gain.linearRampToValueAtTime(volume * 1.15, s2Time + 0.018);
+  gain2.gain.exponentialRampToValueAtTime(0.0001, s2Time + 0.12);
+
+  osc2.start(s2Time);
+  osc2.stop(s2Time + 0.13);
+}
 
 // Lazy initialization of the Web Audio API Context
 // This satisfies browser security rules requiring user interaction before audio starts
@@ -325,6 +374,30 @@ export const playSound = {
       });
     } catch (e) {
       console.warn('[Audio Synth] Failed to play opponent strike alarm', e);
+    }
+  },
+
+  // 10. Heartbeat Pulse: Low-frequency anatomical dual thump (lub-dub) repeating every 1.2s when opponent >= 90%
+  startHeartbeat: (enabled = true) => {
+    if (!enabled) return;
+    if (heartbeatTimer) return;
+    try {
+      const ctx = getAudioContext();
+      playSingleHeartbeat(ctx);
+      heartbeatTimer = setInterval(() => {
+        try {
+          playSingleHeartbeat(getAudioContext());
+        } catch (e) {}
+      }, 1200);
+    } catch (e) {
+      console.warn('[Audio Synth] Failed to start heartbeat loop', e);
+    }
+  },
+
+  stopHeartbeat: () => {
+    if (heartbeatTimer) {
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
     }
   }
 };

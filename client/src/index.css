@@ -220,6 +220,19 @@ html.theme-pastel {
     border-radius: 9999px;
     transition: background-color 0.2s;
   }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: var(--accent-color);
+  }
+
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-color) transparent;
+  }
+
+  .scrollbar-thin:hover {
+    scrollbar-color: var(--accent-color) transparent;
+  }
 }
 
 /* Glassmorphism Panels */
@@ -320,3 +333,66 @@ select option {
 .game-status {
   @apply rounded-xl border border-border-custom/60 bg-accent-glow/20 px-3 py-2 text-xs font-semibold text-text-custom;
 }
+
+/* Heartbeat pulse animation strictly for the board border at >= 90% opponent progress */
+@keyframes heartbeatBorder {
+  0% {
+    box-shadow: 0 0 0 0 rgba(244, 63, 94, 0);
+    border-color: rgba(244, 63, 94, 0.4);
+  }
+  14% {
+    box-shadow: 0 0 25px 4px rgba(244, 63, 94, 0.75);
+    border-color: rgba(244, 63, 94, 1);
+  }
+  28% {
+    box-shadow: 0 0 8px 1px rgba(244, 63, 94, 0.25);
+    border-color: rgba(244, 63, 94, 0.5);
+  }
+  42% {
+    box-shadow: 0 0 35px 6px rgba(244, 63, 94, 0.95);
+    border-color: rgba(244, 63, 94, 1);
+  }
+  70% {
+    box-shadow: 0 0 0 0 rgba(244, 63, 94, 0);
+    border-color: rgba(244, 63, 94, 0.35);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(244, 63, 94, 0);
+    border-color: rgba(244, 63, 94, 0.35);
+  }
+}
+
+.heartbeat-border {
+  animation: heartbeatBorder 1.2s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+}
+
+@keyframes slideInUp {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideInDown {
+  from {
+    transform: translateY(-20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.animate-slide-in-up {
+  animation: slideInUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-slide-in-down {
+  animation: slideInDown 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+

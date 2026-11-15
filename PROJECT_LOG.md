@@ -280,7 +280,7 @@ On branch `feature/lofi-audio-and-board-focus`:
   - **Playback Policy:** Opt-in (off by default); plays strictly during active puzzle gameplay (solo, daily challenge, multiplayer races, co-op); automatically pauses when returning home, entering lobby, or pausing game.
 * **Responsive UI Integration:**
   - **Desktop Header:** Added `🎧 Focus Lo-Fi` button with animated live equalizer bars. Clicking opens a popover menu with master toggle, preset switcher (☕ Rainy Cafe, 🌌 Midnight Deep Focus, 📼 Tape Synth Warmth), and volume slider.
-  - **Mobile Ergonomics:** Header remains clean and uncluttered (`hidden md:block`); full Lo-Fi controls are integrated inside the **Player Settings Modal** under a dedicated *"Focus Lo-Fi Soundscape"* card with scrollable modal container (`max-h-[88vh] overflow-y-auto scrollbar-thin`).
+  - **Mobile Ergonomi cs:** Header remains clean and uncluttered (`hidden md:block`); full Lo-Fi controls are integrated inside the **Player Settings Modal** under a dedicated *"Focus Lo-Fi Soundscape"* card with scrollable modal container (`max-h-[88vh] overflow-y-auto scrollbar-thin`).
   - **Preferences Persistence:** Settings persist in `localStorage` under `sudoku_lofi_enabled`, `sudoku_lofi_volume`, and `sudoku_lofi_preset`.
 * **Verification:**
   - Added unit test suite in `client/test/focusAudio.test.js` testing all 3 presets, volume clamping, preset switching, stage mapping (0–30%, 30–70%, 70–100%), and enable/disable toggling.
@@ -327,3 +327,57 @@ On branch `feature/matchmaking-timeout-and-social-rivalry`:
   - Active server restarted on port 3001 with verified WebSocket connectivity.
 * **Remaining limitations:**
   - Live friend presence and real-time activity status require both clients to connect to the same server deployment. Offline players or players across disconnected instances synchronize friend activity upon next reconnect.
+
+## 2026-11-15 · Multi-Peer WebRTC Voice Mesh, Co-op Progress & Synergy, Mobile Slide-Up Chat & Multiplayer Polish
+
+On branch `feature/coop-voice-chat-and-multiplayer-polish`:
+* **Co-op Team Progress & Individual Contribution Tracking:**
+  - Server-side tracking for co-op rooms in `server/src/server.js`:
+    - `room.teamProgress`: tracks overall puzzle completion percentage (0–100%) based on total correct clues / 81 cells.
+    - `room.cellsContributed[playerId]`: tracks individual cells placed by each player, synchronized on every `COOP_MOVE`.
+    - `COOP_BOARD` broadcasts `teamProgress`, `cellsContributed`, and `lastContributorId`.
+  - Co-op matches now track elapsed solve time via `formatTime(seconds)` instead of "Untimed".
+  - Victory complete screen presents a dedicated **🤝 Co-op Team Synergy** card with total percentage solved, individual cell contribution breakdown per teammate, and genuine solve time.
+* **Lobby Room Specs Visibility:**
+  - Added a responsive Room Configuration Specs Bar directly under the Room Code and QR Code in both Home and In-Game lobbies.
+  - Clearly displays chosen Difficulty (e.g. `Medium`, `Expert`), Mode badge (`🤝 Co-op Mode` vs `⚡ Speed Race`), and Ability status (`✨ Abilities ON`).
+* **Responsive Chat Placement (Desktop & Mobile):**
+  - **Desktop:** Placed in the right-hand column room panel; supports quick messages and real-time updates.
+  - **Mobile (< 768px):** Added a floating chat pill button (`bottom-20 right-4 md:hidden`) with an unread message counter badge (`💬 2`).
+  - Clicking opens a slide-up bottom sheet drawer (`max-h-[75vh] animate-slide-in-up`) featuring:
+    - Quick emote preset pills (`GG! 🏆`, `Nice move! 👏`, `Need help! 🆘`, `Close one! ⚡`, `Wait for me! ⏳`)
+    - Full scrollable room message log with theme-styled scrollbars (`.scrollbar-thin`)
+    - Message input form with submit button and auto-scroll to latest messages.
+* **Non-Intrusive Floating Invitation Toast:**
+  - Replaced the blocking full-screen modal with a compact, floating card in the top-right corner (`fixed top-5 right-5 z-50 animate-slide-in-down`).
+  - Shows inviter's avatar and name, room difficulty, game mode, abilities status, and 1-tap Accept / Decline buttons without obscuring the user's ongoing view.
+* **Multi-Peer WebRTC Voice Mesh (3+ Players):**
+  - Upgraded voice channel architecture from 1-to-1 to a full-mesh P2P topology in `useLobbyStore.js`:
+    - `peerConnections: { [peerId]: RTCPeerConnection }` and `remoteAudioStreams: { [peerId]: MediaStream }`.
+    - Deterministic lexicographical offer ordering (`myPlayerId.localeCompare(peerId) < 0`) eliminates offer glare.
+    - Per-peer track listening and dynamic `<audio>` elements for each incoming stream.
+    - Joining, muting, or leaving cleans up only that specific peer connection without dropping or interrupting other active participants.
+* **Pause / Unpause 3-Second Countdown & Exit Button:**
+  - Reduced server-side pause/resume cooldown from 20s to 3s (`PAUSE_COOLDOWN_MS = 3_000`).
+  - When all players agree to unpause, broadcasts `PAUSE_RESUMING` with `countdownSeconds: 3` and initiates a 3-second delay on the server before resuming gameplay.
+  - Animated countdown overlay (`3... 2... 1... Resuming Match...`) covers the board until gameplay resumes.
+  - Pause screen mask now always features an **"Exit Match"** button beside "Resume Game" so players can forfeit or quit if an opponent goes AFK or refuses to unpause.
+  - Cooldown timer starts right when the countdown finishes and gameplay actually resumes.
+* **Social Hub & In-Room Friend Interactions:**
+  - **In-Room Add Friend Button:** In player cards (both lobby and match views), players who are not yet on the user's friends list have a `+ Add Friend` (`<UserPlus size={11} />`) action button.
+  - **In-Match Spectate Button Suppression:** If Player A and Player B are in the same room/match together, Player A sees an `In Match` badge instead of a `Spectate` button next to B in the Friends tab.
+  - **Friend Requests in Friends Tab:** Added pending friend requests block with Accept/Decline actions inside the Friends tab across all views (Home, Lobby, Game), and added a red notification badge (`🔴 {count}`) on the Friends tab button.
+* **Themed Scrollbars & Opponent Climax Heartbeat Warning:**
+  - Chat logs, modal bodies, and mobile drawers use custom themed scrollbar styling (`::-webkit-scrollbar-thumb` using `var(--accent-color)` and `var(--border-color)`).
+  - Opponent finish warning previously scaled the entire board; it now strictly triggers at $\ge 90\%$ opponent progress with a pulsating border animation (`@keyframes heartbeatBorder`) and an anatomical procedural Web Audio API heartbeat loop (`playSound.startHeartbeat`).
+* **Verification:**
+  - Added new integration tests in `server/test/multiplayer.test.js`:
+    - `co-op tracks shared teamProgress and cellsContributed per player`
+    - `pause consensus unpause broadcasts PAUSE_RESUMING with 3s countdown`
+    - `lobby invitation transmits difficulty, coop, and enableAbilities metadata`
+  - Full automated test suite passed all 27/27 tests (`npm test`).
+  - Client production build succeeded with zero errors (`npm run build --prefix client`).
+  - Active server running on port 3001 with WebSocket synchronization.
+* **Remaining limitations:**
+  - Full-mesh WebRTC topology is optimal for rooms with up to 4 players; rooms exceeding 6+ concurrent voice channels would benefit from an SFU (Selective Forwarding Unit) media relay to reduce upstream bandwidth.
+

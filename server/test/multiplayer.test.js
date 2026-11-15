@@ -451,5 +451,64 @@ test('friend status updates broadcast in-lobby, in-game with roomCode, and enabl
   assert.ok(spectatorJoined.room.players.some(p => p.id === watcher.id && p.isSpectator));
 });
 
+test('co-op tracks shared teamProgress and cellsContributed per player', async () => {
+  const { a, b, matchId } = await room({ coop: true });
+
+  // Player a sends valid move
+  a.send('COOP_MOVE', { row: 0, col: 0, digit: 1, matchId });
+  const coopBoard = await a.next('COOP_BOARD');
+  assert.equal(coopBoard.lastContributorId, a.id);
+  assert.ok(coopBoard.teamProgress > 0);
+  assert.equal(coopBoard.cellsContributed[a.id], 1);
+});
+
+test('pause consensus unpause broadcasts PAUSE_RESUMING with 3s countdown', async () => {
+  const { a, b } = await room();
+
+  // Player a requests pause
+  a.send('REQUEST_PAUSE', {});
+  await b.next('PAUSE_REQUESTED');
+
+  // Player b votes to pause -> game pauses
+  b.send('VOTE_PAUSE', { approve: true });
+  const pauseConsensus = await a.next('PAUSE_CONSENSUS');
+  assert.equal(pauseConsensus.isPaused, true);
+
+  // Now Player a requests unpause (resume)
+  a.send('REQUEST_PAUSE', {});
+  await b.next('PAUSE_REQUESTED');
+
+  // Player b votes to unpause -> broadcasts PAUSE_RESUMING with countdownSeconds: 3
+  b.send('VOTE_PAUSE', { approve: true });
+  const resuming = await a.next('PAUSE_RESUMING');
+  assert.equal(resuming.countdownSeconds, 3);
+});
+
+test('lobby invitation transmits difficulty, coop, and enableAbilities metadata', async () => {
+  const host = await client();
+  const guest = await client();
+
+  host.send('CREATE_ROOM', {
+    playerId: host.id,
+    name: 'HostUser',
+    difficulty: 'expert',
+    coop: false,
+    enableAbilities: true
+  });
+  const created = await host.next('ROOM_CREATED');
+  const code = created.room.code;
+
+  // Host invites guest
+  host.send('INVITE_FRIEND_TO_LOBBY', { friendId: guest.id, roomCode: code, inviterName: 'HostUser' });
+  const invitation = await guest.next('LOBBY_INVITATION');
+  assert.equal(invitation.roomCode, code);
+  assert.equal(invitation.inviterName, 'HostUser');
+  assert.equal(invitation.difficulty, 'expert');
+  assert.equal(invitation.coop, false);
+  assert.equal(invitation.enableAbilities, true);
+});
+
+
+
 
 
