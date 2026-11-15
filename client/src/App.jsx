@@ -367,8 +367,8 @@ export default function App() {
 
   const opponentCellsRemaining = anyOpponentClose
     ? (anyOpponentClose.cellsLeft !== undefined
-        ? anyOpponentClose.cellsLeft
-        : Math.max(0, (anyOpponentClose.total || 32) - Math.round(((anyOpponentClose.total || 32) * (anyOpponentClose.progress || 0)) / 100)))
+      ? anyOpponentClose.cellsLeft
+      : Math.max(0, (anyOpponentClose.total || 32) - Math.round(((anyOpponentClose.total || 32) * (anyOpponentClose.progress || 0)) / 100)))
     : null;
 
   const isOpponentClose = Boolean(
@@ -671,9 +671,11 @@ export default function App() {
       !statusInRoom.isSpectator
     ) {
       const lobby = useLobbyStore.getState();
-      const snapshot = { matchId: room.matchId, board, notes, selectedCell, hintsRemaining, mistakes, strikes,
+      const snapshot = {
+        matchId: room.matchId, board, notes, selectedCell, hintsRemaining, mistakes, strikes,
         timeline, elapsedSeconds: seconds, streak: lobby.myStreak, ink: lobby.activeInkSplashes,
-        shieldUntil: lobby.myShieldActive ? lobby.shieldUntil : 0, scrambleUntil: lobby.isScrambled ? lobby.scrambleUntil : 0 };
+        shieldUntil: lobby.myShieldActive ? lobby.shieldUntil : 0, scrambleUntil: lobby.isScrambled ? lobby.scrambleUntil : 0
+      };
       const stateStr = JSON.stringify(snapshot);
       if (lastSentStateRef.current !== stateStr) {
         if (ws && ws.readyState === 1) {
@@ -796,7 +798,7 @@ export default function App() {
           const url = new URL(window.location.href);
           url.searchParams.delete('room');
           window.history.replaceState({}, '', url.pathname + url.search);
-        } catch {}
+        } catch { }
       }
     }
   }, [roomCodeParam, isConnected, ws, room, joinRoom]);
@@ -991,7 +993,7 @@ export default function App() {
   // Reset Timer when starting a new game
   const startNewGame = (diff) => {
     sessionStorage.removeItem("sudoku_challenge");
-    useLobbyStore.setState({challenge: null, challengeScore: null, challengeLink: null});
+    useLobbyStore.setState({ challenge: null, challengeScore: null, challengeLink: null });
     setDailyDate(null);
     setLockedDigit(null);
     setSeconds(0);
@@ -1071,13 +1073,15 @@ export default function App() {
     if (digitFirst && lockedDigit) placeDigit(lockedDigit);
   };
   const shareChallenge = () => {
-    const puzzle = board.map((row,r) => row.map((v,c) => originalCells.has(r + ',' + c) ? v : null));
-    sendRoomCommand('CREATE_CHALLENGE', { puzzle, difficulty, seconds, strikes,
-      hintsUsed: (difficulty === 'expert' ? 1 : difficulty === 'beginner' ? 3 : 2) - hintsRemaining });
+    const puzzle = board.map((row, r) => row.map((v, c) => originalCells.has(r + ',' + c) ? v : null));
+    sendRoomCommand('CREATE_CHALLENGE', {
+      puzzle, difficulty, seconds, strikes,
+      hintsUsed: (difficulty === 'expert' ? 1 : difficulty === 'beginner' ? 3 : 2) - hintsRemaining
+    });
   };
   useEffect(() => {
     if (challenge && gameStatus === "won" && ws?.readyState === 1)
-      ws.send(JSON.stringify({type: "COMPARE_CHALLENGE", payload: {id: challenge.id}}));
+      ws.send(JSON.stringify({ type: "COMPARE_CHALLENGE", payload: { id: challenge.id } }));
   }, [challenge, gameStatus, isConnected, ws]);
   useEffect(() => {
     if (dailyDate && gameStatus === "won") {
@@ -1355,13 +1359,12 @@ export default function App() {
       const hasWon = !hasLeft && !isEliminated && (playerObj?.result === 'won' || (playerObj?.hasFinishedGame && playerObj?.strikes < 3) || playerObj?.progress >= 100);
 
       return (
-        <div className={`relative w-full max-w-[420px] p-1 rounded-2xl ring-2 transition-all duration-300 ${
-          isEliminated
-            ? "ring-rose-500/80 shadow-[0_0_25px_rgba(244,63,94,0.35)] bg-rose-950/20"
-            : hasWon
+        <div className={`relative w-full max-w-[420px] p-1 rounded-2xl ring-2 transition-all duration-300 ${isEliminated
+          ? "ring-rose-500/80 shadow-[0_0_25px_rgba(244,63,94,0.35)] bg-rose-950/20"
+          : hasWon
             ? "ring-amber-500/80 shadow-[0_0_25px_rgba(245,158,11,0.3)] bg-amber-950/20"
             : "ring-border-custom bg-panel-custom/30 shadow-inner"
-        }`}>
+          }`}>
           <SudokuGrid
             board={boardState?.board || Array(9).fill(null).map(() => Array(9).fill(null))}
             selectedCell={boardState?.selectedCell || null}
@@ -1541,19 +1544,18 @@ export default function App() {
                       setSelectedSpectatorPlayerId(p.id);
                       startSpectating(p.id);
                     }}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all shrink-0 flex items-center gap-1.5 ${
-                      isSelected
-                        ? isEliminated
-                          ? "bg-rose-950/60 text-rose-400 border border-rose-500/60 shadow-xs"
-                          : hasWon
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all shrink-0 flex items-center gap-1.5 ${isSelected
+                      ? isEliminated
+                        ? "bg-rose-950/60 text-rose-400 border border-rose-500/60 shadow-xs"
+                        : hasWon
                           ? "bg-amber-950/60 text-amber-400 border border-amber-500/60 shadow-xs"
                           : "bg-panel-custom text-accent-custom shadow-xs border border-border-custom"
-                        : isEliminated
+                      : isEliminated
                         ? "text-rose-400 opacity-70 hover:opacity-100"
                         : hasWon
-                        ? "text-amber-400 opacity-70 hover:opacity-100"
-                        : "opacity-60 hover:opacity-100"
-                    }`}
+                          ? "text-amber-400 opacity-70 hover:opacity-100"
+                          : "opacity-60 hover:opacity-100"
+                      }`}
                   >
                     <span>{isEliminated ? '💀' : hasWon ? '🏆' : '👁️'} {p.name}</span>
                     <span className="text-[10px] opacity-75 tabular-nums">
@@ -1588,8 +1590,8 @@ export default function App() {
                       {playerA?.strikes >= 3 || playerA?.result === 'lost'
                         ? "Eliminated by 3 Strikes"
                         : playerA?.result === 'won' || playerA?.progress >= 100
-                        ? "Completed Board!"
-                        : `Progress: ${playerA ? playerA.progress : 0}% • Lives: ${playerA ? (3 - playerA.strikes) : 0}/3`}
+                          ? "Completed Board!"
+                          : `Progress: ${playerA ? playerA.progress : 0}% • Lives: ${playerA ? (3 - playerA.strikes) : 0}/3`}
                     </p>
                   </div>
                   {renderBoardOnly(spectatedPlayerABoard, playerA)}
@@ -1609,8 +1611,8 @@ export default function App() {
                       {playerB?.strikes >= 3 || playerB?.result === 'lost'
                         ? "Eliminated by 3 Strikes"
                         : playerB?.result === 'won' || playerB?.progress >= 100
-                        ? "Completed Board!"
-                        : `Progress: ${playerB ? playerB.progress : 0}% • Lives: ${playerB ? (3 - playerB.strikes) : 0}/3`}
+                          ? "Completed Board!"
+                          : `Progress: ${playerB ? playerB.progress : 0}% • Lives: ${playerB ? (3 - playerB.strikes) : 0}/3`}
                     </p>
                   </div>
                   {renderBoardOnly(spectatedPlayerBBoard, playerB)}
@@ -1642,8 +1644,8 @@ export default function App() {
                           {isEliminated
                             ? "Eliminated by 3 Strikes"
                             : hasWon
-                            ? "Completed Board!"
-                            : `${currentP?.progress}% • ${currentP?.cellsLeft !== undefined ? `${currentP?.cellsLeft}/${currentP?.total || 32} left` : ''} • Lives: ${currentP ? (3 - currentP.strikes) : 0}/3`}
+                              ? "Completed Board!"
+                              : `${currentP?.progress}% • ${currentP?.cellsLeft !== undefined ? `${currentP?.cellsLeft}/${currentP?.total || 32} left` : ''} • Lives: ${currentP ? (3 - currentP.strikes) : 0}/3`}
                         </p>
                       </div>
                       {renderBoardOnly(currentBoard, currentP)}
@@ -1702,11 +1704,10 @@ export default function App() {
         {!focus && activeReactions.map((r) => (
           <div
             key={r.id}
-            className={`px-3 py-1.5 rounded-full text-xs font-bold shadow-lg backdrop-blur-md border animate-scale-in flex items-center gap-1.5 ${
-              r.isSpectator
-                ? "bg-slate-900/95 text-emerald-400 border-emerald-500/40"
-                : "bg-slate-900/95 text-accent-custom border-accent-custom/40"
-            }`}
+            className={`px-3 py-1.5 rounded-full text-xs font-bold shadow-lg backdrop-blur-md border animate-scale-in flex items-center gap-1.5 ${r.isSpectator
+              ? "bg-slate-900/95 text-emerald-400 border-emerald-500/40"
+              : "bg-slate-900/95 text-accent-custom border-accent-custom/40"
+              }`}
           >
             {r.isSpectator && <span title="Spectator Reaction">👁️</span>}
             <span className="opacity-75">{r.name || "Opponent"}:</span>
@@ -1870,20 +1871,19 @@ export default function App() {
               />
               <div className="flex items-center gap-1.5">
                 <div
-                  className={`w-1.5 h-1.5 rounded-full ${
-                    connectionState === "connected" || isConnected
-                      ? "bg-emerald-500 animate-pulse"
-                      : connectionState === "connecting"
+                  className={`w-1.5 h-1.5 rounded-full ${connectionState === "connected" || isConnected
+                    ? "bg-emerald-500 animate-pulse"
+                    : connectionState === "connecting"
                       ? "bg-amber-500 animate-pulse"
                       : "bg-rose-500"
-                  }`}
+                    }`}
                 ></div>
                 <span className="text-[9px] font-semibold opacity-65">
                   {connectionState === "connected" || isConnected
                     ? `Online (${elo} ELO)`
                     : connectionState === "connecting"
-                    ? "Connecting..."
-                    : "Offline"}
+                      ? "Connecting..."
+                      : "Offline"}
                 </span>
                 {isSavingUsername && (
                   <RefreshCw size={10} className="animate-spin text-accent-custom ml-1 shrink-0" />
@@ -2213,7 +2213,7 @@ export default function App() {
               {room && Object.values(room.playAgainVotes || {}).some(Boolean) && <p className="game-status" role="status">
                 {room.players.filter(p => room.playAgainVotes[p.id]).map(p => p.name).join(", ")} requested a rematch.
               </p>}
-              {room?.isGameStarted && stayedMatch === room.matchId && activeOpponent && <button className="game-action" onClick={() => {startSpectating(activeOpponent.id); setActiveView("game");}}>Spectate {activeOpponent.name}</button>}
+              {room?.isGameStarted && stayedMatch === room.matchId && activeOpponent && <button className="game-action" onClick={() => { startSpectating(activeOpponent.id); setActiveView("game"); }}>Spectate {activeOpponent.name}</button>}
               {room?.isGameStarted && bothFinished && <button className="game-action" onClick={() => votePlayAgain(true)}>Rematch</button>}
               {/* Lobby Tab */}
               {activeTab === "lobby" && (
@@ -2279,11 +2279,10 @@ export default function App() {
                               key={diff}
                               type="button"
                               onClick={() => setSelectedDifficulty(diff)}
-                              className={`py-2 px-1 text-[11px] font-bold rounded-xl capitalize transition-all active:scale-95 cursor-pointer ${
-                                selectedDifficulty === diff
-                                  ? "bg-accent-custom text-white shadow-xs"
-                                  : "bg-accent-glow hover:bg-accent-glow/70 text-text-custom border border-border-custom/50"
-                              }`}
+                              className={`py-2 px-1 text-[11px] font-bold rounded-xl capitalize transition-all active:scale-95 cursor-pointer ${selectedDifficulty === diff
+                                ? "bg-accent-custom text-white shadow-xs"
+                                : "bg-accent-glow hover:bg-accent-glow/70 text-text-custom border border-border-custom/50"
+                                }`}
                             >
                               {diff}
                             </button>
@@ -2641,11 +2640,10 @@ export default function App() {
                             <button
                               disabled={room.isGameStarted}
                               onClick={toggleReady}
-                              className={`w-full py-3 rounded-xl font-bold text-sm shadow-md transition-all active:scale-[0.98] ${
-                                myStatusInRoom?.isReady
-                                  ? "bg-amber-600 hover:bg-amber-500 text-white"
-                                  : "bg-accent-custom hover:bg-accent-hover text-white"
-                              }`}
+                              className={`w-full py-3 rounded-xl font-bold text-sm shadow-md transition-all active:scale-[0.98] ${myStatusInRoom?.isReady
+                                ? "bg-amber-600 hover:bg-amber-500 text-white"
+                                : "bg-accent-custom hover:bg-accent-hover text-white"
+                                }`}
                             >
                               {myStatusInRoom?.isReady ? "Unready" : "Ready"}
                             </button>
@@ -3047,11 +3045,10 @@ export default function App() {
                     <div className="relative">
                       <button
                         onClick={() => setShowEmoteMenu((prev) => !prev)}
-                        className={`p-1 rounded-lg border text-text-custom transition-all active:scale-95 ${
-                          showEmoteMenu
-                            ? "bg-accent-custom text-white border-accent-custom"
-                            : "bg-accent-glow border-border-custom hover:border-accent-custom"
-                        }`}
+                        className={`p-1 rounded-lg border text-text-custom transition-all active:scale-95 ${showEmoteMenu
+                          ? "bg-accent-custom text-white border-accent-custom"
+                          : "bg-accent-glow border-border-custom hover:border-accent-custom"
+                          }`}
                         title="Quick Reactions & Chat"
                       >
                         <Smile size={11} className={showEmoteMenu ? "text-white" : "text-accent-custom"} />
@@ -3200,13 +3197,12 @@ export default function App() {
                   <div className="flex-1 flex items-center gap-2 min-w-0 px-1">
                     <div className="flex-1 bg-accent-glow/50 h-2 rounded-full overflow-hidden relative">
                       <div
-                        className={`h-full rounded-full transition-all duration-300 ${
-                          activeOpponent.progress >= 85
-                            ? "bg-rose-500 animate-pulse shadow-[0_0_10px_rgba(244,63,94,0.8)]"
-                            : activeOpponent.progress >= 60
+                        className={`h-full rounded-full transition-all duration-300 ${activeOpponent.progress >= 85
+                          ? "bg-rose-500 animate-pulse shadow-[0_0_10px_rgba(244,63,94,0.8)]"
+                          : activeOpponent.progress >= 60
                             ? "bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]"
                             : "bg-accent-custom"
-                        }`}
+                          }`}
                         style={{ width: `${activeOpponent.progress}%` }}
                       />
                     </div>
@@ -3327,19 +3323,18 @@ export default function App() {
 
               {/* Sudoku Board Grid Wrapper with active spectator outline and spectator eye count badge */}
               <div
-                className={`relative w-full max-w-[460px] p-1 rounded-2xl transition-all duration-500 ${
-                  isOpponentClose
-                    ? "ring-4 ring-rose-500 shadow-[0_0_35px_rgba(244,63,94,0.5)] animate-pulse"
-                    : isOpponentWarning
+                className={`relative w-full max-w-[460px] p-1 rounded-2xl transition-all duration-500 ${isOpponentClose
+                  ? "ring-4 ring-rose-500 shadow-[0_0_35px_rgba(244,63,94,0.5)] animate-pulse"
+                  : isOpponentWarning
                     ? "ring-4 ring-amber-500/70 shadow-[0_0_20px_rgba(245,158,11,0.3)]"
                     : spectatingPlayerId
-                    ? hasSpectatedPlayerLeft
-                      ? "ring-4 ring-zinc-500/20 bg-zinc-500/5"
-                      : "ring-4 ring-rose-500/30 bg-rose-500/5"
-                    : (myActiveSpectators || []).length > 0
-                    ? "ring-4 ring-emerald-500/30 bg-emerald-500/5"
-                    : ""
-                }`}
+                      ? hasSpectatedPlayerLeft
+                        ? "ring-4 ring-zinc-500/20 bg-zinc-500/5"
+                        : "ring-4 ring-rose-500/30 bg-rose-500/5"
+                      : (myActiveSpectators || []).length > 0
+                        ? "ring-4 ring-emerald-500/30 bg-emerald-500/5"
+                        : ""
+                  }`}
               >
                 {/* Active Spectator Eye Badge inside corner of the grid */}
                 {(myActiveSpectators || []).length > 0 && !spectatingPlayerId && (
@@ -3535,7 +3530,7 @@ export default function App() {
 
               {!isMeSpectator && !spectatingPlayerId && <div className="board-tools">
                 <span className="mr-auto text-[10px] font-semibold text-text-custom/70 tabular-nums">{filled} of {total} filled</span>
-                {room?.coop && selectedCell && <button className="game-tool" onClick={() => sendRoomCommand('COOP_POINT', {row:selectedCell[0], col:selectedCell[1]})}>Point to cell</button>}
+                {room?.coop && selectedCell && <button className="game-tool" onClick={() => sendRoomCommand('COOP_POINT', { row: selectedCell[0], col: selectedCell[1] })}>Point to cell</button>}
               </div>}
               {/* Keypad selector */}
               <Keypad
@@ -3547,7 +3542,7 @@ export default function App() {
                 onActionClick={
                   spectatingPlayerId || isMeSpectator ? () => { } : handleAction
                 }
-                onLock={num => {setDigitFirst(true); setLockedDigit(num);}} coop={room?.coop} lockedDigit={digitFirst ? lockedDigit : null}
+                onLock={num => { setDigitFirst(true); setLockedDigit(num); }} coop={room?.coop} lockedDigit={digitFirst ? lockedDigit : null}
                 notesMode={notesMode}
                 canUndo={history.length > 0}
                 canRedo={redoStack.length > 0}
@@ -3664,11 +3659,10 @@ export default function App() {
                                     key={diff}
                                     type="button"
                                     onClick={() => setSelectedDifficulty(diff)}
-                                    className={`py-2 px-1 text-[11px] font-bold rounded-xl capitalize transition-all active:scale-95 cursor-pointer ${
-                                      selectedDifficulty === diff
-                                        ? "bg-accent-custom text-white shadow-xs"
-                                        : "bg-accent-glow hover:bg-accent-glow/70 text-text-custom border border-border-custom/50"
-                                    }`}
+                                    className={`py-2 px-1 text-[11px] font-bold rounded-xl capitalize transition-all active:scale-95 cursor-pointer ${selectedDifficulty === diff
+                                      ? "bg-accent-custom text-white shadow-xs"
+                                      : "bg-accent-glow hover:bg-accent-glow/70 text-text-custom border border-border-custom/50"
+                                      }`}
                                   >
                                     {diff}
                                   </button>
@@ -3894,8 +3888,8 @@ export default function App() {
                                           const cellsDisplay = isMe
                                             ? `${myCellsLeft}/${total || 32} left`
                                             : p.cellsLeft !== undefined
-                                            ? `${p.cellsLeft}/${p.total || 32} left`
-                                            : `${Math.max(0, (p.total || 32) - Math.round(((p.total || 32) * p.progress) / 100))}/${p.total || 32} left`;
+                                              ? `${p.cellsLeft}/${p.total || 32} left`
+                                              : `${Math.max(0, (p.total || 32) - Math.round(((p.total || 32) * p.progress) / 100))}/${p.total || 32} left`;
                                           return (
                                             <>
                                               <div className="flex items-center justify-between text-[10px] mb-1 font-semibold opacity-85">
@@ -3906,13 +3900,12 @@ export default function App() {
                                               </div>
                                               <div className="w-full bg-accent-glow/50 h-1.5 rounded-full overflow-hidden">
                                                 <div
-                                                  className={`h-full rounded-full transition-all duration-300 ${
-                                                    prog >= 85
-                                                      ? "bg-rose-500 animate-pulse shadow-[0_0_8px_rgba(244,63,94,0.7)]"
-                                                      : prog >= 60
+                                                  className={`h-full rounded-full transition-all duration-300 ${prog >= 85
+                                                    ? "bg-rose-500 animate-pulse shadow-[0_0_8px_rgba(244,63,94,0.7)]"
+                                                    : prog >= 60
                                                       ? "bg-amber-500"
                                                       : "bg-accent-custom"
-                                                  }`}
+                                                    }`}
                                                   style={{
                                                     width: `${prog}%`,
                                                   }}
@@ -4118,11 +4111,10 @@ export default function App() {
                                     <button
                                       disabled={room.isGameStarted}
                                       onClick={toggleReady}
-                                      className={`w-full py-3 rounded-xl font-bold text-sm shadow-md transition-all active:scale-[0.98] ${
-                                        myStatusInRoom?.isReady
-                                          ? "bg-amber-600 hover:bg-amber-500 text-white"
-                                          : "bg-accent-custom hover:bg-accent-hover text-white"
-                                      }`}
+                                      className={`w-full py-3 rounded-xl font-bold text-sm shadow-md transition-all active:scale-[0.98] ${myStatusInRoom?.isReady
+                                        ? "bg-amber-600 hover:bg-amber-500 text-white"
+                                        : "bg-accent-custom hover:bg-accent-hover text-white"
+                                        }`}
                                     >
                                       {myStatusInRoom?.isReady ? "Unready" : "Ready"}
                                     </button>
@@ -4647,7 +4639,7 @@ export default function App() {
             {room && Object.values(room.playAgainVotes || {}).some(Boolean) && <p className="game-status" role="status">
               {room.players.filter(p => room.playAgainVotes[p.id]).map(p => p.name).join(", ")} requested a rematch.
             </p>}
-            {room && <button className="game-action" onClick={() => {setStayedMatch(room.matchId); setActiveView("home");}}>Stay in room</button>}
+            {room && <button className="game-action" onClick={() => { setStayedMatch(room.matchId); setActiveView("home"); }}>Stay in room</button>}
             {isMultiplayer && bothFinished && (
               <button
                 onClick={() => {
@@ -4802,7 +4794,7 @@ export default function App() {
             {room && Object.values(room.playAgainVotes || {}).some(Boolean) && <p className="game-status" role="status">
               {room.players.filter(p => room.playAgainVotes[p.id]).map(p => p.name).join(", ")} requested a rematch.
             </p>}
-            {room && <button className="game-action" onClick={() => {setStayedMatch(room.matchId); setActiveView("home");}}>Stay in room</button>}
+            {room && <button className="game-action" onClick={() => { setStayedMatch(room.matchId); setActiveView("home"); }}>Stay in room</button>}
             {isMultiplayer && bothFinished && (
               <button
                 onClick={() => {
@@ -4998,7 +4990,7 @@ export default function App() {
             <div className="space-y-4">
               <label className="flex items-center gap-3 rounded-xl border border-border-custom bg-accent-glow/20 px-3 py-2 text-left cursor-pointer"><input className="size-4 accent-accent-custom" type="checkbox" checked={focus} onChange={e => {
                 setFocus(e.target.checked); localStorage.setItem("sudoku_focus", e.target.checked);
-              }}/><span><span className="block text-xs font-bold text-text-custom">Focus mode</span><span className="block text-[10px] text-text-custom/70">Mute opponent sounds and hide emotes and streak notices.</span></span></label>
+              }} /><span><span className="block text-xs font-bold text-text-custom">Focus mode</span><span className="block text-[10px] text-text-custom/70">Mute opponent sounds and hide emotes and streak notices.</span></span></label>
               <label className="flex items-center gap-3 rounded-xl border border-border-custom bg-accent-glow/20 px-3 py-2 text-left cursor-pointer">
                 <input className="size-4 accent-accent-custom" type="checkbox" checked={digitFirst}
                   onChange={event => { setDigitFirst(event.target.checked); setLockedDigit(null); }} />
