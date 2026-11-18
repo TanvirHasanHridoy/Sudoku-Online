@@ -2,12 +2,14 @@ import { useState } from "react";
 import {
   Users,
   Trophy,
+  Clock,
   UserPlus,
   RefreshCw,
   Check,
   X,
   Eye,
 } from "lucide-react";
+import { AVATARS } from "../layout";
 import { useSocialStore } from "../../store/useSocialStore";
 import { useLobbyStore } from "../../store/useLobbyStore";
 import { useGameStore } from "../../store/useGameStore";
@@ -81,15 +83,33 @@ export default function HomeSocialPanel({
   const inviteFriend = propInviteFriend || lobbyStore.inviteFriend || (() => {});
   const joinRoom = propJoinRoom || lobbyStore.joinRoom || (() => {});
 
+  const recentPlayers = socialStore.recentPlayers || [];
+  const sentFriendRequests = socialStore.sentFriendRequests || new Set();
+  const [requestingFriends, setRequestingFriends] = useState(new Set());
+
+  const handleAddRecentFriend = async (p) => {
+    if (!p || !p.name) return;
+    setRequestingFriends((prev) => new Set(prev).add(p.name));
+    try {
+      await socialStore.addFriend(p.name);
+    } finally {
+      setRequestingFriends((prev) => {
+        const next = new Set(prev);
+        next.delete(p.name);
+        return next;
+      });
+    }
+  };
+
   return (
     <section className="lg:col-span-3 flex flex-col gap-6">
       <div className="glass-card rounded-2xl p-5">
-        {/* Tab Selector: Friends vs Rivalries */}
+        {/* Tab Selector: Friends vs Rivalries vs Recent */}
         <div className="flex items-center gap-1 p-1 bg-accent-glow/20 rounded-xl mb-3 border border-border-custom/30">
           <button
             type="button"
             onClick={() => setSocialDrawerTab("friends")}
-            className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer font-sans ${socialDrawerTab === "friends"
+            className={`flex-1 py-1.5 px-1.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1 cursor-pointer font-sans ${socialDrawerTab === "friends"
               ? "bg-accent-custom text-white shadow-xs"
               : "opacity-60 hover:opacity-100 text-text-custom"
               }`}
@@ -108,7 +128,7 @@ export default function HomeSocialPanel({
               setSocialDrawerTab("rivalries");
               fetchRivalries();
             }}
-            className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer font-sans ${socialDrawerTab === "rivalries"
+            className={`flex-1 py-1.5 px-1.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1 cursor-pointer font-sans ${socialDrawerTab === "rivalries"
               ? "bg-accent-custom text-white shadow-xs"
               : "opacity-60 hover:opacity-100 text-text-custom"
               }`}
@@ -116,9 +136,20 @@ export default function HomeSocialPanel({
             <Trophy size={12} />
             <span>Rivalries ({rivalries.length})</span>
           </button>
+          <button
+            type="button"
+            onClick={() => setSocialDrawerTab("recent")}
+            className={`flex-1 py-1.5 px-1.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1 cursor-pointer font-sans ${socialDrawerTab === "recent"
+              ? "bg-accent-custom text-white shadow-xs"
+              : "opacity-60 hover:opacity-100 text-text-custom"
+              }`}
+          >
+            <Clock size={12} />
+            <span>Recent ({recentPlayers.length})</span>
+          </button>
         </div>
 
-        {socialDrawerTab === "friends" ? (
+        {socialDrawerTab === "friends" && (
           <>
             <form
               onSubmit={handleAddFriendSubmit}
@@ -308,8 +339,10 @@ export default function HomeSocialPanel({
               )}
             </div>
           </>
-        ) : (
-          /* Rivalries Tab Content */
+        )}
+
+        {/* Rivalries Tab Content */}
+        {socialDrawerTab === "rivalries" && (
           <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
             {rivalries.length === 0 ? (
               <div className="text-center py-6 px-2">
@@ -346,6 +379,80 @@ export default function HomeSocialPanel({
                   </div>
                 </div>
               ))
+            )}
+          </div>
+        )}
+
+        {/* Recent Tab Content */}
+        {socialDrawerTab === "recent" && (
+          <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1 scrollbar-thin">
+            {recentPlayers.length === 0 ? (
+              <div className="text-center py-6 px-2">
+                <Clock size={24} className="mx-auto mb-2 opacity-30 text-accent-custom" />
+                <p className="text-xs font-semibold opacity-75">No Recent Players</p>
+                <p className="text-[10px] opacity-50 mt-1">
+                  Play multiplayer or 1v1 matches to meet new opponents!
+                </p>
+              </div>
+            ) : (
+              recentPlayers.map((p) => {
+                const isSent =
+                  sentFriendRequests.has(p.name?.toLowerCase()) ||
+                  sentFriendRequests.has(String(p.id).toLowerCase());
+                const avatarObj = AVATARS.find((a) => a.id === p.avatar);
+
+                return (
+                  <div
+                    key={p.id}
+                    className="flex items-center justify-between p-2 rounded-xl border border-border-custom/30 bg-accent-glow/15 gap-2 text-xs"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className="w-6 h-6 rounded-full bg-accent-glow border border-border-custom flex items-center justify-center font-bold text-[9px] overflow-hidden shrink-0">
+                        {avatarObj ? (
+                          <img
+                            src={avatarObj.src}
+                            alt="Avatar"
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          p.name?.charAt(0)?.toUpperCase() || "P"
+                        )}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="font-bold truncate text-[11px] leading-tight text-text-custom">
+                          {p.name}
+                        </p>
+                        <p className="text-[9px] opacity-60">{p.elo || 1450} ELO</p>
+                      </div>
+                    </div>
+
+                    <div className="shrink-0">
+                      {isSent ? (
+                        <span className="px-2 py-0.5 rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-bold text-[10px] flex items-center gap-1 animate-scale-in">
+                          <Check size={11} /> Sent ✓
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleAddRecentFriend(p)}
+                          disabled={requestingFriends.has(p.name)}
+                          className="px-2.5 py-1 rounded-lg bg-accent-custom hover:bg-accent-hover text-white font-bold text-[10px] flex items-center gap-1 active:scale-95 transition-all shadow-xs cursor-pointer disabled:opacity-50"
+                          title={`Add ${p.name} as friend`}
+                        >
+                          {requestingFriends.has(p.name) ? (
+                            <RefreshCw size={10} className="animate-spin" />
+                          ) : (
+                            <>
+                              <UserPlus size={11} />
+                              <span>Add</span>
+                            </>
+                          )}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
             )}
           </div>
         )}

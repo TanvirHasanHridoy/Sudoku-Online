@@ -184,8 +184,30 @@ export const useLobbyStore = create((set, get) => ({
     set({ ws: socket }); // Store immediately to prevent duplicate connections!
 
     socket.onopen = async () => {
+      // Check if URL contains an invite room code
+      let urlRoomCode = '';
+      try {
+        if (typeof window !== 'undefined') {
+          const params = new URLSearchParams(window.location.search);
+          urlRoomCode = params.get('room') || '';
+          if (!urlRoomCode && window.location.hash) {
+            const hashParams = new URLSearchParams(window.location.hash.replace(/^#\/?/, ''));
+            urlRoomCode = hashParams.get('room') || '';
+          }
+          urlRoomCode = urlRoomCode.replace(/\D/g, '').slice(0, 6);
+        }
+      } catch { }
+
+      // If URL has a specific room code, remove conflicting cached room code
+      if (urlRoomCode && urlRoomCode.length === 6) {
+        const cached = localStorage.getItem('sudoku_active_room_code');
+        if (cached && cached !== urlRoomCode) {
+          localStorage.removeItem('sudoku_active_room_code');
+        }
+      }
+
       set({ 
-        isConnected: !localStorage.getItem("sudoku_active_room_code"),
+        isConnected: true,
         connectionState: 'connected'
       });
       get().addToast('Connected to competitive lobby server!', 'success');
@@ -210,12 +232,17 @@ export const useLobbyStore = create((set, get) => ({
         console.error('Failed to register player on connection open', err);
       }
 
-      // Auto-reconnect if there's a cached active room code
-      const activeRoomCode = localStorage.getItem('sudoku_active_room_code');
-      if (activeRoomCode) {
-        console.log(`[Auto Reconnect] Restoring multiplayer session for Room: ${activeRoomCode}`);
-        get().joinRoom(activeRoomCode);
-      } else set({isConnected:true, localReconnectBy:null, connectionState: 'connected'});
+      // Auto-reconnect or join URL room code
+      const targetRoomCode = (urlRoomCode && urlRoomCode.length === 6)
+        ? urlRoomCode
+        : localStorage.getItem('sudoku_active_room_code');
+
+      if (targetRoomCode) {
+        console.log(`[Auto Join/Reconnect] Joining multiplayer Room: ${targetRoomCode}`);
+        get().joinRoom(targetRoomCode);
+      } else {
+        set({ isConnected: true, localReconnectBy: null, connectionState: 'connected' });
+      }
     };
 
     socket.onmessage = (event) => {
@@ -550,8 +577,36 @@ export const useLobbyStore = create((set, get) => ({
           }
 
           case 'ROOM_UPDATED': {
+            const prevPlayers = get().room?.players || [];
+            const updatedRoom = payload.room;
+            const newPlayers = updatedRoom?.players || [];
+
+            // Audio cues for player join/leave
+            if (prevPlayers.length > 0 && newPlayers.length > prevPlayers.length) {
+              const hasNewPlayer = newPlayers.some(np => np.id !== get().myPlayerId && !prevPlayers.some(op => op.id === np.id));
+              if (hasNewPlayer) {
+                playSound.playerJoin(get().sfxEnabled);
+              }
+            } else if (prevPlayers.length > 0 && newPlayers.length < prevPlayers.length) {
+              const hasDepartedPlayer = prevPlayers.some(op => op.id !== get().myPlayerId && !newPlayers.some(np => np.id === op.id));
+              if (hasDepartedPlayer) {
+                playSound.playerLeave(get().sfxEnabled);
+              }
+            }
+
+            // Record unknown players to Recent tab
+            import('./useSocialStore').then(({ useSocialStore }) => {
+              const addRecent = useSocialStore.getState().addRecentPlayer;
+              if (addRecent) {
+                newPlayers.forEach((p) => {
+                  if (p && p.id !== get().myPlayerId) {
+                    addRecent(p);
+                  }
+                });
+              }
+            }).catch(() => {});
+
             set((state) => {
-              const updatedRoom = payload.room;
               const activeSpectatorNames = (updatedRoom?.players || [])
                 .filter(p => p.isSpectator)
                 .map(p => p.name);
@@ -751,6 +806,7 @@ export const useLobbyStore = create((set, get) => ({
 
           case 'PLAYER_LEFT': {
             // Another player explicitly exited the game
+            playSound.playerLeave(get().sfxEnabled);
             const { name: leaverName, playerId: leaverId } = payload;
             if (leaverId === get().spectatingPlayerId) {
               get().addToast(`🚪 Player you were spectating (${leaverName}) has left the game!`, 'error');
@@ -1276,16 +1332,7 @@ export const useLobbyStore = create((set, get) => ({
       timestamp: Date.now()
     };
     set(state => ({ chatMessages: [...(state.chatMessages || []).slice(-49), selfMessage] }));
-    const callback = get().emoteCallback;
-    if (callback) {
-      callback({
-        playerId: myPlayerId,
-        name: myPlayerName || 'You',
-        isSpectator: !!myStatus?.isSpectator,
-        emoji: clean,
-        text: clean
-      });
-    }
+    // Do not trigger local emoteCallback for sender so sender does not see duplicate toast
   },
 
   requestPause: () => {
@@ -1364,6 +1411,31 @@ export const useLobbyStore = create((set, get) => ({
       type: 'KICK_PLAYER',
       payload: { playerId }
     }));
+  },
+
+  forfeitMatch: () => {
+    const { ws, isConnected, room } = get();
+    if (ws && isConnected && ws.readyState === 1 && room) {
+      ws.send(JSON.stringify({
+        type: 'FORFEIT_MATCH',
+        payload: {}
+      }));
+    }
+  },
+
+  returnToRoomLobby: () => {
+    const { room, forfeitMatch } = get();
+    if (!room) {
+      get().exitToHome();
+      return;
+    }
+    const myPlayerId = get().myPlayerId;
+    const me = room.players?.find(p => p.id === myPlayerId);
+    if (room.isGameStarted && me && !me.hasFinishedGame && !me.isSpectator) {
+      forfeitMatch();
+    }
+    useGameStore.getState().resetPersistedState();
+    useGameStore.setState({ gameStatus: 'idle' });
   },
 
   exitToHome: (onHome) => {

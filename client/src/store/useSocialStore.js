@@ -33,6 +33,48 @@ export const useSocialStore = create((set, get) => ({
       return [];
     }
   })(),
+  recentPlayers: (() => {
+    try {
+      const saved = localStorage.getItem('sudoku_recent_players');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  })(),
+  sentFriendRequests: new Set(),
+  addRecentPlayer: (player) => {
+    if (!player || !player.id) return;
+    const { friends, recentPlayers } = get();
+    const myId = useLobbyStore.getState().myPlayerId;
+    const myName = useLobbyStore.getState().myPlayerName;
+    if (player.id === myId || (player.name && player.name.toLowerCase() === myName?.toLowerCase())) return;
+    if (friends.some(f => f.id === player.id || (f.name && f.name.toLowerCase() === player.name?.toLowerCase()))) return;
+
+    const filtered = recentPlayers.filter(p => p.id !== player.id && p.name?.toLowerCase() !== player.name?.toLowerCase());
+    const updated = [
+      {
+        id: player.id,
+        name: player.name || 'Player',
+        avatar: player.avatar || 1,
+        elo: player.elo || 1450,
+        timestamp: Date.now()
+      },
+      ...filtered
+    ].slice(0, 10);
+
+    set({ recentPlayers: updated });
+    try {
+      localStorage.setItem('sudoku_recent_players', JSON.stringify(updated));
+    } catch {}
+  },
+  markFriendRequestSent: (identifier) => {
+    if (!identifier) return;
+    set((state) => {
+      const next = new Set(state.sentFriendRequests);
+      next.add(String(identifier).toLowerCase());
+      return { sentFriendRequests: next };
+    });
+  },
   setShowMatchmakingTimeoutModal: (val) => set({ showMatchmakingTimeoutModal: !!val }),
   leaderboard: [],
   loadingLeaderboard: false,
@@ -217,7 +259,10 @@ export const useSocialStore = create((set, get) => ({
         }
 
         console.log('[Social] Setting friends list:', loadedFriends.length, 'friend(s),', loadedRequests.length, 'request(s)');
-        set({ friends: loadedFriends, friendRequests: loadedRequests });
+        const cleanedRecent = get().recentPlayers.filter(
+          p => !loadedFriends.some(f => f.id === p.id || (f.name && f.name.toLowerCase() === p.name?.toLowerCase()))
+        );
+        set({ friends: loadedFriends, friendRequests: loadedRequests, recentPlayers: cleanedRecent });
 
         // Cache the resolved friends list in localStorage under the user's ID
         const cacheKey = myId ? `sudoku_friends_${myId}` : 'sudoku_friends';
@@ -313,6 +358,9 @@ export const useSocialStore = create((set, get) => ({
 
         if (insertError) throw insertError;
 
+        get().markFriendRequestSent(trimmedName);
+        if (targetProfile?.id) get().markFriendRequestSent(targetProfile.id);
+
         if (lobbyStore.ws && lobbyStore.isConnected && lobbyStore.ws.readyState === 1) {
           lobbyStore.ws.send(JSON.stringify({
             type: 'SEND_FRIEND_REQUEST',
@@ -355,6 +403,8 @@ export const useSocialStore = create((set, get) => ({
           console.warn('Guest profile check error:', err);
         }
       }
+
+      get().markFriendRequestSent(trimmedName);
 
       if (lobbyStore.ws && lobbyStore.isConnected && lobbyStore.ws.readyState === 1) {
         lobbyStore.ws.send(JSON.stringify({

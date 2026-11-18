@@ -243,6 +243,23 @@ export default function InGameSidebars({
     ? propAllPlayersReady
     : (activePlayers.length > 1 && activePlayers.every((p) => p.id === room?.hostId || p.isReady));
 
+  const sentFriendRequests = socialStore.sentFriendRequests || new Set();
+  const [requestingFriends, setRequestingFriends] = useState(new Set());
+
+  const handleAddFriend = async (name) => {
+    if (!name) return;
+    setRequestingFriends((prev) => new Set(prev).add(name));
+    try {
+      await socialStore.addFriend(name);
+    } finally {
+      setRequestingFriends((prev) => {
+        const next = new Set(prev);
+        next.delete(name);
+        return next;
+      });
+    }
+  };
+
   const matchmakingStatus = propMatchmakingStatus !== undefined
     ? propMatchmakingStatus
     : (lobbyStore.matchmakingStatus || "idle");
@@ -608,6 +625,33 @@ export default function InGameSidebars({
                                     </div>
                                   ) : (
                                     <>
+                                      {!isMe && !friends.some((f) => f.id === p.id || (f.name && f.name.toLowerCase() === p.name?.toLowerCase())) && (
+                                        sentFriendRequests.has(p.name?.toLowerCase()) || sentFriendRequests.has(String(p.id).toLowerCase()) ? (
+                                          <span
+                                            className="px-1.5 py-0.5 rounded-md bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-bold text-[9px] flex items-center gap-0.5 animate-scale-in mr-1"
+                                            title="Friend Request Sent"
+                                          >
+                                            <Check size={9} /> Sent
+                                          </span>
+                                        ) : (
+                                          <button
+                                            type="button"
+                                            onClick={() => handleAddFriend(p.name)}
+                                            disabled={requestingFriends.has(p.name)}
+                                            className="px-1.5 py-0.5 rounded-md bg-accent-glow hover:bg-accent-custom hover:text-white text-text-custom/80 text-[9px] font-bold border border-border-custom/50 transition-all active:scale-95 cursor-pointer disabled:opacity-50 flex items-center gap-0.5 mr-1"
+                                            title={`Add ${p.name} as friend`}
+                                          >
+                                            {requestingFriends.has(p.name) ? (
+                                              <RefreshCw size={8} className="animate-spin" />
+                                            ) : (
+                                              <>
+                                                <UserPlus size={9} />
+                                                <span>Add</span>
+                                              </>
+                                            )}
+                                          </button>
+                                        )
+                                      )}
                                       {isHost && !isMe && (
                                         <button
                                           onClick={() => kickPlayer(p.id)}

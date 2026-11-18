@@ -609,6 +609,34 @@ test('multiplayer spectator target switching alerts old and new targets and send
   assert.deepEqual(syncedB.notes, { '0,1': [2] });
 });
 
+test('player forfeits match: stays in room, receives -15 ELO penalty, and opponent receives leaver bonus', async () => {
+  const { a, b } = await room();
+  a.messages.length = 0;
+  b.messages.length = 0;
+
+  // Player B forfeits the match
+  b.send('FORFEIT_MATCH');
+
+  // Player A receives GAME_OVER_LEAVER with forfeit bonus
+  const gameOver = await a.next('GAME_OVER_LEAVER');
+  assert.equal(gameOver.winnerId, a.id);
+  assert.equal(gameOver.leaverId, b.id);
+  assert.equal(gameOver.eloAdjustment, 15);
+
+  // Both receive ROOM_UPDATED where Player B hasFinishedGame === true and is STILL in room.players
+  const updatedA = await a.next('ROOM_UPDATED');
+  assert.equal(updatedA.room.players.length, 2);
+  const playerBInRoom = updatedA.room.players.find(p => p.id === b.id);
+  assert.ok(playerBInRoom);
+  assert.equal(playerBInRoom.hasFinishedGame, true);
+
+  // Player B also gets MATCH_RESULT with forfeit outcome
+  const bResult = await b.next('MATCH_RESULT');
+  assert.equal(bResult.outcome, 'forfeit');
+  assert.equal(bResult.delta, -15);
+});
+
+
 
 
 

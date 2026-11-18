@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   Award as Trophy,
   AlertTriangle,
@@ -7,6 +8,7 @@ import {
   Home,
   LogOut,
   Eye,
+  Check,
 } from "lucide-react";
 import { useGameStore } from "../../store/useGameStore";
 import { useLobbyStore } from "../../store/useLobbyStore";
@@ -129,6 +131,24 @@ export default function GameResultModal({
        room.players.filter((p) => !p.isSpectator).every(
          (p) => p.hasFinishedGame || p.strikes >= 3 || p.result === "won" || p.result === "lost"
        ));
+
+  const friends = socialStore.friends || [];
+  const sentFriendRequests = socialStore.sentFriendRequests || new Set();
+  const [requestingFriends, setRequestingFriends] = useState(new Set());
+
+  const handleAddFriend = async (name) => {
+    if (!name) return;
+    setRequestingFriends((prev) => new Set(prev).add(name));
+    try {
+      await socialStore.addFriend(name);
+    } finally {
+      setRequestingFriends((prev) => {
+        const next = new Set(prev);
+        next.delete(name);
+        return next;
+      });
+    }
+  };
 
   if (activeView !== "game") return null;
 
@@ -319,8 +339,32 @@ export default function GameResultModal({
                     You: {mySeriesWins}
                   </span>
                   <span className="opacity-40">—</span>
-                  <span className={oppSeriesWins > mySeriesWins ? "text-emerald-500" : "text-text-custom"}>
-                    {seriesOpponent?.name || "Opponent"}: {oppSeriesWins}
+                  <span className={`flex items-center gap-1.5 ${oppSeriesWins > mySeriesWins ? "text-emerald-500" : "text-text-custom"}`}>
+                    <span>{seriesOpponent?.name || "Opponent"}: {oppSeriesWins}</span>
+                    {seriesOpponent && !friends.some((f) => f.id === seriesOpponent.id || (f.name && f.name.toLowerCase() === seriesOpponent.name?.toLowerCase())) && (
+                      sentFriendRequests.has(seriesOpponent.name?.toLowerCase()) || sentFriendRequests.has(String(seriesOpponent.id).toLowerCase()) ? (
+                        <span className="px-1.5 py-0.5 rounded-md bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-bold text-[9px] flex items-center gap-0.5 animate-scale-in">
+                          <Check size={9} /> Sent
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleAddFriend(seriesOpponent.name)}
+                          disabled={requestingFriends.has(seriesOpponent.name)}
+                          className="px-1.5 py-0.5 rounded-md bg-accent-glow hover:bg-accent-custom hover:text-white text-text-custom/80 text-[9px] font-bold border border-border-custom/50 transition-all active:scale-95 cursor-pointer disabled:opacity-50 flex items-center gap-0.5"
+                          title={`Add ${seriesOpponent.name} as friend`}
+                        >
+                          {requestingFriends.has(seriesOpponent.name) ? (
+                            <RefreshCw size={8} className="animate-spin" />
+                          ) : (
+                            <>
+                              <UserPlus size={9} />
+                              <span>Add</span>
+                            </>
+                          )}
+                        </button>
+                      )
+                    )}
                   </span>
                 </div>
                 <p className="text-[10px] opacity-60">
@@ -429,7 +473,7 @@ export default function GameResultModal({
                   }}
                   className="w-full py-3 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl active:scale-[0.98] transition-all flex items-center justify-center gap-2 shadow-md shadow-rose-950/40 border border-rose-400/30 cursor-pointer text-xs"
                 >
-                  <LogOut size={15} /> Leave Room
+                  <LogOut size={15} /> Leave Room Entirely
                 </button>
               </div>
             ) : (
@@ -584,8 +628,32 @@ export default function GameResultModal({
                     You: {mySeriesWins}
                   </span>
                   <span className="opacity-40">—</span>
-                  <span className={oppSeriesWins > mySeriesWins ? "text-emerald-500" : "text-text-custom"}>
-                    {seriesOpponent?.name || "Opponent"}: {oppSeriesWins}
+                  <span className={`flex items-center gap-1.5 ${oppSeriesWins > mySeriesWins ? "text-emerald-500" : "text-text-custom"}`}>
+                    <span>{seriesOpponent?.name || "Opponent"}: {oppSeriesWins}</span>
+                    {seriesOpponent && !friends.some((f) => f.id === seriesOpponent.id || (f.name && f.name.toLowerCase() === seriesOpponent.name?.toLowerCase())) && (
+                      sentFriendRequests.has(seriesOpponent.name?.toLowerCase()) || sentFriendRequests.has(String(seriesOpponent.id).toLowerCase()) ? (
+                        <span className="px-1.5 py-0.5 rounded-md bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-bold text-[9px] flex items-center gap-0.5 animate-scale-in">
+                          <Check size={9} /> Sent
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleAddFriend(seriesOpponent.name)}
+                          disabled={requestingFriends.has(seriesOpponent.name)}
+                          className="px-1.5 py-0.5 rounded-md bg-accent-glow hover:bg-accent-custom hover:text-white text-text-custom/80 text-[9px] font-bold border border-border-custom/50 transition-all active:scale-95 cursor-pointer disabled:opacity-50 flex items-center gap-0.5"
+                          title={`Add ${seriesOpponent.name} as friend`}
+                        >
+                          {requestingFriends.has(seriesOpponent.name) ? (
+                            <RefreshCw size={8} className="animate-spin" />
+                          ) : (
+                            <>
+                              <UserPlus size={9} />
+                              <span>Add</span>
+                            </>
+                          )}
+                        </button>
+                      )
+                    )}
                   </span>
                 </div>
                 <p className="text-[10px] opacity-60">
@@ -707,7 +775,7 @@ export default function GameResultModal({
                   }}
                   className="w-full py-3 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl active:scale-[0.98] transition-all flex items-center justify-center gap-2 shadow-md shadow-rose-950/40 border border-rose-400/30 cursor-pointer text-xs"
                 >
-                  <LogOut size={15} /> Leave Room
+                  <LogOut size={15} /> Leave Room Entirely
                 </button>
               </div>
             ) : (
@@ -789,14 +857,21 @@ export default function GameResultModal({
             <button
               onClick={() => {
                 useGameStore.setState({ gameStatus: "idle" });
-                exitToHome(() => {
+                if (room) {
+                  if (room.matchId) setStayedMatch(room.matchId);
+                  setActiveTab("lobby");
                   setActiveView("home");
                   setSeconds(0);
-                });
+                } else {
+                  exitToHome(() => {
+                    setActiveView("home");
+                    setSeconds(0);
+                  });
+                }
               }}
               className="w-full py-3 bg-panel-custom hover:bg-panel-custom/80 border border-border-custom text-text-custom font-bold rounded-xl active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer text-xs"
             >
-              <Home size={15} /> Exit to Home
+              <Home size={15} /> {room ? "Return to Room Lobby" : "Exit to Home"}
             </button>
           </div>
         </div>

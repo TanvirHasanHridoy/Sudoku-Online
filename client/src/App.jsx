@@ -74,7 +74,22 @@ export default function App() {
   const [stayedMatch, setStayedMatch] = useState(null);
   const challengeId = new URLSearchParams(location.search).get("challenge");
   const challengeAutoRequested = useRef(false);
-  const roomCodeParam = new URLSearchParams(location.search).get("room");
+
+  const getRoomCodeFromUrl = () => {
+    if (typeof window === "undefined") return "";
+    try {
+      const params = new URLSearchParams(window.location.search);
+      let code = params.get("room") || "";
+      if (!code && window.location.hash) {
+        const hashParams = new URLSearchParams(window.location.hash.replace(/^#\/?/, ""));
+        code = hashParams.get("room") || "";
+      }
+      return code.replace(/\D/g, "").slice(0, 6);
+    } catch {
+      return "";
+    }
+  };
+
   const roomAutoJoined = useRef(false);
   // Settings Panel preferences states
   const [showSettingsModal, setShowSettingsModal] = useState(false);
@@ -280,7 +295,20 @@ export default function App() {
 
   // Local state inputs
   const [inputName, setInputName] = useState(myPlayerName);
-  const [inputCode, setInputCode] = useState("");
+  const [inputCode, setInputCode] = useState(() => getRoomCodeFromUrl());
+
+  // If a room code is present in the URL, prefill inputCode and focus Private Room lobby
+  useEffect(() => {
+    const urlCode = getRoomCodeFromUrl();
+    if (urlCode && urlCode.length === 6) {
+      setInputCode(urlCode);
+      setActiveTab("lobby");
+      const cached = localStorage.getItem("sudoku_active_room_code");
+      if (cached && cached !== urlCode) {
+        localStorage.removeItem("sudoku_active_room_code");
+      }
+    }
+  }, []);
   const [friendNameInput, setFriendNameInput] = useState("");
   const [isCopied, setIsCopied] = useState(false);
   const [selectedDifficulty, setSelectedDifficulty] = useState("easy");
@@ -1083,14 +1111,20 @@ export default function App() {
     }
   }, [challenge, activeView]);
 
-  // Auto-join room from URL query parameter (?room=123456)
+  // Auto-join room from URL query parameter (?room=123456) or hash
   useEffect(() => {
-    if (roomCodeParam && isConnected && ws?.readyState === 1 && !room && !roomAutoJoined.current) {
+    const urlCode = getRoomCodeFromUrl();
+    if (urlCode && urlCode.length === 6 && isConnected && ws?.readyState === 1 && !room && !roomAutoJoined.current) {
       roomAutoJoined.current = true;
-      const clean = roomCodeParam.replace(/\D/g, "");
-      if (clean.length === 6) {
-        setInputCode(clean);
-        joinRoom(clean);
+      joinRoom(urlCode);
+    }
+  }, [isConnected, ws, room, joinRoom]);
+
+  // Clean URL parameter once successfully joined into that room
+  useEffect(() => {
+    if (room?.code) {
+      const urlCode = getRoomCodeFromUrl();
+      if (urlCode && urlCode === room.code) {
         try {
           const url = new URL(window.location.href);
           url.searchParams.delete('room');
@@ -1098,7 +1132,7 @@ export default function App() {
         } catch { }
       }
     }
-  }, [roomCodeParam, isConnected, ws, room, joinRoom]);
+  }, [room?.code]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -1376,7 +1410,21 @@ export default function App() {
   };
   const chooseCell = (r, c) => {
     selectCell(r, c);
-    if (digitFirst && lockedDigit) placeDigit(lockedDigit);
+    if (digitFirst) {
+      const existingVal = board[r]?.[c];
+      const solVal = solution?.[r]?.[c];
+      const isClue = originalCells.has(`${r},${c}`);
+      const isCorrect = solVal !== undefined && solVal !== null ? existingVal === solVal : true;
+
+      // If clicking an already solved or generated clue number (and NOT a mistake), automatically select it for digit-first input
+      if (typeof existingVal === "number" && existingVal >= 1 && existingVal <= 9 && (isClue || isCorrect)) {
+        setLockedDigit(existingVal);
+        return;
+      }
+      if (lockedDigit) {
+        placeDigit(lockedDigit);
+      }
+    }
   };
   const shareChallenge = () => {
     const puzzle = board.map((row, r) => row.map((v, c) => originalCells.has(r + ',' + c) ? v : null));
@@ -1801,6 +1849,9 @@ export default function App() {
             loadingLeaderboard={loadingLeaderboard}
             leaderboard={leaderboard}
             getRankTierFromElo={getRankTierFromElo}
+            dailyDate={dailyDate}
+            dailyLeaderboards={dailyLeaderboards}
+            fetchDailyLeaderboard={fetchDailyLeaderboard}
             avatars={AVATARS}
           />
           <HomeSocialPanel
@@ -1882,7 +1933,29 @@ export default function App() {
                     </button>
                     <button
                       onClick={() => {
-                        exitToHome(() => setActiveView("home"));
+                        if (room) {
+                          const myPlayerId = lobbyStore.myPlayerId;
+                          const myPlayer = room.players?.find((p) => p.id === myPlayerId);
+                          if (room.isGameStarted && myPlayer && !myPlayer.hasFinishedGame && !myPlayer.isSpectator) {
+                            if (lobbyStore.ws && lobbyStore.ws.readyState === 1) {
+                              lobbyStore.ws.send(JSON.stringify({
+                                type: "FORFEIT_MATCH",
+                                payload: {}
+                              }));
+                            }
+                          }
+                          if (room.matchId) setStayedMatch(room.matchId);
+                          setActiveTab("lobby");
+                          setActiveView("home");
+                          setSeconds(0);
+                          useGameStore.setState({ gameStatus: "idle" });
+                        } else {
+                          exitToHome(() => {
+                            setActiveView("home");
+                            setSeconds(0);
+                            useGameStore.setState({ gameStatus: "idle" });
+                          });
+                        }
                       }}
                       className="px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl active:scale-95 transition-all text-xs flex items-center gap-1.5 shadow-md shadow-rose-950/40 border border-rose-400/30 cursor-pointer"
                     >
@@ -1924,6 +1997,8 @@ export default function App() {
                 requestPause={requestPause}
                 exitToHome={exitToHome}
                 setActiveView={setActiveView}
+                setActiveTab={setActiveTab}
+                setStayedMatch={setStayedMatch}
                 setSeconds={setSeconds}
                 isVoiceJoined={isVoiceJoined}
                 isMicMuted={isMicMuted}

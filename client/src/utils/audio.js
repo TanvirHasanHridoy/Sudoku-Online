@@ -401,5 +401,63 @@ export const playSound = {
       clearInterval(heartbeatTimer);
       heartbeatTimer = null;
     }
+  },
+
+  // 11. Player Joined Room: Subtle warm ascending chime (F5 -> A5)
+  playerJoin: (enabled = true) => {
+    if (!enabled) return;
+    try {
+      const ctx = getAudioContext();
+      const now = ctx.currentTime;
+      [
+        { freq: 698.46, start: 0, dur: 0.12 }, // F5
+        { freq: 880.00, start: 0.08, dur: 0.18 }, // A5
+      ].forEach(({ freq, start, dur }) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(freq, now + start);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        const noteStart = now + start;
+        gain.gain.setValueAtTime(0, noteStart);
+        gain.gain.linearRampToValueAtTime(0.08, noteStart + 0.015);
+        gain.gain.exponentialRampToValueAtTime(0.0001, noteStart + dur);
+        osc.start(noteStart);
+        osc.stop(noteStart + dur + 0.01);
+      });
+    } catch (e) {
+      console.warn("[Audio Synth] Failed to play player join chime", e);
+    }
+  },
+
+  // 12. Player Left Room: Subtle gentle descending chime (E5 -> C5)
+  playerLeave: (enabled = true) => {
+    if (!enabled) return;
+    try {
+      const ctx = getAudioContext();
+      const now = ctx.currentTime;
+      [
+        { freq: 659.25, start: 0, dur: 0.12 }, // E5
+        { freq: 523.25, start: 0.08, dur: 0.18 }, // C5
+      ].forEach(({ freq, start, dur }) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(freq, now + start);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        const noteStart = now + start;
+        gain.gain.setValueAtTime(0, noteStart);
+        gain.gain.linearRampToValueAtTime(0.06, noteStart + 0.015);
+        gain.gain.exponentialRampToValueAtTime(0.0001, noteStart + dur);
+        osc.start(noteStart);
+        osc.stop(noteStart + dur + 0.01);
+      });
+    } catch (e) {
+      console.warn("[Audio Synth] Failed to play player leave chime", e);
+    }
   }
 };

@@ -63,9 +63,10 @@ export default function ToastContainer({
         </div>
       )}
 
-      {/* Non-intrusive Quick Reaction Toast Banner (Guaranteed ZERO board occlusion) */}
+      {/* Non-intrusive Quick Reaction Toast Banner (Guaranteed ZERO board occlusion, suppressed during game to avoid duplicating in-game cloud toast) */}
       <div className="fixed top-16 right-4 z-50 flex flex-col gap-1.5 pointer-events-none max-w-xs select-none">
         {!focus &&
+          activeView !== "game" &&
           activeReactions?.map((r) => (
             <div
               key={r.id}

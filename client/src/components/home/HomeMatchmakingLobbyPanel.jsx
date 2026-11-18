@@ -18,6 +18,10 @@ import {
   MessageSquare,
   Send,
   Search,
+  ChevronLeft,
+  ChevronRight,
+  Clock,
+  Sparkles,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import {
@@ -103,6 +107,9 @@ export default function HomeMatchmakingLobbyPanel({
   loadingLeaderboard: propLoadingLeaderboard,
   leaderboard: propLeaderboard,
   getRankTierFromElo: propGetRankTierFromElo,
+  dailyDate: propDailyDate,
+  dailyLeaderboards: propDailyLeaderboards,
+  fetchDailyLeaderboard: propFetchDailyLeaderboard,
   avatars = AVATARS,
 }) {
   const lobbyStore = useLobbyStore();
@@ -112,6 +119,29 @@ export default function HomeMatchmakingLobbyPanel({
   const [localActiveTab, setLocalActiveTab] = useState("lobby");
   const activeTab = propActiveTab !== undefined ? propActiveTab : localActiveTab;
   const setActiveTab = propSetActiveTab || setLocalActiveTab;
+
+  const [leaderboardCategory, setLeaderboardCategory] = useState("elo"); // "elo" | "daily"
+  const [selectedLeaderboardDate, setSelectedLeaderboardDate] = useState(() => {
+    return propDailyDate || defaultFormatDateKey(new Date());
+  });
+
+  const dailyLeaderboards = propDailyLeaderboards !== undefined ? propDailyLeaderboards : (lobbyStore.dailyLeaderboards || {});
+  const fetchDailyLeaderboard = propFetchDailyLeaderboard || lobbyStore.fetchDailyLeaderboard || (() => {});
+
+  useEffect(() => {
+    if (activeTab === "leaderboard" && leaderboardCategory === "daily") {
+      fetchDailyLeaderboard(selectedLeaderboardDate);
+    }
+  }, [activeTab, leaderboardCategory, selectedLeaderboardDate, fetchDailyLeaderboard]);
+
+  const handleShiftDate = (offsetDays) => {
+    try {
+      const d = new Date(selectedLeaderboardDate + "T12:00:00");
+      d.setDate(d.getDate() + offsetDays);
+      const newKey = defaultFormatDateKey(d);
+      setSelectedLeaderboardDate(newKey);
+    } catch { }
+  };
 
   const fetchLeaderboard = propFetchLeaderboard || socialStore.fetchLeaderboard || (() => {});
   const room = propRoom !== undefined ? propRoom : lobbyStore.room;
@@ -224,6 +254,23 @@ export default function HomeMatchmakingLobbyPanel({
   const loadingLeaderboard = propLoadingLeaderboard !== undefined ? propLoadingLeaderboard : socialStore.loadingLeaderboard;
   const leaderboard = propLeaderboard !== undefined ? propLeaderboard : (socialStore.leaderboard || EMPTY_ARRAY);
   const getRankTierFromElo = propGetRankTierFromElo || defaultGetRankTierFromElo;
+
+  const sentFriendRequests = socialStore.sentFriendRequests || new Set();
+  const [requestingFriends, setRequestingFriends] = useState(new Set());
+
+  const handleAddFriend = async (name) => {
+    if (!name) return;
+    setRequestingFriends((prev) => new Set(prev).add(name));
+    try {
+      await socialStore.addFriend(name);
+    } finally {
+      setRequestingFriends((prev) => {
+        const next = new Set(prev);
+        next.delete(name);
+        return next;
+      });
+    }
+  };
 
   useEffect(() => {
     if (lobbyChatEndRef.current) {
@@ -642,6 +689,33 @@ export default function HomeMatchmakingLobbyPanel({
                                 </div>
                               ) : (
                                 <>
+                                  {!isMe && !friends.some((f) => f.id === p.id || (f.name && f.name.toLowerCase() === p.name?.toLowerCase())) && (
+                                    sentFriendRequests.has(p.name?.toLowerCase()) || sentFriendRequests.has(String(p.id).toLowerCase()) ? (
+                                      <span
+                                        className="px-1.5 py-0.5 rounded-md bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-bold text-[9px] flex items-center gap-0.5 animate-scale-in mr-1"
+                                        title="Friend Request Sent"
+                                      >
+                                        <Check size={9} /> Sent
+                                      </span>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleAddFriend(p.name)}
+                                        disabled={requestingFriends.has(p.name)}
+                                        className="px-1.5 py-0.5 rounded-md bg-accent-glow hover:bg-accent-custom hover:text-white text-text-custom/80 text-[9px] font-bold border border-border-custom/50 transition-all active:scale-95 cursor-pointer disabled:opacity-50 flex items-center gap-0.5 mr-1"
+                                        title={`Add ${p.name} as friend`}
+                                      >
+                                        {requestingFriends.has(p.name) ? (
+                                          <RefreshCw size={8} className="animate-spin" />
+                                        ) : (
+                                          <>
+                                            <UserPlus size={9} />
+                                            <span>Add</span>
+                                          </>
+                                        )}
+                                      </button>
+                                    )
+                                  )}
                                   {isHost && !isMe && (
                                     <button
                                       onClick={() => kickPlayer(p.id)}
@@ -683,9 +757,43 @@ export default function HomeMatchmakingLobbyPanel({
                     })}
                   </div>
 
-                  {/* Lobby Chat & Banter - only visible when more than one player in lobby */}
+                  {/* Action Buttons (Ready / Start / Leave) placed directly below player list so they never shift */}
+                  <div className="flex flex-col gap-2 pt-3">
+                    <div className="flex gap-2">
+                      {!isHost && activePlayers.length > 1 && (
+                        <button
+                          disabled={room.isGameStarted}
+                          onClick={toggleReady}
+                          className={`w-full py-3 rounded-xl font-bold text-sm shadow-md transition-all active:scale-[0.98] ${myStatusInRoom?.isReady
+                            ? "bg-amber-600 hover:bg-amber-500 text-white"
+                            : "bg-accent-custom hover:bg-accent-hover text-white"
+                            }`}
+                        >
+                          {myStatusInRoom?.isReady ? "Unready" : "Ready"}
+                        </button>
+                      )}
+                      {isHost && (
+                        <button
+                          onClick={startGame}
+                          disabled={!allPlayersReady || room.isGameStarted}
+                          className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold rounded-xl text-sm transition-all active:scale-[0.98]"
+                          title="Start Match"
+                        >
+                          Start the Match
+                        </button>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => exitToHome(() => setActiveView("home"))}
+                      className="w-full py-2.5 bg-slate-800 hover:bg-slate-700/80 border border-slate-700/50 text-slate-300 font-bold rounded-xl text-xs transition-all active:scale-[0.98]"
+                    >
+                      {isHost ? "Leave & pass host" : "Leave Room"}
+                    </button>
+                  </div>
+
+                  {/* Lobby Chat & Banter - placed below action buttons to prevent pushing Ready/Start controls */}
                   {activePlayers.length > 1 && (
-                    <div className="bg-accent-glow/20 border border-border-custom/50 rounded-xl p-3 space-y-2 mt-2">
+                    <div className="bg-accent-glow/20 border border-border-custom/50 rounded-xl p-3 space-y-2 mt-3">
                       <div className="flex items-center justify-between">
                         <span className="text-[10px] uppercase font-bold tracking-wider text-accent-custom flex items-center gap-1.5">
                           <MessageSquare size={12} /> Room Chat & Banter
@@ -755,38 +863,6 @@ export default function HomeMatchmakingLobbyPanel({
                       </form>
                     </div>
                   )}
-                </div>
-                <div className="flex flex-col gap-2 pt-2">
-                  <div className="flex gap-2">
-                    {!isHost && activePlayers.length > 1 && (
-                      <button
-                        disabled={room.isGameStarted}
-                        onClick={toggleReady}
-                        className={`w-full py-3 rounded-xl font-bold text-sm shadow-md transition-all active:scale-[0.98] ${myStatusInRoom?.isReady
-                          ? "bg-amber-600 hover:bg-amber-500 text-white"
-                          : "bg-accent-custom hover:bg-accent-hover text-white"
-                          }`}
-                      >
-                        {myStatusInRoom?.isReady ? "Unready" : "Ready"}
-                      </button>
-                    )}
-                    {isHost && (
-                      <button
-                        onClick={startGame}
-                        disabled={!allPlayersReady || room.isGameStarted}
-                        className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold rounded-xl text-sm transition-all active:scale-[0.98]"
-                        title="Start Match"
-                      >
-                        Start the Match
-                      </button>
-                    )}
-                  </div>
-                  <button
-                    onClick={() => exitToHome(() => setActiveView("home"))}
-                    className="w-full py-2.5 bg-slate-800 hover:bg-slate-700/80 border border-slate-700/50 text-slate-300 font-bold rounded-xl text-xs transition-all active:scale-[0.98] mt-1"
-                  >
-                    {isHost ? "Leave & pass host" : "Leave Room"}
-                  </button>
                 </div>
               </div>
             )}
@@ -881,101 +957,266 @@ export default function HomeMatchmakingLobbyPanel({
         {/* Leaderboard Tab */}
         {activeTab === "leaderboard" && (
           <div className="space-y-4 py-2 animate-fade-in">
-            <div className="text-center space-y-1 mb-2">
-              <h3 className="text-sm font-bold text-accent-custom uppercase tracking-wider">
-                🏆 Global ELO Rankings
-              </h3>
-              <p className="text-[10px] opacity-60">
-                Top players worldwide climbing the ranks
-              </p>
+            {/* Sub-tab switcher: Global ELO vs Daily Challenge */}
+            <div className="flex bg-accent-glow/20 rounded-xl p-1 border border-border-custom/40">
+              <button
+                type="button"
+                onClick={() => setLeaderboardCategory("elo")}
+                className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                  leaderboardCategory === "elo"
+                    ? "bg-panel-custom text-text-custom shadow-xs"
+                    : "opacity-60 hover:opacity-100"
+                }`}
+              >
+                <Trophy size={13} className={leaderboardCategory === "elo" ? "text-amber-400" : ""} />
+                Global ELO
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setLeaderboardCategory("daily");
+                  fetchDailyLeaderboard(selectedLeaderboardDate);
+                }}
+                className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                  leaderboardCategory === "daily"
+                    ? "bg-panel-custom text-text-custom shadow-xs"
+                    : "opacity-60 hover:opacity-100"
+                }`}
+              >
+                <Calendar size={13} className={leaderboardCategory === "daily" ? "text-accent-custom" : ""} />
+                Daily Challenge
+              </button>
             </div>
-            {loadingLeaderboard ? (
-              <div className="flex flex-col items-center justify-center py-8 gap-2">
-                <div className="w-8 h-8 rounded-full border-4 border-accent-custom/20 border-t-accent-custom animate-spin" />
-                <span className="text-[10px] font-semibold opacity-60">
-                  Loading leaderboard...
-                </span>
-              </div>
-            ) : leaderboard.length === 0 ? (
-              <p className="text-center py-6 text-xs opacity-50 italic">
-                No players ranked yet.
-              </p>
+
+            {leaderboardCategory === "elo" ? (
+              <>
+                <div className="text-center space-y-1 mb-2">
+                  <h3 className="text-sm font-bold text-accent-custom uppercase tracking-wider">
+                    🏆 Global ELO Rankings
+                  </h3>
+                  <p className="text-[10px] opacity-60">
+                    Top players worldwide climbing the ranks
+                  </p>
+                </div>
+                {loadingLeaderboard ? (
+                  <div className="flex flex-col items-center justify-center py-8 gap-2">
+                    <div className="w-8 h-8 rounded-full border-4 border-accent-custom/20 border-t-accent-custom animate-spin" />
+                    <span className="text-[10px] font-semibold opacity-60">
+                      Loading leaderboard...
+                    </span>
+                  </div>
+                ) : leaderboard.length === 0 ? (
+                  <p className="text-center py-6 text-xs opacity-50 italic">
+                    No players ranked yet.
+                  </p>
+                ) : (
+                  <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+                    {leaderboard.slice(0, 10).map((player, index) => {
+                      const isMe = player.id === myPlayerId;
+                      const rankTier = getRankTierFromElo(player.elo);
+
+                      return (
+                        <div
+                          key={player.id}
+                          className={`flex items-center justify-between p-2.5 border rounded-xl transition-all ${
+                            isMe
+                              ? "bg-accent-glow/20 border-accent-custom ring-1 ring-accent-custom/20"
+                              : "bg-accent-glow/5 border-border-custom/50 hover:border-border-custom"
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            {/* Position Badge */}
+                            <span
+                              className={`w-5 h-5 rounded-md flex items-center justify-center font-extrabold text-[10px] ${
+                                index === 0
+                                  ? "bg-amber-500 text-slate-950 font-sans"
+                                  : index === 1
+                                    ? "bg-slate-300 text-slate-950 font-sans"
+                                    : index === 2
+                                      ? "bg-amber-700 text-white font-sans"
+                                      : "bg-accent-glow border border-border-custom opacity-70 text-[9px]"
+                              }`}
+                            >
+                              {index + 1}
+                            </span>
+
+                            {/* Avatar display */}
+                            <div className="w-7 h-7 rounded-full bg-accent-custom/10 text-white overflow-hidden border border-border-custom/30 flex items-center justify-center text-[10px] font-bold">
+                              {avatars.find((a) => a.id === player.avatar_id) ? (
+                                <img
+                                  src={avatars.find((a) => a.id === player.avatar_id).src}
+                                  alt=""
+                                  className="w-full h-full object-cover"
+                                />
+                              ) : (
+                                player.display_name?.slice(0, 2)?.toUpperCase() || "P"
+                              )}
+                            </div>
+
+                            <div>
+                              <p className="text-xs font-bold leading-tight flex items-center gap-1.5">
+                                {player.display_name}
+                                {isMe && (
+                                  <span className="text-[8px] bg-accent-custom/20 text-accent-custom px-1.5 py-0.25 rounded-full uppercase tracking-wider font-extrabold scale-90">
+                                    You
+                                  </span>
+                                )}
+                              </p>
+                              <span className="text-[9px] opacity-60 font-medium">
+                                {rankTier}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="text-right">
+                            <span className="text-xs font-extrabold text-accent-custom font-sans tabular-nums">
+                              {player.elo}
+                            </span>
+                            <span className="text-[8px] block opacity-50 font-semibold tracking-wide uppercase">
+                              ELO
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
             ) : (
-              <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
-                {leaderboard.slice(0, 10).map((player, index) => {
-                  const isMe = player.id === myPlayerId;
-                  const rankTier = getRankTierFromElo(player.elo);
+              /* Daily Challenge Leaderboard */
+              <div className="space-y-3">
+                {/* Date Navigator Header */}
+                <div className="flex items-center justify-between p-2.5 bg-accent-glow/10 border border-border-custom/50 rounded-xl">
+                  <button
+                    type="button"
+                    onClick={() => handleShiftDate(-1)}
+                    className="p-1 hover:bg-panel-custom rounded-lg transition-all text-text-custom opacity-70 hover:opacity-100 cursor-pointer"
+                    title="Previous Day"
+                  >
+                    <ChevronLeft size={16} />
+                  </button>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsCalendarOpen(true)}
+                      className="flex items-center gap-1.5 text-xs font-extrabold text-accent-custom hover:underline cursor-pointer"
+                      title="Open Calendar"
+                    >
+                      <Calendar size={13} />
+                      <span>{defaultFormatReadableDate(selectedLeaderboardDate)}</span>
+                    </button>
+                    {selectedLeaderboardDate === defaultFormatDateKey(new Date()) && (
+                      <span className="text-[9px] bg-accent-custom/20 text-accent-custom px-1.5 py-0.25 rounded-full font-bold uppercase tracking-wider">
+                        Today
+                      </span>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => handleShiftDate(1)}
+                    className="p-1 hover:bg-panel-custom rounded-lg transition-all text-text-custom opacity-70 hover:opacity-100 cursor-pointer"
+                    title="Next Day"
+                  >
+                    <ChevronRight size={16} />
+                  </button>
+                </div>
+
+                {/* Daily Rankings List */}
+                {(() => {
+                  const dailyList = dailyLeaderboards[selectedLeaderboardDate] || [];
+                  if (dailyList.length === 0) {
+                    return (
+                      <div className="text-center py-6 space-y-2">
+                        <p className="text-xs opacity-50 italic">
+                          No solvers recorded yet for this date.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            startDailyGame(selectedLeaderboardDate);
+                          }}
+                          className="px-3 py-1.5 bg-accent-custom hover:bg-accent-hover text-white text-xs font-bold rounded-xl transition-all shadow-md active:scale-95 cursor-pointer inline-flex items-center gap-1"
+                        >
+                          <PlayIcon size={12} fill="white" />
+                          Solve This Daily Board
+                        </button>
+                      </div>
+                    );
+                  }
 
                   return (
-                    <div
-                      key={player.id}
-                      className={`flex items-center justify-between p-2.5 border rounded-xl transition-all ${isMe
-                        ? "bg-accent-glow/20 border-accent-custom ring-1 ring-accent-custom/20"
-                        : "bg-accent-glow/5 border-border-custom/50 hover:border-border-custom"
-                        }`}
-                    >
-                      <div className="flex items-center gap-3">
-                        {/* Position Badge */}
-                        <span
-                          className={`w-5 h-5 rounded-md flex items-center justify-center font-extrabold text-[10px] ${index === 0
-                            ? "bg-amber-500 text-slate-950 font-sans"
-                            : index === 1
-                              ? "bg-slate-300 text-slate-950 font-sans"
-                              : index === 2
-                                ? "bg-amber-700 text-white font-sans"
-                                : "bg-accent-glow border border-border-custom opacity-70 text-[9px]"
+                    <div className="space-y-1.5 max-h-[300px] overflow-y-auto pr-1">
+                      {dailyList.slice(0, 10).map((entry, index) => {
+                        const isMe = entry.playerId === myPlayerId;
+                        return (
+                          <div
+                            key={entry.playerId || index}
+                            className={`flex items-center justify-between p-2 rounded-xl border text-xs transition-all ${
+                              isMe
+                                ? "bg-accent-glow/20 border-accent-custom ring-1 ring-accent-custom/20"
+                                : "bg-accent-glow/5 border-border-custom/50 hover:border-border-custom"
                             }`}
-                        >
-                          {index + 1}
-                        </span>
-
-                        {/* Avatar display */}
-                        <div className="w-7 h-7 rounded-full bg-accent-custom/10 text-white overflow-hidden border border-border-custom/30 flex items-center justify-center text-[10px] font-bold">
-                          {avatars.find(
-                            (a) => a.id === player.avatar_id,
-                          ) ? (
-                            <img
-                              src={
-                                avatars.find(
-                                  (a) => a.id === player.avatar_id,
-                                ).src
-                              }
-                              alt=""
-                              className="w-full h-full object-cover"
-                            />
-                          ) : (
-                            player.display_name
-                              ?.slice(0, 2)
-                              ?.toUpperCase() || "P"
-                          )}
-                        </div>
-
-                        <div>
-                          <p className="text-xs font-bold leading-tight flex items-center gap-1.5">
-                            {player.display_name}
-                            {isMe && (
-                              <span className="text-[8px] bg-accent-custom/20 text-accent-custom px-1.5 py-0.25 rounded-full uppercase tracking-wider font-extrabold scale-90">
-                                You
+                          >
+                            <div className="flex items-center gap-2.5">
+                              {/* Position */}
+                              <span
+                                className={`w-5 h-5 rounded-md flex items-center justify-center font-extrabold text-[10px] ${
+                                  index === 0
+                                    ? "bg-amber-500 text-slate-950 font-sans"
+                                    : index === 1
+                                      ? "bg-slate-300 text-slate-950 font-sans"
+                                      : index === 2
+                                        ? "bg-amber-700 text-white font-sans"
+                                        : "bg-accent-glow border border-border-custom opacity-70 text-[9px]"
+                                }`}
+                              >
+                                {index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : index + 1}
                               </span>
-                            )}
-                          </p>
-                          <span className="text-[9px] opacity-60 font-medium">
-                            {rankTier}
-                          </span>
-                        </div>
-                      </div>
 
-                      <div className="text-right">
-                        <span className="text-xs font-extrabold text-accent-custom font-sans tabular-nums">
-                          {player.elo}
-                        </span>
-                        <span className="text-[8px] block opacity-50 font-semibold tracking-wide uppercase">
-                          ELO
-                        </span>
-                      </div>
+                              {/* Avatar */}
+                              <div className="w-6 h-6 rounded-full bg-accent-custom/10 text-white overflow-hidden border border-border-custom/30 flex items-center justify-center text-[9px] font-bold">
+                                {avatars.find((a) => a.id === entry.avatar) ? (
+                                  <img
+                                    src={avatars.find((a) => a.id === entry.avatar).src}
+                                    alt=""
+                                    className="w-full h-full object-cover"
+                                  />
+                                ) : (
+                                  entry.name?.slice(0, 2)?.toUpperCase() || "P"
+                                )}
+                              </div>
+
+                              <div>
+                                <p className="font-bold leading-tight flex items-center gap-1.5">
+                                  {entry.name}
+                                  {isMe && (
+                                    <span className="text-[8px] bg-accent-custom/20 text-accent-custom px-1.5 py-0.25 rounded-full uppercase tracking-wider font-extrabold scale-90">
+                                      You
+                                    </span>
+                                  )}
+                                </p>
+                                <span className="text-[9px] opacity-50 font-mono">
+                                  {entry.strikes === 0 ? "Clean Solve" : `${entry.strikes} strike${entry.strikes > 1 ? "s" : ""}`}
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="text-right font-mono">
+                              <span className="text-xs font-black text-accent-custom">
+                                {entry.formattedTime || (entry.timeSeconds ? `${Math.floor(entry.timeSeconds / 60)}:${(entry.timeSeconds % 60).toString().padStart(2, "0")}` : "--:--")}
+                              </span>
+                              <span className="text-[8px] block opacity-50 uppercase font-semibold">
+                                Time
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   );
-                })}
+                })()}
               </div>
             )}
           </div>

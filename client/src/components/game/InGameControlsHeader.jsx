@@ -1,8 +1,8 @@
+import { useState } from "react";
 import {
   Calendar,
   Timer,
   Smile,
-  Cloud,
   X,
   MessageSquare,
   Bell,
@@ -15,6 +15,7 @@ import {
 import { formatReadableDate } from "../../utils/dailyChallenge";
 import { useGameStore } from "../../store/useGameStore";
 import { useLobbyStore } from "../../store/useLobbyStore";
+import { ForfeitConfirmationModal } from "../modals";
 
 export default function InGameControlsHeader({
   dailyDate: propDailyDate,
@@ -46,6 +47,8 @@ export default function InGameControlsHeader({
   requestPause: propRequestPause,
   exitToHome: propExitToHome,
   setActiveView: propSetActiveView,
+  setActiveTab: propSetActiveTab,
+  setStayedMatch: propSetStayedMatch,
   setSeconds: propSetSeconds,
   isVoiceJoined: propIsVoiceJoined,
   isMicMuted: propIsMicMuted,
@@ -82,6 +85,8 @@ export default function InGameControlsHeader({
   const requestPause = propRequestPause || lobbyStore.requestPause || (() => {});
   const exitToHome = propExitToHome || ((cb) => cb && cb());
   const setActiveView = propSetActiveView || (() => {});
+  const setActiveTab = propSetActiveTab || (() => {});
+  const setStayedMatch = propSetStayedMatch || (() => {});
   const setSeconds = propSetSeconds || (() => {});
   const isVoiceJoined = propIsVoiceJoined !== undefined ? propIsVoiceJoined : lobbyStore.isVoiceJoined;
   const isMicMuted = propIsMicMuted !== undefined ? propIsMicMuted : lobbyStore.isMicMuted;
@@ -94,6 +99,56 @@ export default function InGameControlsHeader({
     const s = (secs % 60).toString().padStart(2, "0");
     return `${m}:${s}`;
   });
+
+  const [showForfeitModal, setShowForfeitModal] = useState(false);
+
+  const handleExitClick = () => {
+    const myPlayerId = lobbyStore.myPlayerId;
+    const myPlayer = room?.players?.find((p) => p.id === myPlayerId);
+    const isRatedActiveMatch =
+      room &&
+      room.isGameStarted &&
+      room.rated &&
+      !myPlayer?.isSpectator &&
+      !myPlayer?.hasFinishedGame;
+
+    if (isRatedActiveMatch) {
+      setShowForfeitModal(true);
+    } else {
+      executeExit();
+    }
+  };
+
+  const executeExit = () => {
+    setShowForfeitModal(false);
+    if (room) {
+      // In a multiplayer room: forfeit/finish active match if needed and stay in room lobby!
+      const myPlayerId = lobbyStore.myPlayerId;
+      const myPlayer = room.players?.find((p) => p.id === myPlayerId);
+      if (room.isGameStarted && myPlayer && !myPlayer.hasFinishedGame && !myPlayer.isSpectator) {
+        if (lobbyStore.ws && lobbyStore.ws.readyState === 1) {
+          lobbyStore.ws.send(JSON.stringify({
+            type: "FORFEIT_MATCH",
+            payload: {}
+          }));
+        }
+      }
+      if (setStayedMatch && room.matchId) {
+        setStayedMatch(room.matchId);
+      }
+      setActiveTab("lobby");
+      setActiveView("home");
+      setSeconds(0);
+      useGameStore.setState({ gameStatus: "idle" });
+    } else {
+      // Solo / practice: return home cleanly
+      exitToHome(() => {
+        setActiveView("home");
+        setSeconds(0);
+        useGameStore.setState({ gameStatus: "idle" });
+      });
+    }
+  };
 
   return (
     <div className="w-full max-w-[460px] flex items-center justify-between gap-2 mb-2 lg:mb-4 px-2 select-none">
@@ -197,7 +252,7 @@ export default function InGameControlsHeader({
               )}
             </button>
 
-            {/* Cloud-Like In-Game Chat Toast */}
+            {/* Puffy Cloud In-Game Chat Toast (Top Center, No Board Occlusion) */}
             {cloudToast && (
               <div
                 onClick={() => {
@@ -209,36 +264,67 @@ export default function InGameControlsHeader({
                     setShowEmoteMenu(true);
                   }
                 }}
-                className={`absolute right-0 top-full mt-2 z-50 cursor-pointer select-none ${
+                className={`fixed top-14 sm:top-16 left-1/2 -translate-x-1/2 z-50 cursor-pointer select-none ${
                   cloudToastExiting ? "animate-cloud-out" : "animate-cloud-in"
                 }`}
                 title="Tap to open chat"
               >
-                <div className="relative flex items-center gap-1.5 px-3 py-1.5 bg-slate-900/90 hover:bg-slate-900 text-slate-100 rounded-full border border-cyan-400/50 shadow-[0_4px_18px_rgba(56,189,248,0.35)] backdrop-blur-md max-w-[260px] whitespace-nowrap overflow-hidden transition-all">
-                  {/* Cloud pointer tail pointing up to chat button */}
-                  <div className="absolute -top-1.5 right-2.5 w-3 h-3 bg-slate-900/90 border-t border-l border-cyan-400/50 rotate-45" />
+                <div className="relative group filter drop-shadow-[0_8px_22px_rgba(56,189,248,0.38)]">
+                  {/* Fluffy Cloud Lobe Accents */}
+                  <div className="absolute -top-3 left-4 w-8 h-8 rounded-full bg-slate-900 border-t border-l border-cyan-400/60" />
+                  <div className="absolute -top-4.5 left-11 w-11 h-11 rounded-full bg-slate-900 border-t border-cyan-400/60" />
+                  <div className="absolute -top-4 right-14 w-10 h-10 rounded-full bg-slate-900 border-t border-cyan-400/60" />
+                  <div className="absolute -top-2.5 right-5 w-8 h-8 rounded-full bg-slate-900 border-t border-r border-cyan-400/60" />
+                  
+                  {/* Bottom subtle cloud puffs */}
+                  <div className="absolute -bottom-1.5 left-10 w-6 h-6 rounded-full bg-slate-900 border-b border-cyan-400/60" />
+                  <div className="absolute -bottom-2 right-12 w-7 h-7 rounded-full bg-slate-900 border-b border-cyan-400/60" />
 
-                  <Cloud size={12} className="text-cyan-400 shrink-0 animate-pulse" />
+                  {/* Cloud thought bubble trailing dots */}
+                  <div className="absolute -bottom-3.5 left-6 w-2.5 h-2.5 rounded-full bg-slate-900 border border-cyan-400/50" />
+                  <div className="absolute -bottom-5 left-4.5 w-1.5 h-1.5 rounded-full bg-slate-900 border border-cyan-400/50" />
 
-                  <span className="text-[11px] font-extrabold text-cyan-300 shrink-0 max-w-[80px] truncate">
-                    {cloudToast.name}:
-                  </span>
+                  {/* Main Cloud Body */}
+                  <div className="relative z-10 flex items-center gap-2 px-4 py-2 bg-slate-900/95 hover:bg-slate-900 text-slate-100 rounded-full border border-cyan-400/60 backdrop-blur-md max-w-[320px] sm:max-w-[420px] transition-all">
+                    {/* Role badge */}
+                    <span
+                      className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full shrink-0 border ${
+                        cloudToast.isSpectator
+                          ? "bg-emerald-500/20 text-emerald-300 border-emerald-400/40"
+                          : "bg-cyan-500/20 text-cyan-300 border-cyan-400/40"
+                      }`}
+                    >
+                      {cloudToast.isSpectator ? "👁️ Spectator" : "🏎️ Racer"}
+                    </span>
 
-                  <span className="text-[11px] font-medium text-white truncate max-w-[130px]">
-                    {cloudToast.text}
-                  </span>
+                    {/* Sender Name */}
+                    <span className="text-xs font-bold text-white shrink-0 max-w-[90px] truncate">
+                      {cloudToast.name}:
+                    </span>
 
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      dismissCloudToast();
-                    }}
-                    className="p-0.5 ml-0.5 rounded-full hover:bg-white/20 text-white/60 hover:text-white shrink-0 cursor-pointer transition-colors"
-                    title="Dismiss"
-                  >
-                    <X size={10} />
-                  </button>
+                    {/* Message truncated with ... if too long */}
+                    <span
+                      className="text-xs font-medium text-slate-200 truncate max-w-[130px] sm:max-w-[190px]"
+                      title={cloudToast.text}
+                    >
+                      {cloudToast.text?.length > 28
+                        ? `${cloudToast.text.slice(0, 28)}...`
+                        : cloudToast.text}
+                    </span>
+
+                    {/* Dismiss Button */}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        dismissCloudToast();
+                      }}
+                      className="p-1 ml-0.5 rounded-full hover:bg-white/20 text-white/60 hover:text-white shrink-0 cursor-pointer transition-colors"
+                      title="Dismiss"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
@@ -339,13 +425,7 @@ export default function InGameControlsHeader({
         )}
 
         <button
-          onClick={() => {
-            exitToHome(() => {
-              setActiveView("home");
-              setSeconds(0);
-              useGameStore.setState({ gameStatus: "idle" });
-            });
-          }}
+          onClick={handleExitClick}
           className="px-2 py-1 rounded-lg bg-rose-500/10 border border-rose-500/30 hover:bg-rose-500 hover:text-white text-rose-500 transition-all active:scale-95 text-[10px] font-bold flex items-center gap-1 cursor-pointer"
           title="Exit to Home"
         >
@@ -353,6 +433,13 @@ export default function InGameControlsHeader({
           <span className="hidden sm:inline">Exit</span>
         </button>
       </div>
+
+      <ForfeitConfirmationModal
+        isOpen={showForfeitModal}
+        onCancel={() => setShowForfeitModal(false)}
+        onConfirm={executeExit}
+        penalty={15}
+      />
     </div>
   );
 }

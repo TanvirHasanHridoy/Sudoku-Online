@@ -404,3 +404,34 @@ test('In-game controls container removes difficulty select and supports multi-pl
   );
 });
 
+test('Forfeit confirmation modal, stay in room lobby on exit, and daily leaderboard tab integration', async () => {
+  const fs = await import('fs');
+  const appContent = fs.readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf-8');
+  const forfeitModalPath = new URL('../src/components/modals/ForfeitConfirmationModal.jsx', import.meta.url);
+  const forfeitModalContent = fs.existsSync(forfeitModalPath) ? fs.readFileSync(forfeitModalPath, 'utf-8') : '';
+  const headerPath = new URL('../src/components/game/InGameControlsHeader.jsx', import.meta.url);
+  const headerContent = fs.existsSync(headerPath) ? fs.readFileSync(headerPath, 'utf-8') : '';
+  const lobbyPanelPath = new URL('../src/components/home/HomeMatchmakingLobbyPanel.jsx', import.meta.url);
+  const lobbyPanelContent = fs.existsSync(lobbyPanelPath) ? fs.readFileSync(lobbyPanelPath, 'utf-8') : '';
+
+  // 1. Forfeit modal emphasizes cancel button and warns about ELO deduction
+  assert.ok(forfeitModalContent.includes('Forfeit Match?'), 'Forfeit modal must display title');
+  assert.ok(forfeitModalContent.includes('Cancel & Stay in Match'), 'Forfeit modal must emphasize Cancel button');
+  assert.ok(forfeitModalContent.includes('-{penalty} ELO') || forfeitModalContent.includes('ELO'), 'Forfeit modal must show ELO deduction');
+
+  // 2. InGameControlsHeader hooks up ForfeitConfirmationModal and stays in room lobby
+  assert.ok(headerContent.includes('ForfeitConfirmationModal'), 'InGameControlsHeader must import ForfeitConfirmationModal');
+  assert.ok(headerContent.includes('FORFEIT_MATCH'), 'InGameControlsHeader must send FORFEIT_MATCH when exiting active match');
+  assert.ok(headerContent.includes('setActiveTab("lobby")'), 'InGameControlsHeader must navigate to room lobby tab on exit');
+
+  // 3. HomeMatchmakingLobbyPanel features Daily Challenge under Leaderboards tab
+  assert.ok(lobbyPanelContent.includes('Global ELO'), 'Leaderboards tab must have Global ELO sub-tab');
+  assert.ok(lobbyPanelContent.includes('Daily Challenge'), 'Leaderboards tab must have Daily Challenge sub-tab');
+  assert.ok(lobbyPanelContent.includes('fetchDailyLeaderboard'), 'Leaderboards tab must fetch daily leaderboard data');
+
+  // 4. App.jsx pre-fills inputCode from URL parameter as fallback
+  assert.ok(appContent.includes('getRoomCodeFromUrl'), 'App.jsx must parse room code from URL query and hash');
+  assert.ok(appContent.includes('setInputCode(urlCode)'), 'App.jsx must prefill inputCode with URL room code');
+});
+
+

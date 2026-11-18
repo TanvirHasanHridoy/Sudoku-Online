@@ -1,5 +1,99 @@
 # Project log
 
+## 2026-11-18 · Stay in Room Lobby on Exit, ELO Forfeit Warning Modal, Daily Leaderboard Tab, & Invite Link Fallback
+
+On branch `feat/room-lobby-forfeit-leaderboard-and-invite-link`:
+
+### Player-Facing Behavior & Architecture
+
+1. **Stay in Room Lobby Across Match Exits (In-Game, Paused, and Post-Game):**
+   - Implemented `FORFEIT_MATCH` on the WebSocket server (`server.js`): when an active player resigns or exits an ongoing match, the server marks `hasFinishedGame = true`, records forfeit results and settles ELO (-15 ELO if rated), awards forfeit win bonus (+15 ELO) to the surviving opponent via `GAME_OVER_LEAVER`, and broadcasts `ROOM_UPDATED` while keeping the player seated in `room.players`.
+   - Updated client in-game controls (`InGameControlsHeader.jsx`), paused match overlay, and `GameResultModal.jsx`: exiting an active multiplayer match now transitions the player to the home screen Private Room lobby tab (`activeView = "home"`, `activeTab = "lobby"`, `stayedMatch = room.matchId`) while remaining connected to the room.
+   - Players who finish or forfeit can watch other active players solve via the `Spectate [Opponent]` button, chat in room banter, and vote for a rematch (`VOTE_PLAY_AGAIN`) once all racers finish.
+   - The only way to completely depart a room is through an explicit "Leave Room" / "Leave Room Entirely" action.
+
+2. **ELO Forfeit Deduction Warning Modal with Emphasized Cancel:**
+   - Created `ForfeitConfirmationModal.jsx` in `client/src/components/modals/`.
+   - In `InGameControlsHeader.jsx`, clicking "Exit" during an active, rated multiplayer match detects `room.isGameStarted && room.rated && !myPlayer.isSpectator && !myPlayer.hasFinishedGame` and immediately triggers the warning modal.
+   - The modal alerts the player that leaving early counts as an immediate forfeit and will deduct `-15 ELO`.
+   - In accordance with UX specifications, the "Cancel & Stay in Match" button is prominently emphasized (accent background, auto-focused, thicker padding, focus ring), while "Forfeit & Exit (-15 ELO)" is styled as a subtle warning button.
+
+3. **Daily Challenge Leaderboard Under Leaderboards Tab:**
+   - In `HomeMatchmakingLobbyPanel.jsx`, added a sub-navigation toggle under `activeTab === "leaderboard"`: `[ 🏆 Global ELO ]` vs `[ 📅 Daily Challenge ]`.
+   - The Daily Challenge leaderboard features:
+     - Date navigation header with previous/next day arrows, formatted date badge ("Today" tag for current day), and calendar picker launch shortcut (`setIsCalendarOpen(true)`).
+     - Renders top 10 solvers with rank badges (🥇, 🥈, 🥉, #4+), player avatars, usernames (with "You" pill), solve times formatted `mm:ss`, and strikes counter ("Clean Solve" vs strike count).
+     - Empty state with direct "Solve This Daily Board" call to action when no completions are recorded yet for that date.
+     - Dual-synchronized with Supabase `daily_challenge_scores` and local WebSocket fallback.
+
+4. **1-Click Invite Link Auto-Join with Robust 6-Digit Code Fallback:**
+   - Extracted and normalized room codes from both URL search params (`?room=CODE`) and hash fragments (`#room=CODE`).
+   - Pre-populates the 6-digit text input box (`inputCode`) on page mount and switches to the Private Room lobby tab so the code is immediately visible.
+   - As soon as the WebSocket connection is established (`isConnected && ws.readyState === 1`), automatically sends `joinRoom(cleanCode)`.
+   - Cleans the URL query parameter only once `room.code` matches, ensuring that if joining is delayed or encounters a temporary hiccup, the 6-digit input box remains filled as a fallback for 1-click manual "Join".
+   - Cleaned up backend `JOIN_ROOM` handling in `server.js`: if a client was seated in any previous stale room on that server, it cleanly departs the old room before seating in the new room, preventing silent join drops.
+
+### Verification Performed
+
+- `server/src/server.js`: Implemented `FORFEIT_MATCH` and improved `JOIN_ROOM` seat departure cleanup.
+- `client/src/App.jsx`: Pre-filled `inputCode` from URL, wired `setActiveTab` and `setStayedMatch` to in-game header, passed daily leaderboard props to lobby panel.
+- `client/src/components/game/InGameControlsHeader.jsx`: Integrated `ForfeitConfirmationModal` and hooked in-game exit to return to room lobby while maintaining room connection.
+- `client/src/components/game/GameResultModal.jsx`: Preserved room membership on lobby return and labeled explicit room departures clearly.
+- `client/src/components/home/HomeMatchmakingLobbyPanel.jsx`: Added Global ELO vs Daily Challenge toggle, date navigator, and daily challenge leaderboard rankings list.
+- `client/src/components/modals/ForfeitConfirmationModal.jsx`: Created and registered in modals index.
+- `client/src/store/useLobbyStore.js`: Added `forfeitMatch()` and `returnToRoomLobby()`, prioritized URL invite codes over stale localStorage room codes.
+- `npm test`: All 42 unit and integration tests passed cleanly (42/42 pass, 0 fail).
+- `npm run build --prefix client`: Production bundle and PWA service worker generated cleanly with 0 errors in 1.58s.
+
+### Remaining Limitations
+
+- None identified for these milestones; all requested features and fallback behaviors are verified and passing.
+
+
+
+On branch `feat/gameplay-chat-and-ux-improvements`:
+
+### Player-Facing Behavior & Architecture
+
+1. **1-Click QR Code & Deep Link Auto-Join:**
+   - Fixed QR code join flow (`/?room=CODE`): scanning the QR code or opening the invite link immediately joins the room lobby instead of merely populating the 6-digit text input box.
+   - Eliminated client-side input staging delays by triggering `joinRoom(code)` directly upon connection.
+   - Fixed backend WebSocket handler in `server.js` (`JOIN_ROOM`) to prevent dropping room join requests if client registration packets are in-flight, auto-registering the connecting socket if not yet registered.
+
+2. **Digit-First Input Selection on Cell Tap:**
+   - In digit-first mode, tapping any board cell containing a clue or correctly solved digit (1-9) automatically selects and locks that digit for rapid subsequent cell placements.
+   - Mistaken / incorrect numbers are explicitly excluded from auto-selection.
+
+3. **Subtle Audio Cues on Player Join and Leave:**
+   - Added subtle, harmonic Web Audio synthesizers:
+     - `playSound.playerJoin()`: Warm ascending two-tone chime (F5 -> A5, gentle sine waves with soft envelope decay).
+     - `playSound.playerLeave()`: Gentle descending two-tone chime (E5 -> C5, soft envelope decay).
+   - Hooked cues in `useLobbyStore.js` to `ROOM_UPDATED` (player join delta) and `PLAYER_LEFT`.
+
+4. **In-Game Chat Cloud Container & Self-Toast Suppression:**
+   - Replaced right-aligned pill container with a top-center floating cloud container (`fixed top-14 sm:top-16 left-1/2 -translate-x-1/2 z-50`) with realistic fluffy CSS lobe contours and subtle shadow, completely clear of the puzzle board and keypad.
+   - Formatted messages with sender's role badge (`🏎️ Racer` / `👁️ Spectator`), sender's display name, and truncated message text with ellipsis (`...`).
+   - Fixed issue where the message sender received self-toasts by suppressing local reaction triggers on the sender socket and restricting toast banners in game view.
+
+5. **Lobby Chat Placement Below Action Buttons:**
+   - In `HomeMatchmakingLobbyPanel.jsx`, repositioned room action buttons (`Ready`, `Start the Match`, `Leave Room`) directly below the connected players list so their layout and vertical position remain completely stable as players join and leave.
+   - Moved the Chat & Banter box beneath the action buttons.
+
+6. **Social Panel "Recent" Tab & Universal "+ Add Friend" UX:**
+   - Added a 3rd tab (`Recent (N)`) to `HomeSocialPanel.jsx` tracking the last 10 opponents played against with their avatars, names, and ELO ratings.
+   - Added "+ Add" button with instant "Sent ✓" green badge feedback across the Recent tab, lobby player roster, in-game sidebar player list, and post-game scoreboard series card.
+
+### Verification Performed
+
+- `client/src/App.jsx`, `client/src/store/useLobbyStore.js`, `client/src/store/useSocialStore.js`, `client/src/utils/audio.js`, and `server/src/server.js` modified and verified.
+- `npm run build --prefix client`: Exit code 0, 1828 modules transformed cleanly, production bundle and PWA service worker generated in 2.15s with zero errors.
+- `npm test`: All 40 unit and integration tests passed cleanly (40/40 pass, 0 fail).
+
+### Remaining Limitations
+
+- ELO Forfeit Confirmation Modal and Daily Challenge tab under Leaderboards will be addressed in subsequent increments on this branch.
+
+
 ## 2026-11-18 · Modular In-Game UI Components & Sidebars Extraction & Integration (Phase 4)
 
 On branch `refactor/modularize-app-jsx`:

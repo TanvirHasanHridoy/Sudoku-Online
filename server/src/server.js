@@ -319,7 +319,7 @@ wss.on('connection', (ws) => {
       if (seated && (type === 'CREATE_ROOM' || (type === 'JOIN_ROOM' && payload.code !== currentRoomCode))) return;
       if (seated && type === 'REGISTER_PLAYER' && payload.playerId !== currentPlayer.id) return;
       if (registration && connectedClients.get(registeredPlayerId)?.socket !== ws && !['REGISTER_PLAYER','JOIN_ROOM'].includes(type)) return;
-      if (['JOIN_ROOM', 'CREATE_ROOM', 'JOIN_MATCHMAKING_QUEUE'].includes(type) && registeredPlayerId !== payload.playerId) return;
+      if (['JOIN_ROOM', 'CREATE_ROOM', 'JOIN_MATCHMAKING_QUEUE'].includes(type) && registeredPlayerId && registeredPlayerId !== payload.playerId) return;
       switch (type) {
         case 'CREATE_ROOM': {
           const { name, playerId, difficulty, avatar, enableAbilities } = payload;
@@ -445,7 +445,8 @@ wss.on('connection', (ws) => {
             Object.assign(seat, { socket: ws, disconnected: false, isVoiceJoined: false, isVoiceMuted: false });
             currentPlayer = seat;
             connectedClients.set(playerId, registration);
-            currentRoomCode = room.code;
+            if (!registeredPlayerId) registeredPlayerId = playerId;
+          currentRoomCode = room.code;
             if (room.awaitingOutcome?.length && !seat.isSpectator && !seat.hasFinishedGame) {
               finishDepartures(room, room.awaitingOutcome, room.players.filter(p => !p.isSpectator && !p.hasFinishedGame), false);
               room.awaitingOutcome = [];
@@ -461,12 +462,34 @@ wss.on('connection', (ws) => {
             }, playerId);
 
           } else {
-            if (registration?.socket !== ws || Array.from(rooms.values()).some(r => r.players.some(p => p.id === playerId))) return;
+            // If the player was previously in any OTHER room, depart from it first
+            for (const [code, otherRoom] of rooms.entries()) {
+              if (code !== room.code) {
+                const oldSeat = otherRoom.players.find(p => p.id === playerId);
+                if (oldSeat) {
+                  depart(otherRoom, oldSeat, false);
+                }
+              }
+            }
+
+            if (!registration) {
+              registration = {
+                id: playerId,
+                socket: ws,
+                name: name || `Player_${String(playerId || "").slice(0, 4)}`,
+                elo: elo || 1450,
+                supabaseUserId: null,
+                friendsList: new Set()
+              };
+              connectedClients.set(playerId, registration);
+            }
+            if (registration?.socket !== ws) return;
             connectedClients.set(playerId, registration);
             currentPlayer = newSeat;
             room.players.push(currentPlayer);
           }
 
+          if (!registeredPlayerId) registeredPlayerId = playerId;
           currentRoomCode = room.code;
           broadcastOnlineStatusChange(playerId, room.isGameStarted ? 'in-game' : 'in-lobby');
 
@@ -711,6 +734,47 @@ wss.on('connection', (ws) => {
             type: 'HINT_USED',
             payload: { name: currentPlayer.name }
           }, currentPlayer.id);
+          break;
+        }
+
+        case 'FORFEIT_MATCH': {
+          const room = rooms.get(currentRoomCode);
+          if (!room || !currentPlayer) return;
+          if (!room.isGameStarted || currentPlayer.isSpectator || currentPlayer.hasFinishedGame) return;
+
+          console.log(`[WS Forfeit] Player ${currentPlayer.name} forfeited match in room ${currentRoomCode} while remaining in room lobby`);
+
+          currentPlayer.hasFinishedGame = true;
+          currentPlayer.gameResult = 'forfeit';
+          currentPlayer.isReady = false;
+
+          // Settle forfeit penalty (-15 ELO) if rated and not settled yet
+          if (room.rated && !currentPlayer.result) {
+            settle(room, currentPlayer, 'forfeit', -15);
+          }
+
+          const others = room.players.filter(p => p !== currentPlayer && !p.isSpectator);
+          const survivors = others.filter(p => !p.hasFinishedGame);
+
+          // If there is exactly one active survivor left, give them forfeit bonus
+          if (survivors.length === 1 && !survivors[0].disconnected) {
+            survivors[0].forfeitBonus = true;
+            broadcastToRoom(room.code, {
+              type: 'GAME_OVER_LEAVER',
+              payload: {
+                winnerId: survivors[0].id,
+                leaverId: currentPlayer.id,
+                leaverName: currentPlayer.name,
+                eloAdjustment: 15
+              }
+            });
+          }
+
+          // Broadcast updated room state to all players so their UI updates while keeping player in room
+          broadcastToRoom(room.code, {
+            type: 'ROOM_UPDATED',
+            payload: { room: getSanitizedRoom(room) }
+          });
           break;
         }
 
