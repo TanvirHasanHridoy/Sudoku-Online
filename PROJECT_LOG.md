@@ -28,9 +28,14 @@ On branch `feat/theme-ux-color-evaluation-and-redesign`:
    - Updated `THEMES` array in `client/src/components/layout/constants.js` with revised accent colors and theme switcher card preview classes for all 7 themes.
    - Registered `theme-forest-zen` in `client/src/App.jsx` theme removal list.
 
+5. **Eliminate Initial Font Flicker (FOUT):**
+   - Moved Google Fonts from CSS `@import` in `index.css` directly to HTML `<head>` in `client/index.html` with `<link rel="preconnect">` to `fonts.googleapis.com` and `fonts.gstatic.com`.
+   - Fonts (`Outfit` and `Inter`) now begin downloading immediately in parallel at millisecond 0 of HTML parsing, eliminating the initial split-second font snap on first load.
+
 ### Verification Performed
 
-- `client/src/index.css`: Updated root and class tokens for all 7 themes, added dark mode button contrast rules, boosted crosshair tokens, and applied typography differentiation overrides.
+- `client/index.html`: Added preconnect and Google Fonts link tags to `<head>`.
+- `client/src/index.css`: Removed blocking `@import`, updated root and class tokens for all 7 themes, added dark mode button contrast rules, boosted crosshair tokens, and applied typography differentiation overrides.
 - `client/src/components/layout/constants.js`: Aligned `THEMES` array color metadata and preview styles for all 7 themes including Forest Zen.
 - `client/src/App.jsx`: Updated theme class toggling lifecycle.
 - `client/src/components/home/HomeMatchmakingLobbyPanel.jsx` & `client/src/components/game/InGameSidebars.jsx`: Fixed private room code input and placeholder contrast.
