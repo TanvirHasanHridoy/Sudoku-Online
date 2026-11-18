@@ -1,5 +1,37 @@
 # Project log
 
+## 2026-11-18 · Theme UX Evaluation, WCAG AA/AAA Accessibility Redesign, & Contrast Enhancements
+
+On branch `feat/theme-ux-color-evaluation-and-redesign`:
+
+### Player-Facing Behavior & Architecture
+
+1. **Theme Color Palette & WCAG AA/AAA Redesign:**
+   - **Nordic Light**: Elevated Scandinavian minimalism with dark slate body/clue text (`#0f172a`), deep indigo interactive accent (`#4338ca`), crisp ice-indigo selection wash (`#c7d2fe`), and clean airy slate-ice cell highlighting (`#f1f5f9`).
+   - **Nordic Dark**: Implemented deep Arctic midnight background (`#0b1120`, `#0f172a`), luminous periwinkle accent (`#818cf8`), and soft nocturnal cell highlights (`rgba(148, 163, 184, 0.12)`).
+   - **Stark / Monochrome Light**: High-fashion editorial paper aesthetic (`#f4f4f5` background, `#ffffff` panel, `#09090b` clues). Solved the pre-filled clue vs. user entry ambiguity by styling user numbers in distinct deep slate-charcoal (`#3f3f46`), with clear zinc highlighting (`#f4f4f5`) and selection (`#e4e4e7`).
+   - **Stark / Monochrome Dark**: Purged incongruous lime-green accent, shifting to clean titanium/pure white (`#f4f4f5`, `#ffffff`) on deep OLED slate (`#09090b`, `#121215`) with high-contrast neutral cell highlights (`rgba(255, 255, 255, 0.08)` and `0.22`).
+   - **Cyber Neon (Synthwave Outrun)**: Replaced eye-fatiguing green body text with ultra-readable cool cyber-white (`#f1f5f9`). Paired with synthwave electric cyan (`#00f0ff`) for user placed numbers and neon magenta (`#ec4899`) accents. Fixed invisible cell highlighting by adding an atmospheric purple neon wash (`rgba(168, 85, 247, 0.18)`).
+   - **Pastel Peach**: Fixed the critical pitch-black cell highlight bug (`#22211f`) which previously caused near-total clue illegibility (1.43:1). Highlight now renders as a soft apricot tint (`#fff7ed`), cell selection as warm apricot (`#fed7aa`), and accent as rich warm terracotta (`#c2410c`, > 4.5:1 WCAG AA).
+
+2. **UI Component Contrast & Text Inversion:**
+   - Configured high-contrast text color overrides for primary action buttons (`.bg-accent-custom text-white`) across dark themes, ensuring buttons in Monochrome Dark, Nordic Dark, and Cyber Neon maintain ≥ 6:1 to 19:1 contrast ratios.
+   - Enhanced Sudoku mistake/error text styling in `SudokuGrid.jsx` to `text-rose-600 dark:text-rose-400` for crisp WCAG AA compliance (4.7:1 on light panels).
+   - Ensured pencil notes in `SudokuGrid.jsx` cleanly adopt `text-text-custom` with 70% opacity across all 6 themes.
+   - Updated `THEMES` array in `client/src/components/layout/constants.js` with revised accent colors and theme switcher card preview classes matching the new aesthetics.
+
+### Verification Performed
+
+- `client/src/index.css`: Updated root and class tokens for all 6 themes, added dark mode button contrast rules, and applied typography differentiation overrides.
+- `client/src/components/layout/constants.js`: Aligned `THEMES` array color metadata and preview styles.
+- `client/src/components/SudokuGrid.jsx`: Updated dynamic cell background classes, clue text differentiation, pencil notes text styling, and mistake color contrast.
+- `npm test`: All 42 unit and integration tests passed cleanly (42/42 pass, 0 fail).
+- `npm run build --prefix client`: Production Vite bundle generated with 0 errors in 1.61s.
+
+### Remaining Limitations
+
+- None identified; all 6 themes satisfy WCAG contrast targets and severe visual bugs (Pastel blackout, Cyber fatigue, Monochrome lime) have been resolved.
+
 ## 2026-11-18 · Stay in Room Lobby on Exit, ELO Forfeit Warning Modal, Daily Leaderboard Tab, & Invite Link Fallback
 
 On branch `feat/room-lobby-forfeit-leaderboard-and-invite-link`:

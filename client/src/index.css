@@ -3,101 +3,93 @@
 @import "tailwindcss";
 
 :root {
-  /* Nordic Light (Default) */
+  /* 1. Nordic Light (Default) - Airy Scandinavian Minimalism */
   --bg-color: #f8fafc;
-  --text-color: #1e293b;
+  --text-color: #0f172a;
   --panel-color: #ffffff;
   --border-color: #e2e8f0;
-  --subgrid-border: #94a3b8;
-  /* Dark slate - stark contrast against light selection */
-  --accent-color: #4f46e5;
-  --accent-hover: #4338ca;
+  --subgrid-border: #64748b;
+  --accent-color: #4338ca;
+  --accent-hover: #3730a3;
   --accent-glow: #e0e7ff;
   --grid-bg: #cbd5e1;
-  --cell-selected: #cbd5e1;
-  --cell-highlight: #a6a6a6;
+  --cell-selected: #c7d2fe;
+  --cell-highlight: #f1f5f9;
 }
 
 html.theme-nordic-dark {
-  --bg-color: #030712;
-  --text-color: #f1f5f9;
-  --panel-color: #0b0f19;
+  /* 2. Nordic Dark - Deep Arctic Midnight */
+  --bg-color: #0b1120;
+  --text-color: #f8fafc;
+  --panel-color: #0f172a;
   --border-color: #1e293b;
   --subgrid-border: #475569;
-  /* Slate 600 - stark contrast in dark mode */
-  --accent-color: #6366f1;
-  --accent-hover: #818cf8;
-  --accent-glow: rgba(99, 102, 241, 0.15);
+  --accent-color: #818cf8;
+  --accent-hover: #a5b4fc;
+  --accent-glow: rgba(129, 140, 248, 0.15);
   --grid-bg: #1e293b;
-  --cell-selected: rgba(99, 102, 241, 0.3);
-  --cell-highlight: rgba(118, 129, 148, 0.4);
+  --cell-selected: rgba(129, 140, 248, 0.35);
+  --cell-highlight: rgba(148, 163, 184, 0.12);
 }
 
 html.theme-monochrome-light {
-  --bg-color: #fafafa;
-  --text-color: #18181b;
+  /* 3. Stark / Monochrome Light - Editorial Paper */
+  --bg-color: #f4f4f5;
+  --text-color: #09090b;
   --panel-color: #ffffff;
   --border-color: #e4e4e7;
-  --subgrid-border: #71717a;
-  /* Zinc 500 - bold gray */
-  --accent-color: #09090b;
+  --subgrid-border: #52525b;
+  --accent-color: #18181b;
   --accent-hover: #27272a;
   --accent-glow: #f4f4f5;
-  --grid-bg: #e4e4e7;
+  --grid-bg: #d4d4d8;
   --cell-selected: #e4e4e7;
-  --cell-highlight: #ababb4;
+  --cell-highlight: #f4f4f5;
 }
 
 html.theme-monochrome-dark {
+  /* 4. Stark / Monochrome Dark - OLED Slate & Titanium */
   --bg-color: #09090b;
   --text-color: #fafafa;
-  --panel-color: #18181b;
+  --panel-color: #121215;
   --border-color: #27272a;
-  --subgrid-border: #52525b;
-  /* Zinc 600 - highly visible */
-  --accent-color: #49da2f;
-  --accent-hover: #e4e4e7;
-  --accent-glow: rgba(255, 255, 255, 0.1);
+  --subgrid-border: #71717a;
+  --accent-color: #f4f4f5;
+  --accent-hover: #ffffff;
+  --accent-glow: rgba(255, 255, 255, 0.12);
   --grid-bg: #27272a;
-  --cell-selected: rgba(255, 255, 255, 0.25);
-  --cell-highlight: rgba(67, 67, 108, 0.6);
+  --cell-selected: rgba(255, 255, 255, 0.22);
+  --cell-highlight: rgba(255, 255, 255, 0.08);
 }
 
 html.theme-cyberpunk {
-  --bg-color: #0f051d;
-  --text-color: #39ff14;
-  /* Neon green text */
-  --panel-color: #1a0b2e;
-  --border-color: #ec4899;
-  /* Pink borders */
-  --subgrid-border: #39ff14;
-  /* Neon Green - stunning contrast against pink grid bg! */
+  /* 5. Cyber Neon - Synthwave Outrun */
+  --bg-color: #090214;
+  --text-color: #f1f5f9;
+  --panel-color: #150a26;
+  --border-color: #3b1d66;
+  --subgrid-border: #00f0ff;
   --accent-color: #ec4899;
-  /* Neon pink accent */
   --accent-hover: #f472b6;
-  --accent-glow: rgba(236, 72, 153, 0.2);
-  --grid-bg: #ec4899;
-  --cell-selected: rgba(236, 72, 153, 0.4);
-  --cell-highlight: rgba(26, 11, 46, 0.8);
+  --accent-glow: rgba(236, 72, 153, 0.25);
+  --grid-bg: #261142;
+  --cell-selected: rgba(236, 72, 153, 0.35);
+  --cell-highlight: rgba(168, 85, 247, 0.18);
 }
 
 html.theme-pastel {
-  --bg-color: #fffaf0;
-  /* warm cream */
-  --text-color: #4a3728;
-  /* deep soft brown */
+  /* 6. Pastel Peach - Gentle Cream & Apricot */
+  --bg-color: #fffaf5;
+  --text-color: #431407;
   --panel-color: #ffffff;
   --border-color: #fed7aa;
-  /* soft orange */
-  --subgrid-border: #f97316;
-  /* Bold orange - premium contrast */
-  --accent-color: #dd6b20;
-  /* warm pastel orange */
-  --accent-hover: #c05621;
+  --subgrid-border: #ea580c;
+  --accent-color: #c2410c;
+  --accent-hover: #9a3412;
   --accent-glow: #ffedd5;
   --grid-bg: #fed7aa;
-  --cell-selected: #ffedd5;
-  --cell-highlight: #22211f;
+  --cell-selected: #fed7aa;
+  --cell-highlight: #fff7ed;
 }
 
 @theme {
@@ -274,11 +266,38 @@ html.theme-pastel {
   animation: floatEmoji 1.5s ease-out forwards;
 }
 
-/* Cyberpunk Neon Theme Selected Cell text color override */
-html.theme-cyberpunk .sudoku-cell.bg-cell-selected,
-html.theme-cyberpunk .sudoku-cell.bg-cell-selected\/60 {
-  color: #39ff14 !important;
-  /* Force electric neon green text for high readability */
+/* Primary Button Contrast in Dark Themes */
+html.theme-monochrome-dark button.bg-accent-custom,
+html.theme-monochrome-dark .bg-accent-custom.text-white,
+html.theme-monochrome-dark button.bg-accent-custom *,
+html.theme-monochrome-dark .bg-accent-custom.text-white * {
+  color: #09090b !important;
+}
+
+html.theme-nordic-dark button.bg-accent-custom,
+html.theme-nordic-dark .bg-accent-custom.text-white,
+html.theme-nordic-dark button.bg-accent-custom *,
+html.theme-nordic-dark .bg-accent-custom.text-white * {
+  color: #0b1120 !important;
+}
+
+html.theme-cyberpunk button.bg-accent-custom,
+html.theme-cyberpunk .bg-accent-custom.text-white,
+html.theme-cyberpunk button.bg-accent-custom *,
+html.theme-cyberpunk .bg-accent-custom.text-white * {
+  color: #0a0118 !important;
+}
+
+/* Cyberpunk Grid Number Harmony */
+html.theme-cyberpunk .sudoku-cell .text-accent-custom,
+html.theme-cyberpunk .sudoku-cell.text-accent-custom {
+  color: #00f0ff !important;
+}
+
+/* Monochrome Light Clue vs. User Number Differentiation */
+html.theme-monochrome-light .sudoku-cell.text-accent-custom,
+html.theme-monochrome-light .sudoku-cell .text-accent-custom {
+  color: #3f3f46 !important;
 }
 
 /* Speaking Pulse Avatar voice indicator animation */

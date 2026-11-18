@@ -85,11 +85,11 @@ export default function SudokuGrid({
                 if (isSelected) {
                   bgClass = isSpectatingMode
                     ? 'bg-indigo-500/20 text-indigo-400 ring-2 ring-indigo-500/50 z-10'
-                    : 'bg-cell-selected text-accent-custom ring-2 ring-accent-custom ring-inset z-10';
+                    : 'bg-cell-selected ring-2 ring-accent-custom ring-inset z-10';
                 } else if (isSameNum) {
                   bgClass = isSpectatingMode
                     ? 'bg-indigo-500/10 text-indigo-400 font-bold'
-                    : 'bg-cell-selected/60 text-accent-custom font-bold';
+                    : 'bg-cell-selected/60 font-bold';
                 } else if (isHighlighted) {
                   bgClass = isSpectatingMode
                     ? 'bg-indigo-500/5'
@@ -100,11 +100,11 @@ export default function SudokuGrid({
 
                 // Typography and error coloring
                 let fontClass = isOriginal 
-                  ? 'font-bold' 
+                  ? 'text-text-custom font-bold' 
                   : 'text-accent-custom font-semibold';
 
                 if (isMistake) {
-                  fontClass = 'text-rose-500 font-extrabold dark:text-rose-400';
+                  fontClass = 'text-rose-600 font-extrabold dark:text-rose-400';
                 }
 
                 return (
@@ -141,7 +141,7 @@ export default function SudokuGrid({
                       <span>{val}</span>
                     ) : (
                       // Pencil Notes Grid
-                      <div className="grid grid-cols-3 w-full h-full p-[2px] pointer-events-none">
+                      <div className="grid grid-cols-3 w-full h-full p-[2px] pointer-events-none text-text-custom">
                         {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
                           <span
                             key={num}

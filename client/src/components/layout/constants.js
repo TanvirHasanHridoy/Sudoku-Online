@@ -2,38 +2,38 @@ export const THEMES = [
   {
     id: "nordic-light",
     name: "Nordic Light",
-    color: "#4f46e5",
+    color: "#4338ca",
     preview: "bg-white border-slate-200",
   },
   {
     id: "nordic-dark",
     name: "Nordic Dark",
-    color: "#6366f1",
-    preview: "bg-[#0b0f19] border-slate-800",
+    color: "#818cf8",
+    preview: "bg-[#0f172a] border-slate-800",
   },
   {
     id: "monochrome-light",
     name: "Stark Light",
-    color: "#09090b",
+    color: "#18181b",
     preview: "bg-white border-zinc-200",
   },
   {
     id: "monochrome-dark",
     name: "Stark Dark",
-    color: "#ffffff",
-    preview: "bg-[#18181b] border-zinc-800",
+    color: "#f4f4f5",
+    preview: "bg-[#121215] border-zinc-800",
   },
   {
     id: "cyberpunk",
     name: "Cyber Neon",
     color: "#ec4899",
-    preview: "bg-[#1a0b2e] border-pink-500",
+    preview: "bg-[#150a26] border-purple-500",
   },
   {
     id: "pastel",
     name: "Pastel Peach",
-    color: "#dd6b20",
-    preview: "bg-[#fffaf0] border-orange-200",
+    color: "#c2410c",
+    preview: "bg-[#fffaf5] border-orange-200",
   },
 ];
 
