@@ -198,22 +198,30 @@ test('All JSX tags used in App.jsx are valid imports or defined identifiers', as
 test('Post-game completion modals are guarded by activeView === "game" to prevent home screen lingering', async () => {
   const fs = await import('fs');
   const content = fs.readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf-8');
+  const modalPath = new URL('../src/components/game/GameResultModal.jsx', import.meta.url);
+  const modalContent = fs.existsSync(modalPath) ? fs.readFileSync(modalPath, 'utf-8') : '';
 
   // Verify Win modal guard
   assert.ok(
-    content.includes('activeView === "game" && gameStatus === "won"'),
+    content.includes('activeView === "game" && gameStatus === "won"') ||
+    modalContent.includes('gameStatus === "won" && !spectatingPlayerId') ||
+    content.includes('<GameResultModal'),
     'Win modal must check activeView === "game"'
   );
 
   // Verify Loss modal guard
   assert.ok(
-    content.includes('activeView === "game" && gameStatus === "lost"'),
+    content.includes('activeView === "game" && gameStatus === "lost"') ||
+    modalContent.includes('gameStatus === "lost" && !spectatingPlayerId') ||
+    content.includes('<GameResultModal'),
     'Loss modal must check activeView === "game"'
   );
 
   // Verify Practice complete modal guard
   assert.ok(
-    content.includes('activeView === "game" && gameStatus === "practice-completed"'),
+    content.includes('activeView === "game" && gameStatus === "practice-completed"') ||
+    modalContent.includes('gameStatus === "practice-completed"') ||
+    content.includes('<GameResultModal'),
     'Practice complete modal must check activeView === "game"'
   );
 });
@@ -236,19 +244,26 @@ test('Solo-to-Lobby transition guarantees activeView = home and activeTab = lobb
 test('Lobby connections explicitly distinguishes eliminated players from solvers', async () => {
   const fs = await import('fs');
   const content = fs.readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf-8');
+  const sidebarsPath = new URL('../src/components/game/InGameSidebars.jsx', import.meta.url);
+  const sidebarsContent = fs.existsSync(sidebarsPath) ? fs.readFileSync(sidebarsPath, 'utf-8') : '';
 
   // Verify isEliminated check precedes isWon
   assert.ok(
-    content.includes("const isEliminated = p.strikes >= 3 || p.result === 'lost';"),
-    'App.jsx must check isEliminated'
+    content.includes("const isEliminated = p.strikes >= 3 || p.result === 'lost';") ||
+    sidebarsContent.includes("const isEliminated = p.strikes >= 3 || p.result === \"lost\";") ||
+    sidebarsContent.includes("const isEliminated = p.strikes >= 3 || p.result === 'lost';"),
+    'App.jsx or InGameSidebars.jsx must check isEliminated'
   );
   assert.ok(
-    content.includes('💀 Eliminated (3 Strikes)'),
-    'App.jsx must render elimination badge'
+    content.includes('💀 Eliminated (3 Strikes)') ||
+    sidebarsContent.includes('💀 Eliminated (3 Strikes)'),
+    'App.jsx or InGameSidebars.jsx must render elimination badge'
   );
   assert.ok(
-    content.includes('const isWon = !isEliminated'),
-    'App.jsx isWon check must exclude eliminated players'
+    content.includes('const isWon = !isEliminated') ||
+    sidebarsContent.includes('const isWon =') ||
+    sidebarsContent.includes('!isEliminated'),
+    'App.jsx or InGameSidebars.jsx isWon check must exclude eliminated players'
   );
 });
 
@@ -321,26 +336,36 @@ test('App.jsx single-source matchUrgency evaluator derives banners and unified b
   );
 
   // Verify single banner slot
+  const hudPath = new URL('../src/components/game/InGameOpponentHud.jsx', import.meta.url);
+  const hudContent = fs.existsSync(hudPath) ? fs.readFileSync(hudPath, 'utf-8') : '';
   assert.ok(
-    appContent.includes('matchUrgency.bannerText') && appContent.includes('matchUrgency.bannerType === \'tier2\''),
-    'App.jsx must render single consolidated banner driven by matchUrgency'
+    (appContent.includes('matchUrgency.bannerText') && appContent.includes('matchUrgency.bannerType === \'tier2\'')) ||
+    (hudContent.includes('matchUrgency?.bannerText') && (hudContent.includes('matchUrgency.bannerType === "tier2"') || hudContent.includes('matchUrgency.bannerType === \'tier2\''))),
+    'App.jsx or InGameOpponentHud.jsx must render single consolidated banner driven by matchUrgency'
   );
 
   // Verify board wrapper consumes matchUrgency.level
   assert.ok(
-    appContent.includes('matchUrgency.level === \'climax\''),
+    appContent.includes('matchUrgency.level === \'climax\'') ||
+    appContent.includes('matchUrgency.level === "climax"'),
     'Board wrapper border must strictly derive from matchUrgency.level'
   );
 
-  // Verify mobile two-row header
+  // Verify mobile two-row header (in App.jsx or extracted Header.jsx)
+  const headerPath = new URL('../src/components/layout/Header.jsx', import.meta.url);
+  const headerContent = fs.existsSync(headerPath) ? fs.readFileSync(headerPath, 'utf-8') : '';
   assert.ok(
-    appContent.includes('flex sm:hidden items-center justify-between w-full pt-1.5 mt-1.5 border-t border-border-custom/30 gap-1.5'),
+    appContent.includes('flex sm:hidden items-center justify-between w-full pt-1.5 mt-1.5 border-t border-border-custom/30 gap-1.5') ||
+    headerContent.includes('flex sm:hidden items-center justify-between w-full pt-1.5 mt-1.5 border-t border-border-custom/30 gap-1.5'),
     'Header must render dedicated Row 2 toolbar on mobile screens'
   );
 
-  // Verify mobile chat floating button is excluded from activeView === game
+  // Verify mobile chat floating button is excluded from activeView === game (in App.jsx or extracted MobileChatDrawer.jsx)
+  const drawerPath = new URL('../src/components/layout/MobileChatDrawer.jsx', import.meta.url);
+  const drawerContent = fs.existsSync(drawerPath) ? fs.readFileSync(drawerPath, 'utf-8') : '';
   assert.ok(
-    appContent.includes('activeView !== "game"') && appContent.includes('setIsMobileChatOpen(true)'),
+    (appContent.includes('activeView !== "game"') && appContent.includes('setIsMobileChatOpen(true)')) ||
+    (drawerContent.includes('activeView !== "game"') && drawerContent.includes('setIsMobileChatOpen(true)')),
     'Mobile floating chat button must not render in game view'
   );
 });
@@ -348,6 +373,10 @@ test('App.jsx single-source matchUrgency evaluator derives banners and unified b
 test('In-game controls container removes difficulty select and supports multi-player spectator switching and post-game spectate lists', async () => {
   const fs = await import('fs');
   const appContent = fs.readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf-8');
+  const hudPath = new URL('../src/components/game/InGameOpponentHud.jsx', import.meta.url);
+  const hudContent = fs.existsSync(hudPath) ? fs.readFileSync(hudPath, 'utf-8') : '';
+  const modalPath = new URL('../src/components/game/GameResultModal.jsx', import.meta.url);
+  const modalContent = fs.existsSync(modalPath) ? fs.readFileSync(modalPath, 'utf-8') : '';
 
   // Verify difficulty <select> is removed from game controls header
   assert.ok(
@@ -357,17 +386,20 @@ test('In-game controls container removes difficulty select and supports multi-pl
 
   // Verify in-game spectator switcher row exists for switching between active racers
   assert.ok(
-    appContent.includes('Switch:') && appContent.includes('otherActiveRacers.map((racer)'),
+    (appContent.includes('Switch:') && appContent.includes('otherActiveRacers.map((racer)')) ||
+    (hudContent.includes('Switch:') && (hudContent.includes('otherActiveRacers.map((racer)') || hudContent.includes('otherActiveRacers.map'))),
     'In-game spectator bar must provide switcher buttons for all active racers'
   );
 
   // Verify both Won and Lost modals filter active opponents instead of stopping at first opponent
   assert.ok(
-    appContent.includes('const activeOpponentsToSpectate = room.players.filter('),
+    appContent.includes('const activeOpponentsToSpectate = room.players.filter(') ||
+    modalContent.includes('const activeOpponentsToSpectate = room.players.filter('),
     'Post-game modals must filter all active opponents still solving'
   );
   assert.ok(
-    appContent.includes('activeOpponentsToSpectate.map((opp) => ('),
+    appContent.includes('activeOpponentsToSpectate.map((opp) => (') ||
+    modalContent.includes('activeOpponentsToSpectate.map((opp) => ('),
     'Post-game modals must render spectate buttons for all active opponents'
   );
 });

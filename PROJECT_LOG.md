@@ -1,5 +1,128 @@
 # Project log
 
+## 2026-11-18 · Modular In-Game UI Components & Sidebars Extraction & Integration (Phase 4)
+
+On branch `refactor/modularize-app-jsx`:
+
+### Player-Facing Behavior & Architecture
+
+1. **In-Game UI Components Modularization & App.jsx Integration:**
+   - Extracted 6 modular in-game UI components and sidebars from `client/src/App.jsx` into self-contained components in `client/src/components/game/`:
+     - `GameResultModal.jsx`: Post-game modal overlays for Won, Lost, and Practice-Completed states. Features victory/elimination badges, solve time and mistakes statistics, co-op team synergy contribution summary, ELO & rank ratings, detailed move-by-move solver timeline replay analysis with hint/error tags, challenge results comparison card and 48-hour share link, 1v1 rivalry series standings with active win streak indicators, active opponents multi-spectator action buttons, rematch voting action with live vote indicator, and Return to Lobby / Back to Home navigation.
+     - `SpectatorView.jsx`: Full dual-board spectator dashboard featuring 2-player split side-by-side board view, single board / multi-racer tab switcher, co-op shared board mode, live spectators list, and live cheer reaction toolbar with spectator chat.
+     - `InGameControlsHeader.jsx`: Top controls bar with Exit to Home, daily challenge date / difficulty badge, live timer, hearts strike display (X/3), consensus pause button, WebRTC voice microphone mute toggle, and quick reaction/cloud toast popovers.
+     - `InGameOpponentHud.jsx`: 1v1 rivalry series banner with streak counter, mobile swipable opponent carousel, live race ribbon progress ticker with finisher placements and elimination badges, live spectator indicator banner, and consolidated urgency climax banner.
+     - `CombatControlBar.jsx`: In-game combat panel featuring 32px circular SVG mana reactor dial with percentage readouts, streak counter badge, and sabotage abilities with cooldowns and mana costs (Cleanse/Shield, Ink/Fog, Scramble/Swap, Freeze, Scan).
+     - `InGameSidebars.jsx`: Right column in-game sidebar comprising multiplayer room configuration specs, live player roster with completion progress & strikes, WebRTC voice channel panel with mute/leave controls, desktop room chat with emote sender, ready/start match action buttons, ELO matchmaking queue status, friends/rivalries social panel, and solo daily leaderboard preview.
+     - `index.js`: Clean barrel exports for all 6 modular components.
+   - Integrated all 6 components into `client/src/App.jsx`, cleanly replacing the inline spectator dashboard, top header, opponent carousel & climax banners, combat control panel, lobby/stats right column sidebar, and post-game win/loss/practice modals.
+   - Cleaned up redundant imports (unused Lucide icons, `QRCodeSVG`, `LOFI_PRESETS`, and dead `renderSpectatorView` helper).
+   - Reduced `client/src/App.jsx` from 4,928 lines down to 2,375 lines (-2,553 lines in Phase 4; cumulative -4,693 lines from the original 7,068 lines).
+   - Preserved all original JSX structure, Tailwind styling classes, animations, and behavioral contracts.
+
+### Verification Performed
+
+- Created all 6 in-game components and barrel export in `client/src/components/game/`.
+- Integrated `GameResultModal`, `SpectatorView`, `InGameControlsHeader`, `InGameOpponentHud`, `CombatControlBar`, and `InGameSidebars` into `client/src/App.jsx`.
+- `npx eslint client/src/components/game`: Exit code 0 with 0 errors and 0 warnings.
+- `npm run build --prefix client`: Exit code 0, 1828 modules transformed cleanly in 1.96s, production bundle and PWA service worker generated with zero errors.
+- `npm test`: All 40 unit and integration tests passed cleanly (40/40 pass, 0 fail).
+
+### Remaining Limitations
+
+- `client/src/App.jsx` is now down to 2,375 lines, with all modals, layouts, home panels, and in-game UI components modularized into dedicated directories. Any further reduction would target extracting the core gameplay board container and keyboard handlers.
+
+## 2026-11-17 · Modular Home Screen Panels Extraction & Integration (Phase 3)
+
+On branch `refactor/modularize-app-jsx`:
+
+### Player-Facing Behavior & Architecture
+
+1. **Home Screen Panels Modularization & App.jsx Integration:**
+   - Extracted 3 modular panels from `client/src/App.jsx` (`activeView === "home"`) into self-contained components in `client/src/components/home/`:
+     - `HomeProfilePanel.jsx`: Left panel featuring interactive avatar display and picker modal grid (`AVATARS`), editable display name input with verified/guest badge and validation indicators, live spectator count indicator, core stats (ELO and Rank tier), comprehensive personal career statistics (played, completed, solo wins, match wins, win rate, and average solve time), account actions (Google link / sign out), and pending friend request approval/rejection card.
+     - `HomeMatchmakingLobbyPanel.jsx`: Center panel featuring tab navigation (Private Room / Lobby, Matchmaking, Global Leaderboard), rematch notifications & spectate buttons, daily challenge launch card with calendar date picker, difficulty picker, offline-ready solo game launch, multiplayer & co-op room hosting with optional special abilities (mana) toggles, 6-digit room code joiner, live room display with copyable code, 1-click shareable invite link & QR code, room specs badges, connected players list with WebRTC mic indicators & host kick controls, active lobby chat & banter with quick reaction presets, and competitive ELO matchmaking queue with search timer & cancel actions.
+     - `HomeSocialPanel.jsx`: Right panel featuring tab switcher (Friends vs Rivalries), friend request submission form, pending friend request management, live friends list with real-time status pulses (online, in-lobby, in-game), 1-click room invite and spectate buttons, and head-to-head rivalry records showing win/loss tallies, match counts, and active win streaks.
+     - `index.js`: Clean barrel exports for `HomeProfilePanel`, `HomeMatchmakingLobbyPanel`, and `HomeSocialPanel`.
+   - Integrated all 3 components into `client/src/App.jsx`, replacing over 1,200 lines of inline JSX with `<HomeProfilePanel />`, `<HomeMatchmakingLobbyPanel />`, and `<HomeSocialPanel />`.
+   - Passed and wired all required props, callbacks, and store bindings cleanly.
+   - Reduced `client/src/App.jsx` from 6,093 lines down to 4,928 lines (-1,165 lines in Phase 3; cumulative -2,140 lines from original 7,068).
+   - Preserved all existing JSX structure, Tailwind styling classes, animations, and behavioral contracts.
+
+### Verification Performed
+
+- Created all 3 home components and barrel export in `client/src/components/home/`.
+- Integrated `HomeProfilePanel`, `HomeMatchmakingLobbyPanel`, and `HomeSocialPanel` into `client/src/App.jsx`.
+- `npx eslint client/src/components/home`: Exit code 0, 0 errors, 0 warnings.
+- `npm run build --prefix client`: Exit code 0, 1821 modules transformed cleanly in 1.39s.
+- `npm test`: All 40 unit and integration tests passed cleanly (40/40 pass, 0 fail).
+
+### Remaining Limitations
+
+- Future phases will extract game puzzle board, in-game spectator views, and post-game modals to bring `App.jsx` under the target threshold.
+
+
+## 2026-11-17 · Modular Layout Component Extraction & Integration (Phase 2)
+
+On branch `refactor/modularize-app-jsx`:
+
+### Player-Facing Behavior & Architecture
+
+1. **Layout & Navigation Component Modularization & App.jsx Integration:**
+   - Extracted 4 modular layout and navigation components from `client/src/App.jsx` into `client/src/components/layout/`:
+     - `Header.jsx`: Top navigation header with brand title, room code badge, Google auth profile/signin, desktop utility toolbar (theme picker dropdown, audio SFX toggle, Focus Lo-Fi popover with mood presets & volume slider, game guide button, settings button), online player avatar, name editing input, and responsive mobile utility toolbar.
+     - `ToastContainer.jsx`: Peripheral climax aura warning overlay (`isOpponentClose`), floating toast notifications stack (`toasts`, `removeToast`), non-blocking opponent disconnection warning banner, and non-intrusive quick reaction banner.
+     - `WebRTCAudioManager.jsx`: Hidden WebRTC remote audio elements with automatic stream-binding effects and multi-peer mesh audio players.
+     - `MobileChatDrawer.jsx`: Mobile floating pill button with unread counter, slide-up bottom sheet drawer with mute toggle for in-game cloud toasts, quick emote presets, chat message list with auto-scroll, and chat input.
+     - `constants.js`: Reusable theme palettes (`THEMES`) and avatar options (`AVATARS`).
+     - `index.js`: Clean barrel exports for `Header`, `ToastContainer`, `WebRTCAudioManager`, `MobileChatDrawer`, `THEMES`, and `AVATARS`.
+   - Integrated `Header`, `ToastContainer`, `WebRTCAudioManager`, and `MobileChatDrawer` into `client/src/App.jsx`.
+   - Replaced inline implementations with clean JSX tags, passing required props and wiring state.
+   - Removed redundant constants, refs, and unused icons in `App.jsx`, reducing `App.jsx` from 6,664 to 6,093 lines (over 570 lines eliminated in Phase 2 alone, bringing total App.jsx reduction to ~975 lines).
+   - Preserved all original JSX structure, Tailwind styling classes, animations, and prop contracts.
+
+### Verification Performed
+
+- Extracted 4 layout components, constants, and barrel export into `client/src/components/layout/`.
+- Integrated all layout components into `client/src/App.jsx`.
+- `npx eslint client/src/components/layout`: Zero errors, zero warnings.
+- `npx eslint client/src/components/layout client/src/App.jsx`: No new errors introduced; baseline errors decreased from 68 down to 40 (30 errors, 10 warnings).
+- `npm run build --prefix client`: Exit code 0, 1817 modules transformed cleanly, production bundle and PWA service worker generated in 1.59s.
+- `npm test`: All 40 unit and integration tests passed cleanly (40/40 pass, 0 fail).
+
+### Remaining Limitations
+
+- Future phases (Home screen panels, In-game sidebars/overlays) will continue modularizing `App.jsx` down to target sub-2000 lines.
+
+## 2026-11-17 · Modular Modal Extraction (Phase 1)
+
+On branch `refactor/modularize-app-jsx`:
+
+### Player-Facing Behavior & Architecture
+
+1. **Modal Component Modularization & Integration:**
+   - Extracted 5 self-contained modal dialog components from monolithic `client/src/App.jsx` into `client/src/components/modals/`:
+     - `SettingsModal.jsx`: User preferences, focus mode, digit-first input, keypad layout, mana option settings, sound effects, in-game chat popup toggles, and procedural Lo-Fi soundscape controls.
+     - `PauseVoteModal.jsx`: Multiplayer consensus pause/resume voting dialog with Agree and Reject actions.
+     - `AccountConflictModal.jsx`: Google account vs guest profile conflict resolution overlay with profile detail comparison and resolution actions.
+     - `LobbyInvitationToast.jsx`: Floating incoming lobby challenge toast with mode/difficulty tags, accept and decline handlers.
+     - `VoicePromptPopup.jsx`: Real-time WebRTC opponent voice-joined notification toast with join and dismiss handlers.
+     - `index.js`: Barrel export for clean modular imports.
+   - Integrated all 5 modal components into `client/src/App.jsx`, replacing their inline implementations and passing necessary props.
+   - Removed dead duplicate blocks for `AccountConflictModal` and `DailyCalendarModal` in `App.jsx` (saving over 400 lines, reducing `App.jsx` from 7,068 to 6,664 lines).
+   - Preserved all original JSX structure, Tailwind styling, animations, and prop contracts.
+
+### Verification Performed
+
+- Extracted 5 modal files and barrel exports into `client/src/components/modals/`.
+- Integrated all components into `client/src/App.jsx`.
+- `npm run build`: Exit code 0, 1811 modules transformed cleanly, production bundle and PWA service worker generated in 2.33s.
+- `npx eslint src/App.jsx src/components/modals`: Zero new errors introduced; all 5 modal components pass with 0 errors and 0 warnings.
+
+### Remaining Limitations
+
+- None for Phase 1 modals. Remaining phases (Layout/Header, Home panels, In-game sidebars) will continue refactoring App.jsx down further.
+
 ## 2026-11-16 · In-Game Cloud Chat Toast, Button Pulse & Mute Controls
 
 On branch `feature/cloud-chat-toast-and-pulse`:
