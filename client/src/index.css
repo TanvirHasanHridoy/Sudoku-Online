@@ -14,7 +14,7 @@
   --accent-glow: #e0e7ff;
   --grid-bg: #cbd5e1;
   --cell-selected: #c7d2fe;
-  --cell-highlight: #f1f5f9;
+  --cell-highlight: #e0e7ff;
 }
 
 html.theme-nordic-dark {
@@ -28,8 +28,8 @@ html.theme-nordic-dark {
   --accent-hover: #a5b4fc;
   --accent-glow: rgba(129, 140, 248, 0.15);
   --grid-bg: #1e293b;
-  --cell-selected: rgba(129, 140, 248, 0.35);
-  --cell-highlight: rgba(148, 163, 184, 0.12);
+  --cell-selected: rgba(129, 140, 248, 0.45);
+  --cell-highlight: rgba(99, 102, 241, 0.24);
 }
 
 html.theme-monochrome-light {
@@ -43,8 +43,8 @@ html.theme-monochrome-light {
   --accent-hover: #27272a;
   --accent-glow: #f4f4f5;
   --grid-bg: #d4d4d8;
-  --cell-selected: #e4e4e7;
-  --cell-highlight: #f4f4f5;
+  --cell-selected: #cbd5e1;
+  --cell-highlight: #e4e4e7;
 }
 
 html.theme-monochrome-dark {
@@ -58,8 +58,8 @@ html.theme-monochrome-dark {
   --accent-hover: #ffffff;
   --accent-glow: rgba(255, 255, 255, 0.12);
   --grid-bg: #27272a;
-  --cell-selected: rgba(255, 255, 255, 0.22);
-  --cell-highlight: rgba(255, 255, 255, 0.08);
+  --cell-selected: rgba(255, 255, 255, 0.32);
+  --cell-highlight: rgba(255, 255, 255, 0.16);
 }
 
 html.theme-cyberpunk {
@@ -73,8 +73,8 @@ html.theme-cyberpunk {
   --accent-hover: #f472b6;
   --accent-glow: rgba(236, 72, 153, 0.25);
   --grid-bg: #261142;
-  --cell-selected: rgba(236, 72, 153, 0.35);
-  --cell-highlight: rgba(168, 85, 247, 0.18);
+  --cell-selected: rgba(236, 72, 153, 0.50);
+  --cell-highlight: rgba(168, 85, 247, 0.34);
 }
 
 html.theme-pastel {
@@ -88,8 +88,23 @@ html.theme-pastel {
   --accent-hover: #9a3412;
   --accent-glow: #ffedd5;
   --grid-bg: #fed7aa;
-  --cell-selected: #fed7aa;
-  --cell-highlight: #fff7ed;
+  --cell-selected: #fdba74;
+  --cell-highlight: #fed7aa;
+}
+
+html.theme-forest-zen {
+  /* 7. Forest Zen - Ergonomic Biophilic Sound Design */
+  --bg-color: #f2f8f4;
+  --text-color: #064e3b;
+  --panel-color: #ffffff;
+  --border-color: #a7f3d0;
+  --subgrid-border: #047857;
+  --accent-color: #047857;
+  --accent-hover: #065f46;
+  --accent-glow: #d1fae5;
+  --grid-bg: #a7f3d0;
+  --cell-selected: #86efac;
+  --cell-highlight: #bbf7d0;
 }
 
 @theme {

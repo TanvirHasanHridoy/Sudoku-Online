@@ -963,6 +963,7 @@ export default function App() {
       "theme-monochrome-dark",
       "theme-cyberpunk",
       "theme-pastel",
+      "theme-forest-zen",
       "dark",
     );
 

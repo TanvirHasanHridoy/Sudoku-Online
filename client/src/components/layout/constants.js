@@ -35,6 +35,12 @@ export const THEMES = [
     color: "#c2410c",
     preview: "bg-[#fffaf5] border-orange-200",
   },
+  {
+    id: "forest-zen",
+    name: "Forest Zen",
+    color: "#047857",
+    preview: "bg-[#f2f8f4] border-emerald-400",
+  },
 ];
 
 export const AVATARS = [

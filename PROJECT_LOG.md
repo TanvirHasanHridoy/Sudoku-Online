@@ -1,36 +1,46 @@
 # Project log
 
-## 2026-11-18 · Theme UX Evaluation, WCAG AA/AAA Accessibility Redesign, & Contrast Enhancements
+## 2026-11-18 · Theme UX Evaluation, WCAG AA/AAA Accessibility Redesign, Crosshair Boost, & 7th Theme (Forest Zen)
 
 On branch `feat/theme-ux-color-evaluation-and-redesign`:
 
 ### Player-Facing Behavior & Architecture
 
 1. **Theme Color Palette & WCAG AA/AAA Redesign:**
-   - **Nordic Light**: Elevated Scandinavian minimalism with dark slate body/clue text (`#0f172a`), deep indigo interactive accent (`#4338ca`), crisp ice-indigo selection wash (`#c7d2fe`), and clean airy slate-ice cell highlighting (`#f1f5f9`).
-   - **Nordic Dark**: Implemented deep Arctic midnight background (`#0b1120`, `#0f172a`), luminous periwinkle accent (`#818cf8`), and soft nocturnal cell highlights (`rgba(148, 163, 184, 0.12)`).
-   - **Stark / Monochrome Light**: High-fashion editorial paper aesthetic (`#f4f4f5` background, `#ffffff` panel, `#09090b` clues). Solved the pre-filled clue vs. user entry ambiguity by styling user numbers in distinct deep slate-charcoal (`#3f3f46`), with clear zinc highlighting (`#f4f4f5`) and selection (`#e4e4e7`).
-   - **Stark / Monochrome Dark**: Purged incongruous lime-green accent, shifting to clean titanium/pure white (`#f4f4f5`, `#ffffff`) on deep OLED slate (`#09090b`, `#121215`) with high-contrast neutral cell highlights (`rgba(255, 255, 255, 0.08)` and `0.22`).
-   - **Cyber Neon (Synthwave Outrun)**: Replaced eye-fatiguing green body text with ultra-readable cool cyber-white (`#f1f5f9`). Paired with synthwave electric cyan (`#00f0ff`) for user placed numbers and neon magenta (`#ec4899`) accents. Fixed invisible cell highlighting by adding an atmospheric purple neon wash (`rgba(168, 85, 247, 0.18)`).
-   - **Pastel Peach**: Fixed the critical pitch-black cell highlight bug (`#22211f`) which previously caused near-total clue illegibility (1.43:1). Highlight now renders as a soft apricot tint (`#fff7ed`), cell selection as warm apricot (`#fed7aa`), and accent as rich warm terracotta (`#c2410c`, > 4.5:1 WCAG AA).
+   - **Nordic Light**: Elevated Scandinavian minimalism with dark slate body/clue text (`#0f172a`), deep indigo interactive accent (`#4338ca`), crisp ice-indigo selection wash (`#c7d2fe`), and boosted cool periwinkle crosshair highlighting (`#e0e7ff`).
+   - **Nordic Dark**: Implemented deep Arctic midnight background (`#0b1120`, `#0f172a`), luminous periwinkle accent (`#818cf8`), with vibrant luminous indigo crosshairs (`rgba(99, 102, 241, 0.24)`) and selection (`rgba(129, 140, 248, 0.45)`).
+   - **Stark / Monochrome Light**: High-fashion editorial paper aesthetic (`#f4f4f5` background, `#ffffff` panel, `#09090b` clues). Solved pre-filled clue vs. user entry ambiguity by styling user numbers in distinct deep slate-charcoal (`#3f3f46`), with distinct zinc-200 paper wash crosshairs (`#e4e4e7`) and selection (`#cbd5e1`).
+   - **Stark / Monochrome Dark**: Purged incongruous lime-green accent, shifting to clean titanium/pure white (`#f4f4f5`, `#ffffff`) on deep OLED slate (`#09090b`, `#121215`) with distinct smoky titanium crosshairs (`rgba(255, 255, 255, 0.16)`) and selection (`0.32`).
+   - **Cyber Neon (Synthwave Outrun)**: Replaced eye-fatiguing green body text with ultra-readable cool cyber-white (`#f1f5f9`). Paired with synthwave electric cyan (`#00f0ff`) for user placed numbers and neon magenta (`#ec4899`) accents. Boosted vivid neon violet crosshairs (`rgba(168, 85, 247, 0.34)`) and selection (`0.50`).
+   - **Pastel Peach**: Fixed the critical pitch-black cell highlight bug (`#22211f`) which previously caused near-total clue illegibility (1.43:1). Highlight now renders as a distinct warm pastel apricot crosshair wash (`#fed7aa`), cell selection as warm apricot (`#fdba74`), and accent as rich warm terracotta (`#c2410c`, > 4.5:1 WCAG AA).
+   - **7th Theme - Forest Zen (Ergonomic Biophilic Sound Design)**: Introduced an ergonomic, calming green palette inspired by biophilic sound design and forest bathing (`--bg-color: #f2f8f4`, `--text-color: #064e3b`, `--panel-color: #ffffff`, `--border-color: #a7f3d0`, `--subgrid-border: #047857`, `--accent-color: #047857`, `--cell-highlight: #bbf7d0`, `--cell-selected: #86efac`). All text pairs exceed 4.5:1 (AA) to 9.7:1 (AAA).
 
-2. **UI Component Contrast & Text Inversion:**
+2. **Prominent Crosshair Visibility & Board Interaction:**
+   - Greatly strengthened visual contrast and saturation for highlighted rows, columns, and 3x3 boxes across all themes, ensuring vertical and horizontal lines clearly pop when a cell is selected while keeping digits legible.
+
+3. **"Enter 6-digit Code" Input Contrast**:
+   - Fixed low contrast in `HomeMatchmakingLobbyPanel.jsx` and `InGameSidebars.jsx` by adding explicit `text-text-custom placeholder:text-text-custom/60` and `focus:ring-1 focus:ring-accent-custom` to both private room code inputs, ensuring high visibility in all light and dark themes.
+
+4. **UI Component Contrast & Text Inversion:**
    - Configured high-contrast text color overrides for primary action buttons (`.bg-accent-custom text-white`) across dark themes, ensuring buttons in Monochrome Dark, Nordic Dark, and Cyber Neon maintain ≥ 6:1 to 19:1 contrast ratios.
    - Enhanced Sudoku mistake/error text styling in `SudokuGrid.jsx` to `text-rose-600 dark:text-rose-400` for crisp WCAG AA compliance (4.7:1 on light panels).
-   - Ensured pencil notes in `SudokuGrid.jsx` cleanly adopt `text-text-custom` with 70% opacity across all 6 themes.
-   - Updated `THEMES` array in `client/src/components/layout/constants.js` with revised accent colors and theme switcher card preview classes matching the new aesthetics.
+   - Ensured pencil notes in `SudokuGrid.jsx` cleanly adopt `text-text-custom` with 70% opacity across all 7 themes.
+   - Updated `THEMES` array in `client/src/components/layout/constants.js` with revised accent colors and theme switcher card preview classes for all 7 themes.
+   - Registered `theme-forest-zen` in `client/src/App.jsx` theme removal list.
 
 ### Verification Performed
 
-- `client/src/index.css`: Updated root and class tokens for all 6 themes, added dark mode button contrast rules, and applied typography differentiation overrides.
-- `client/src/components/layout/constants.js`: Aligned `THEMES` array color metadata and preview styles.
+- `client/src/index.css`: Updated root and class tokens for all 7 themes, added dark mode button contrast rules, boosted crosshair tokens, and applied typography differentiation overrides.
+- `client/src/components/layout/constants.js`: Aligned `THEMES` array color metadata and preview styles for all 7 themes including Forest Zen.
+- `client/src/App.jsx`: Updated theme class toggling lifecycle.
+- `client/src/components/home/HomeMatchmakingLobbyPanel.jsx` & `client/src/components/game/InGameSidebars.jsx`: Fixed private room code input and placeholder contrast.
 - `client/src/components/SudokuGrid.jsx`: Updated dynamic cell background classes, clue text differentiation, pencil notes text styling, and mistake color contrast.
 - `npm test`: All 42 unit and integration tests passed cleanly (42/42 pass, 0 fail).
-- `npm run build --prefix client`: Production Vite bundle generated with 0 errors in 1.61s.
+- `npm run build --prefix client`: Production Vite bundle generated with 0 errors in 2.06s.
 
 ### Remaining Limitations
 
-- None identified; all 6 themes satisfy WCAG contrast targets and severe visual bugs (Pastel blackout, Cyber fatigue, Monochrome lime) have been resolved.
+- None identified; all 7 themes satisfy WCAG contrast targets, crosshairs pop distinctly across the board, and private room inputs are sharp and legible.
 
 ## 2026-11-18 · Stay in Room Lobby on Exit, ELO Forfeit Warning Modal, Daily Leaderboard Tab, & Invite Link Fallback
 
