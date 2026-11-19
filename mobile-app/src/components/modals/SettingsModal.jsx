@@ -1,5 +1,7 @@
+import { useState } from "react";
 import { X, Headphones, Check, Volume2, HelpCircle } from "lucide-react";
 import { LOFI_PRESETS } from "../../utils/focusAudio";
+import { useLobbyStore } from "../../store/useLobbyStore";
 
 export default function SettingsModal({
   isOpen,
@@ -29,6 +31,11 @@ export default function SettingsModal({
 }) {
   const visible = isOpen !== undefined ? isOpen : Boolean(showSettingsModal);
   if (!visible) return null;
+
+  const connectionState = useLobbyStore((state) => state.connectionState);
+  const getWsUrl = useLobbyStore((state) => state.getWsUrl);
+  const setWsUrl = useLobbyStore((state) => state.setWsUrl);
+  const [serverUrl, setServerUrl] = useState(() => (getWsUrl ? getWsUrl() : 'ws://192.168.0.100:3001'));
 
   const handleClose = () => {
     if (onClose) {
@@ -264,6 +271,80 @@ export default function SettingsModal({
               </div>
             )}
           </div>
+        </div>
+
+        {/* Server Connection URL */}
+        <div className="pt-3 border-t border-border-custom/40 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold flex items-center gap-1.5">
+              <span>🌐</span> Server Address
+            </span>
+            <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-bold ${
+              connectionState === 'connected' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40' :
+              connectionState === 'connecting' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40 animate-pulse' :
+              'bg-rose-500/20 text-rose-400 border border-rose-500/40'
+            }`}>
+              {connectionState === 'connected' ? '● Connected' : connectionState === 'connecting' ? '○ Connecting...' : '✕ Offline'}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            <input
+              type="text"
+              value={serverUrl}
+              onChange={(e) => setServerUrl(e.target.value)}
+              placeholder="wss://sudoku-online-backend.onrender.com"
+              className="flex-1 px-2.5 py-1.5 text-xs font-mono rounded-lg bg-panel-custom border border-border-custom text-text-custom focus:outline-none focus:ring-1 focus:ring-accent-custom"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                if (setWsUrl) setWsUrl(serverUrl);
+              }}
+              className="px-3 py-1.5 bg-accent-custom hover:bg-accent-hover text-white text-[11px] font-bold rounded-lg active:scale-95 transition-all shrink-0 cursor-pointer"
+            >
+              Connect
+            </button>
+          </div>
+
+          <div className="flex flex-wrap gap-1.5 pt-1">
+            <button
+              type="button"
+              onClick={() => {
+                const url = 'wss://sudoku-online-backend.onrender.com';
+                setServerUrl(url);
+                if (setWsUrl) setWsUrl(url);
+              }}
+              className="text-[9px] px-2 py-1 rounded bg-panel-custom hover:bg-accent-glow border border-accent-custom/50 text-accent-custom font-mono active:scale-95 cursor-pointer font-bold"
+            >
+              ☁️ Render Cloud (Live)
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const url = 'ws://192.168.0.100:3001';
+                setServerUrl(url);
+                if (setWsUrl) setWsUrl(url);
+              }}
+              className="text-[9px] px-2 py-1 rounded bg-panel-custom hover:bg-accent-glow border border-border-custom text-text-custom/80 font-mono active:scale-95 cursor-pointer"
+            >
+              🏠 Home Wi-Fi
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const url = 'ws://localhost:3001';
+                setServerUrl(url);
+                if (setWsUrl) setWsUrl(url);
+              }}
+              className="text-[9px] px-2 py-1 rounded bg-panel-custom hover:bg-accent-glow border border-border-custom text-text-custom/80 font-mono active:scale-95 cursor-pointer"
+            >
+              💻 Localhost
+            </button>
+          </div>
+          <p className="text-[9px] opacity-60">
+            For phones on the same Wi-Fi, use your PC's IP address. For worldwide play, enter your hosted <code className="font-mono">wss://</code> server URL.
+          </p>
         </div>
 
         <button

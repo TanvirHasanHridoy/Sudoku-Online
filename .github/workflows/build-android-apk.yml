@@ -37,6 +37,10 @@ jobs:
           npm install
 
       - name: Build Web Production Assets
+        env:
+          VITE_WS_URL: ${{ vars.VITE_WS_URL || 'wss://sudoku-online-backend.onrender.com' }}
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || 'https://zhsveazonqrutegeedvn.supabase.co' }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpoc3ZlYXpvbnFydXRlZ2VlZHZuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA2ODAxOTQsImV4cCI6MjA5NjI1NjE5NH0.PmBR9kSJssq6DeNo_krM1KfOYmbYxnZZEVtzOIKyWpY' }}
         run: |
           cd mobile-app
           npm run build

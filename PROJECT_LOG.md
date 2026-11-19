@@ -29,6 +29,12 @@ On branch `feat/mobile-app-experiment`:
    - Pipeline uses Ubuntu-latest with Node 20, Temurin Java 17, and Android SDK, running `npm run build`, `npx cap sync android`, and `./gradlew assembleDebug`.
    - Automatically uploads `codoku-sudoku-debug-apk` as an installable 14-day downloadable artifact on GitHub Actions.
 
+5. **Android Network & Render Cloud WebSocket Integration:**
+   - Integrated live production cloud backend (`wss://sudoku-online-backend.onrender.com`) verified healthy (`/health` returned `{ status: "ok" }`).
+   - Configured `wss://sudoku-online-backend.onrender.com` as the default WebSocket address across `mobile-app/.env`, `useLobbyStore.js`, and `.github/workflows/build-android-apk.yml`.
+   - Added `android:usesCleartextTraffic="true"` to `AndroidManifest.xml` as a fallback for local network testing.
+   - Added in-app Server Address configuration section to `SettingsModal.jsx` with real-time connection status pill (`Connected 🟢` / `Connecting 🟡` / `Offline 🔴`), URL input, and 1-tap presets (`Render Cloud (Live)`, `Home Wi-Fi`, and `Localhost`).
+
 ### Verification Performed
 
 - `mobile-app/package.json`: Configured Capacitor 6 native plugins and dependencies.

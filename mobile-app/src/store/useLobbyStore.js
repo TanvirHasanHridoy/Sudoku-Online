@@ -173,13 +173,36 @@ export const useLobbyStore = create((set, get) => ({
     set({ emoteCallback: callback });
   },
 
+  getWsUrl: () => {
+    if (typeof localStorage !== 'undefined') {
+      const saved = localStorage.getItem('sudoku_custom_ws_url');
+      if (saved) return saved.trim();
+    }
+    if (import.meta.env.VITE_WS_URL) {
+      return import.meta.env.VITE_WS_URL;
+    }
+    return 'wss://sudoku-online-backend.onrender.com';
+  },
+
+  setWsUrl: (newUrl) => {
+    if (typeof localStorage !== 'undefined') {
+      if (!newUrl) {
+        localStorage.removeItem('sudoku_custom_ws_url');
+      } else {
+        localStorage.setItem('sudoku_custom_ws_url', newUrl.trim());
+      }
+    }
+    get().reconnectImmediately();
+  },
+
   connectWebSocket: () => {
     clearTimeout(retryTimer);
     const activeWs = get().ws;
     if (activeWs && activeWs.readyState <= 1) return; // Already connecting or connected
 
     set({ connectionState: 'connecting' });
-    const wsUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:3001';
+    const wsUrl = get().getWsUrl();
+    console.log('[Lobby] Connecting WebSocket to:', wsUrl);
     const socket = new WebSocket(wsUrl);
     set({ ws: socket }); // Store immediately to prevent duplicate connections!
 
