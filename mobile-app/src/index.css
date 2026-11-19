@@ -1,0 +1,507 @@
+@import "tailwindcss";
+
+:root {
+  /* 1. Nordic Light (Default) - Airy Scandinavian Minimalism */
+  --bg-color: #f8fafc;
+  --text-color: #0f172a;
+  --panel-color: #ffffff;
+  --border-color: #e2e8f0;
+  --subgrid-border: #64748b;
+  --accent-color: #4338ca;
+  --accent-hover: #3730a3;
+  --accent-glow: #e0e7ff;
+  --grid-bg: #cbd5e1;
+  --cell-selected: #c7d2fe;
+  --cell-highlight: #e0e7ff;
+}
+
+html.theme-nordic-dark {
+  /* 2. Nordic Dark - Deep Arctic Midnight */
+  --bg-color: #0b1120;
+  --text-color: #f8fafc;
+  --panel-color: #0f172a;
+  --border-color: #1e293b;
+  --subgrid-border: #475569;
+  --accent-color: #818cf8;
+  --accent-hover: #a5b4fc;
+  --accent-glow: rgba(129, 140, 248, 0.15);
+  --grid-bg: #1e293b;
+  --cell-selected: rgba(129, 140, 248, 0.45);
+  --cell-highlight: rgba(99, 102, 241, 0.24);
+}
+
+html.theme-monochrome-light {
+  /* 3. Stark / Monochrome Light - Editorial Paper */
+  --bg-color: #f4f4f5;
+  --text-color: #09090b;
+  --panel-color: #ffffff;
+  --border-color: #e4e4e7;
+  --subgrid-border: #52525b;
+  --accent-color: #18181b;
+  --accent-hover: #27272a;
+  --accent-glow: #f4f4f5;
+  --grid-bg: #d4d4d8;
+  --cell-selected: #cbd5e1;
+  --cell-highlight: #e4e4e7;
+}
+
+html.theme-monochrome-dark {
+  /* 4. Stark / Monochrome Dark - OLED Slate & Titanium */
+  --bg-color: #09090b;
+  --text-color: #fafafa;
+  --panel-color: #121215;
+  --border-color: #27272a;
+  --subgrid-border: #71717a;
+  --accent-color: #f4f4f5;
+  --accent-hover: #ffffff;
+  --accent-glow: rgba(255, 255, 255, 0.12);
+  --grid-bg: #27272a;
+  --cell-selected: rgba(255, 255, 255, 0.32);
+  --cell-highlight: rgba(255, 255, 255, 0.16);
+}
+
+html.theme-cyberpunk {
+  /* 5. Cyber Neon - Synthwave Outrun */
+  --bg-color: #090214;
+  --text-color: #f1f5f9;
+  --panel-color: #150a26;
+  --border-color: #3b1d66;
+  --subgrid-border: #00f0ff;
+  --accent-color: #ec4899;
+  --accent-hover: #f472b6;
+  --accent-glow: rgba(236, 72, 153, 0.25);
+  --grid-bg: #261142;
+  --cell-selected: rgba(236, 72, 153, 0.50);
+  --cell-highlight: rgba(168, 85, 247, 0.34);
+}
+
+html.theme-pastel {
+  /* 6. Pastel Peach - Gentle Cream & Apricot */
+  --bg-color: #fffaf5;
+  --text-color: #431407;
+  --panel-color: #ffffff;
+  --border-color: #fed7aa;
+  --subgrid-border: #ea580c;
+  --accent-color: #c2410c;
+  --accent-hover: #9a3412;
+  --accent-glow: #ffedd5;
+  --grid-bg: #fed7aa;
+  --cell-selected: #fdba74;
+  --cell-highlight: #fed7aa;
+}
+
+html.theme-forest-zen {
+  /* 7. Forest Zen - Ergonomic Biophilic Sound Design */
+  --bg-color: #f2f8f4;
+  --text-color: #064e3b;
+  --panel-color: #ffffff;
+  --border-color: #a7f3d0;
+  --subgrid-border: #047857;
+  --accent-color: #047857;
+  --accent-hover: #065f46;
+  --accent-glow: #d1fae5;
+  --grid-bg: #a7f3d0;
+  --cell-selected: #86efac;
+  --cell-highlight: #bbf7d0;
+}
+
+@theme {
+  --color-bg-custom: var(--bg-color);
+  --color-text-custom: var(--text-color);
+  --color-panel-custom: var(--panel-color);
+  --color-border-custom: var(--border-color);
+  --color-border-subgrid: var(--subgrid-border);
+  --color-accent-custom: var(--accent-color);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-glow: var(--accent-glow);
+  --color-grid-custom: var(--grid-bg);
+  --color-cell-selected: var(--cell-selected);
+  --color-cell-highlight: var(--cell-highlight);
+  --font-sans: 'Outfit', 'Inter', 'sans-serif';
+
+  --animate-fade-in: fadeIn 0.2s ease-out;
+  --animate-scale-in: scaleIn 0.15s cubic-bezier(0.34, 1.56, 0.64, 1);
+  --animate-pulse-subtle: pulseSubtle 2.5s infinite ease-in-out;
+  --animate-shake: shake 0.4s cubic-bezier(.36, .07, .19, .97) both;
+  --animate-float-emoji: floatEmoji 1.5s ease-out forwards;
+
+  @keyframes fadeIn {
+    0% {
+      opacity: 0;
+    }
+
+    100% {
+      opacity: 1;
+    }
+  }
+
+  @keyframes scaleIn {
+    0% {
+      transform: scale(0.95);
+      opacity: 0;
+    }
+
+    100% {
+      transform: scale(1);
+      opacity: 1;
+    }
+  }
+
+  @keyframes pulseSubtle {
+
+    0%,
+    100% {
+      opacity: 1;
+    }
+
+    50% {
+      opacity: 0.6;
+    }
+  }
+
+  @keyframes shake {
+
+    10%,
+    90% {
+      transform: translate3d(-1px, 0, 0);
+    }
+
+    20%,
+    80% {
+      transform: translate3d(2px, 0, 0);
+    }
+
+    30%,
+    50%,
+    70% {
+      transform: translate3d(-3px, 0, 0);
+    }
+
+    40%,
+    60% {
+      transform: translate3d(3px, 0, 0);
+    }
+  }
+
+  @keyframes floatEmoji {
+    0% {
+      transform: translateY(0) scale(0.5);
+      opacity: 0;
+    }
+
+    15% {
+      transform: translateY(-20px) scale(1.2);
+      opacity: 1;
+    }
+
+    100% {
+      transform: translateY(-100px) scale(0.8);
+      opacity: 0;
+    }
+  }
+}
+
+@layer base {
+  body {
+    background-color: var(--bg-color);
+    color: var(--text-color);
+    transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+    font-family: 'Outfit', 'Inter', sans-serif;
+    @apply antialiased overflow-x-hidden;
+  }
+
+  /* Custom Scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background-color: var(--border-color);
+    border-radius: 9999px;
+    transition: background-color 0.2s;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: var(--accent-color);
+  }
+
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-color) transparent;
+  }
+
+  .scrollbar-thin:hover {
+    scrollbar-color: var(--accent-color) transparent;
+  }
+}
+
+/* Glassmorphism Panels */
+.glass-panel {
+  background-color: color-mix(in srgb, var(--panel-color) 70%, transparent);
+  backdrop-filter: blur(12px);
+  border-color: var(--border-color);
+  @apply border;
+}
+
+.glass-card {
+  background-color: var(--panel-color);
+  border-color: var(--border-color);
+  @apply border shadow-xs hover:shadow-md transition-all duration-300;
+}
+
+/* Sudoku Grid specific styles */
+.sudoku-cell {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 500;
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.shaking {
+  animation: shake 0.4s cubic-bezier(.36, .07, .19, .97) both;
+}
+
+/* Interactive Floating emojis */
+.emoji-float {
+  position: absolute;
+  pointer-events: none;
+  font-size: 2.5rem;
+  animation: floatEmoji 1.5s ease-out forwards;
+}
+
+/* Primary Button Contrast in Dark Themes */
+html.theme-monochrome-dark button.bg-accent-custom,
+html.theme-monochrome-dark .bg-accent-custom.text-white,
+html.theme-monochrome-dark button.bg-accent-custom *,
+html.theme-monochrome-dark .bg-accent-custom.text-white * {
+  color: #09090b !important;
+}
+
+html.theme-nordic-dark button.bg-accent-custom,
+html.theme-nordic-dark .bg-accent-custom.text-white,
+html.theme-nordic-dark button.bg-accent-custom *,
+html.theme-nordic-dark .bg-accent-custom.text-white * {
+  color: #0b1120 !important;
+}
+
+html.theme-cyberpunk button.bg-accent-custom,
+html.theme-cyberpunk .bg-accent-custom.text-white,
+html.theme-cyberpunk button.bg-accent-custom *,
+html.theme-cyberpunk .bg-accent-custom.text-white * {
+  color: #0a0118 !important;
+}
+
+/* Cyberpunk Grid Number Harmony */
+html.theme-cyberpunk .sudoku-cell .text-accent-custom,
+html.theme-cyberpunk .sudoku-cell.text-accent-custom {
+  color: #00f0ff !important;
+}
+
+/* Monochrome Light Clue vs. User Number Differentiation */
+html.theme-monochrome-light .sudoku-cell.text-accent-custom,
+html.theme-monochrome-light .sudoku-cell .text-accent-custom {
+  color: #3f3f46 !important;
+}
+
+/* Speaking Pulse Avatar voice indicator animation */
+.speaking-pulse-avatar::before {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 9999px;
+  border: 2.5px solid var(--accent-color);
+  animation: speakingPulse 1.8s infinite ease-in-out;
+  pointer-events: none;
+}
+
+@keyframes speakingPulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+
+  50% {
+    transform: scale(1.2);
+    opacity: 0.4;
+  }
+
+  100% {
+    transform: scale(1.35);
+    opacity: 0;
+  }
+}
+
+/* Styling option tags inside selects to guarantee high-contrast readability in all themes */
+select option {
+  background-color: var(--panel-color) !important;
+  color: var(--text-color) !important;
+}
+/* Shared controls for the lobby, result panel and compact board toolbar. */
+.game-action {
+  @apply flex w-full items-center justify-center gap-1.5 rounded-xl border border-border-custom bg-accent-glow px-3 py-3 text-xs font-bold text-text-custom transition-all hover:border-accent-custom hover:bg-accent-glow/70 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50;
+}
+.board-tools {
+  @apply mt-2 flex w-full max-w-[460px] flex-wrap items-center gap-2;
+}
+.game-tool {
+  @apply rounded-lg border border-border-custom bg-accent-glow/40 px-2.5 py-1.5 text-[10px] font-bold text-text-custom transition-colors hover:border-accent-custom;
+}
+.game-tool[aria-pressed="true"] {
+  @apply border-accent-custom bg-accent-glow text-accent-custom;
+}
+.game-action:focus-visible, .game-tool:focus-visible {
+  @apply outline-2 outline-offset-2 outline-accent-custom;
+}
+.game-status {
+  @apply rounded-xl border border-border-custom/60 bg-accent-glow/20 px-3 py-2 text-xs font-semibold text-text-custom;
+}
+
+/* Heartbeat pulse animation strictly for the board border at >= 90% opponent progress */
+@keyframes heartbeatBorder {
+  0% {
+    box-shadow: 0 0 0 0 rgba(244, 63, 94, 0);
+    border-color: rgba(244, 63, 94, 0.4);
+  }
+  14% {
+    box-shadow: 0 0 25px 4px rgba(244, 63, 94, 0.75);
+    border-color: rgba(244, 63, 94, 1);
+  }
+  28% {
+    box-shadow: 0 0 8px 1px rgba(244, 63, 94, 0.25);
+    border-color: rgba(244, 63, 94, 0.5);
+  }
+  42% {
+    box-shadow: 0 0 35px 6px rgba(244, 63, 94, 0.95);
+    border-color: rgba(244, 63, 94, 1);
+  }
+  70% {
+    box-shadow: 0 0 0 0 rgba(244, 63, 94, 0);
+    border-color: rgba(244, 63, 94, 0.35);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(244, 63, 94, 0);
+    border-color: rgba(244, 63, 94, 0.35);
+  }
+}
+
+.heartbeat-border {
+  animation: heartbeatBorder 1.2s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+}
+
+@keyframes slideInUp {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideInDown {
+  from {
+    transform: translateY(-20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.animate-slide-in-up {
+  animation: slideInUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-slide-in-down {
+  animation: slideInDown 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes chatButtonPulse {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.7);
+  }
+  50% {
+    transform: scale(1.22);
+    box-shadow: 0 0 16px 4px rgba(56, 189, 248, 0.85);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(56, 189, 248, 0);
+  }
+}
+
+.animate-chat-pulse {
+  animation: chatButtonPulse 0.65s cubic-bezier(0.16, 1, 0.3, 1) 1;
+}
+
+@keyframes cloudToastIn {
+  0% {
+    transform: translateY(14px) scale(0.92);
+    opacity: 0;
+  }
+  65% {
+    transform: translateY(-2px) scale(1.02);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes cloudToastOut {
+  0% {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(-8px) scale(0.94);
+    opacity: 0;
+  }
+}
+
+.animate-cloud-in {
+  animation: cloudToastIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+.animate-cloud-out {
+  animation: cloudToastOut 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Mobile Touch & Safe-Area Optimizations */
+.safe-top {
+  padding-top: max(env(safe-area-inset-top), 8px);
+}
+.safe-bottom {
+  padding-bottom: max(env(safe-area-inset-bottom), 12px);
+}
+.safe-left {
+  padding-left: env(safe-area-inset-left);
+}
+.safe-right {
+  padding-right: env(safe-area-inset-right);
+}
+
+/* Touch speed & prevent double-tap zoom on buttons and grid cells */
+button, [data-board], .select-none {
+  touch-action: manipulation;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+
+

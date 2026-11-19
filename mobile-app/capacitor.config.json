@@ -1,0 +1,15 @@
+{
+  "appId": "app.codoku.sudoku",
+  "appName": "Sudoku Showdown",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 1500,
+      "backgroundColor": "#030712",
+      "showSpinner": false
+    }
+  }
+}

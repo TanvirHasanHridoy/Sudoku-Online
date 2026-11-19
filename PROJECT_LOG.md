@@ -1,5 +1,55 @@
 # Project log
 
+## 2026-11-18 · Mobile App Isolated Experiment: Capacitor 6 Setup & Cloud Android APK Pipeline
+
+On branch `feat/mobile-app-experiment`:
+
+### Player-Facing Behavior & Architecture
+
+1. **Strictly Isolated `mobile-app/` Environment:**
+   - Established a self-contained mobile experiment workspace in `mobile-app/` ensuring the original `client/` and `server/` codebases remain completely pristine and unaffected.
+   - Configured dedicated mobile dependency manifests (`mobile-app/package.json`) with Capacitor 6 native dependencies.
+   - Added `mobile-app/.gitignore` preventing `node_modules/`, `dist/`, and local Android build outputs from polluting version control.
+
+2. **Native Android & iOS Platform Scaffolding:**
+   - Initialized Capacitor project configuration (`capacitor.config.json`) under app ID `app.codoku.sudoku` and display title `Sudoku Showdown`.
+   - Scaffolded native Android project (`mobile-app/android`) with Gradle integration and updated permissions for WebRTC audio (`RECORD_AUDIO`, `MODIFY_AUDIO_SETTINGS`), haptics (`VIBRATE`), and wake lock (`WAKE_LOCK`).
+   - Added Android deep linking intent filters for 1-click room invites (`codoku://room/*` and `https://codoku.app/room/*`).
+   - Scaffolded native iOS Xcode project (`mobile-app/ios`) with `NSMicrophoneUsageDescription` in `Info.plist`.
+
+3. **Hardware Bridge & Touch Optimizations:**
+   - Created `mobileBridge.js` utility wrapping `@capacitor/haptics`, `@capacitor-community/keep-awake`, and `@capacitor/app`.
+   - Integrated tactile haptic feedback: light ticks on cell selection and digit placements, micro-ticks for notes and ink-splatter scrubbing in `SabotageOverlay.jsx`, double-buzz for mistakes/strikes, and fanfare for game completion.
+   - Integrated screen keep-awake during active matches to prevent the phone screen from dimming/sleeping while calculating moves.
+   - Wired Android hardware back button handler to dismiss modals before safely navigating backwards.
+   - Added safe-area CSS insets (`safe-top`, `safe-bottom`, `safe-left`, `safe-right`) in `index.css` and `index.html` viewport meta tags (`viewport-fit=cover`) to prevent display cutout and navigation bar clipping.
+
+4. **Automated Cloud Android APK Build Pipeline:**
+   - Created `.github/workflows/build-android-apk.yml` configured to build on `workflow_dispatch` (1-click manual trigger) and push events targeting `mobile-app/**`.
+   - Pipeline uses Ubuntu-latest with Node 20, Temurin Java 17, and Android SDK, running `npm run build`, `npx cap sync android`, and `./gradlew assembleDebug`.
+   - Automatically uploads `codoku-sudoku-debug-apk` as an installable 14-day downloadable artifact on GitHub Actions.
+
+### Verification Performed
+
+- `mobile-app/package.json`: Configured Capacitor 6 native plugins and dependencies.
+- `mobile-app/index.html`: Added `viewport-fit=cover` to meta viewport.
+- `mobile-app/src/index.css`: Added safe-area padding rules and touch speed manipulation rules.
+- `mobile-app/src/utils/mobileBridge.js`: Created native bridge wrapper with graceful web fallback.
+- `mobile-app/src/store/useGameStore.js`: Integrated tactile haptic feedback hooks on moves and mistakes.
+- `mobile-app/src/components/SabotageOverlay.jsx`: Wired capacitive ink wiping to haptic ticks.
+- `mobile-app/src/App.jsx`: Added keep-awake lifecycle effect, Android back button listener, deep link handler, and safe-area wrappers.
+- `.github/workflows/build-android-apk.yml`: Created automated cloud APK build pipeline.
+- `mobile-app/.gitignore`: Added ignore rules for node_modules, build outputs, and logs.
+- `npm run build --prefix mobile-app`: Production Vite bundle compiled cleanly in 2.12s.
+- `npx cap sync` (in `mobile-app`): Synced web build into both `mobile-app/android` and `mobile-app/ios` in 0.56s.
+- `git status`: Confirmed root `client/` and `server/` directories are completely untouched.
+
+### Remaining Limitations
+
+- APK is generated via GitHub Actions in the cloud; local compilation requires local Android Studio / JDK installation.
+- iOS `.ipa` compilation requires macOS / Xcode or Cloud CI runner.
+
+
 ## 2026-11-18 · Theme UX Evaluation, WCAG AA/AAA Accessibility Redesign, Crosshair Boost, & 7th Theme (Forest Zen)
 
 On branch `feat/theme-ux-color-evaluation-and-redesign`:

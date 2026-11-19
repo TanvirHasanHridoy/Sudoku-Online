@@ -1,0 +1,168 @@
+
+export default function SudokuGrid({ 
+  board, 
+  selectedCell, 
+  onCellClick, onCellFocus,
+  notes = {},
+  originalCells = new Set(),
+  mistakes = {},
+  shakingCell = null,
+  isSpectatingMode = false,
+  coopPointedCell = null,
+  urgency = null
+}) {
+  // Check if a cell is highlighted (same row, col, or 3x3 subgrid)
+  const isCellHighlighted = (row, col) => {
+    if (!selectedCell) return false;
+    const [selRow, selCol] = selectedCell;
+    if (row === selRow || col === selCol) return true;
+    
+    // Check 3x3 box
+    const boxRowStart = Math.floor(selRow / 3) * 3;
+    const boxColStart = Math.floor(selCol / 3) * 3;
+    return row >= boxRowStart && row < boxRowStart + 3 && 
+           col >= boxColStart && col < boxColStart + 3;
+  };
+
+  // Check if cell is the selected one
+  const isCellSelected = (row, col) => {
+    return selectedCell && selectedCell[0] === row && selectedCell[1] === col;
+  };
+
+  // Check if cell has the same number as the selected cell
+  const isSameNumber = (row, col, cellValue) => {
+    if (!selectedCell || !cellValue) return false;
+    const [selRow, selCol] = selectedCell;
+    const selVal = board[selRow][selCol];
+    return selVal === cellValue && !(selRow === row && selCol === col);
+  };
+
+  const borderClasses = urgency === 'critical'
+    ? "border-2 border-rose-500 heartbeat-border"
+    : urgency === 'warning'
+    ? "border-2 border-amber-500/80 shadow-[0_0_12px_rgba(245,158,11,0.35)]"
+    : "border border-border-custom";
+
+  const subgridDividerClasses = urgency === 'critical'
+    ? "bg-rose-500/60"
+    : urgency === 'warning'
+    ? "bg-amber-500/50"
+    : "bg-border-subgrid";
+
+  return (
+    <div data-board className={`w-full max-w-[460px] aspect-square bg-grid-custom rounded-xl p-1 shadow-inner transition-all duration-500 ${borderClasses}`}>
+      <div className={`grid grid-cols-3 grid-rows-3 h-full w-full gap-[3px] rounded-lg overflow-hidden transition-colors duration-500 ${subgridDividerClasses}`}>
+        {Array.from({ length: 9 }).map((_, boxIndex) => {
+          const boxRow = Math.floor(boxIndex / 3);
+          const boxCol = boxIndex % 3;
+
+          return (
+            <div
+              key={boxIndex}
+              className="grid grid-cols-3 grid-rows-3 gap-[1px] bg-grid-custom"
+            >
+              {Array.from({ length: 9 }).map((_, cellIndex) => {
+                const cellRow = Math.floor(cellIndex / 3);
+                const cellCol = cellIndex % 3;
+                const rowIndex = boxRow * 3 + cellRow;
+                const colIndex = boxCol * 3 + cellCol;
+
+                const cellKey = `${rowIndex},${colIndex}`;
+                const val = board[rowIndex]?.[colIndex];
+                if (val === undefined) return null;
+
+                const isSelected = isCellSelected(rowIndex, colIndex);
+                const isHighlighted = isCellHighlighted(rowIndex, colIndex);
+                const isSameNum = isSameNumber(rowIndex, colIndex, val);
+                const isOriginal = originalCells.has(cellKey);
+                const isMistake = mistakes[cellKey];
+                const isShaking = shakingCell === cellKey;
+                const cellNotes = notes[cellKey] || [];
+                const isPointed = coopPointedCell && coopPointedCell.row === rowIndex && coopPointedCell.col === colIndex;
+
+                // Dynamic color logic based on theme state
+                let bgClass = 'bg-panel-custom text-text-custom';
+                if (isSelected) {
+                  bgClass = isSpectatingMode
+                    ? 'bg-indigo-500/20 text-indigo-400 ring-2 ring-indigo-500/50 z-10'
+                    : 'bg-cell-selected ring-2 ring-accent-custom ring-inset z-10';
+                } else if (isSameNum) {
+                  bgClass = isSpectatingMode
+                    ? 'bg-indigo-500/10 text-indigo-400 font-bold'
+                    : 'bg-cell-selected/60 font-bold';
+                } else if (isHighlighted) {
+                  bgClass = isSpectatingMode
+                    ? 'bg-indigo-500/5'
+                    : 'bg-cell-highlight';
+                } else if (isSpectatingMode) {
+                  bgClass = 'bg-panel-custom/70 text-text-custom/80 opacity-90 border border-indigo-500/5';
+                }
+
+                // Typography and error coloring
+                let fontClass = isOriginal 
+                  ? 'text-text-custom font-bold' 
+                  : 'text-accent-custom font-semibold';
+
+                if (isMistake) {
+                  fontClass = 'text-rose-600 font-extrabold dark:text-rose-400';
+                }
+
+                return (
+                  <button
+                    type="button"
+                    disabled={isSpectatingMode}
+                    aria-label={`Row ${rowIndex+1}, column ${colIndex+1}, ${val ?? 'empty'}${isOriginal ? ', clue' : ''}${cellNotes.length ? ', notes ' + cellNotes.join(' and ') : ''}${isMistake ? ', incorrect' : ''}`}
+                    onKeyDown={event => {
+                      const offset = {ArrowLeft:[0,-1], ArrowRight:[0,1], ArrowUp:[-1,0], ArrowDown:[1,0]}[event.key];
+                      if (!offset) return;
+                      event.preventDefault();
+                      const key = [rowIndex+offset[0], colIndex+offset[1]].join(',');
+                      event.currentTarget.closest('[data-board]').querySelector('[data-cell="' + key + '"]')?.focus();
+                    }}
+                    onFocus={() => onCellFocus?.(rowIndex, colIndex)}
+                    data-cell={cellKey}
+                    key={cellKey}
+                    onClick={() => onCellClick(rowIndex, colIndex)}
+                    className={`
+                      sudoku-cell relative flex items-center justify-center select-none text-lg md:text-xl
+                      ${bgClass} ${fontClass}
+                      ${isShaking ? 'shaking ring-2 ring-rose-500/80 z-20 bg-rose-500/10' : ''}
+                      ${isPointed ? 'ring-2 ring-amber-400 bg-amber-400/25 z-25 animate-pulse' : ''}
+                      ${isSpectatingMode ? 'cursor-default' : 'hover:bg-accent-glow/20 cursor-pointer'} transition-all duration-100
+                    `}
+                  >
+                    {isPointed && (
+                      <span className="absolute -top-3.5 left-1/2 -translate-x-1/2 z-30 bg-amber-500 text-white font-bold text-[8px] px-1.5 py-0.5 rounded-full shadow-md whitespace-nowrap pointer-events-none animate-bounce flex items-center gap-0.5">
+                        👉 {coopPointedCell.name || 'Partner'}
+                      </span>
+                    )}
+                    {isMistake && <span aria-hidden="true" className="absolute top-0 right-1 text-xs">!</span>}
+                    {val !== null ? (
+                      <span>{val}</span>
+                    ) : (
+                      // Pencil Notes Grid
+                      <div className="grid grid-cols-3 w-full h-full p-[2px] pointer-events-none text-text-custom">
+                        {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
+                          <span
+                            key={num}
+                            className={`
+                              text-[clamp(9px,2.5vw,12px)] leading-none flex items-center justify-center font-normal
+                              transition-opacity duration-150
+                              ${cellNotes.includes(num) ? 'opacity-70' : 'opacity-0'}
+                            `}
+                          >
+                            {num}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}

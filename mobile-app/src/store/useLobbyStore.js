@@ -1,0 +1,1908 @@
+import { generateSudoku } from '../utils/generator';
+import { raceProgress } from '../utils/play';
+import { solveSudoku } from '../utils/solver';
+import { playSound } from '../utils/audio';
+import { create } from 'zustand';
+import { useGameStore } from './useGameStore';
+
+// Retrieve or generate player details for caching persistence
+const getCachedPlayer = () => {
+  let id = localStorage.getItem('sudoku_player_id');
+  if (!id) {
+    id = 'p_' + Math.random().toString(36).substring(2, 11);
+    localStorage.setItem('sudoku_player_id', id);
+  }
+  let name = localStorage.getItem('sudoku_player_name');
+  if (!name) {
+    name = 'S_' + Math.floor(10000 + Math.random() * 90000);
+    localStorage.setItem('sudoku_player_name', name);
+  }
+  let avatar = localStorage.getItem('sudoku_avatar') || 'apex';
+  return { id, name, avatar };
+};
+
+let retryAttempt = 0;
+let retryTimer;
+const { id: defaultId, name: defaultName, avatar: defaultAvatar } = getCachedPlayer();
+
+export const useLobbyStore = create((set, get) => ({
+  challenge: JSON.parse(sessionStorage.getItem('sudoku_challenge') || 'null'), challengeLink: null, challengeScore: null, localReconnectBy: null,
+  coopPointedCell: null,
+  ws: null,
+  isConnected: false,
+  connectionState: 'connecting', // 'connecting' | 'connected' | 'disconnected'
+  finishers: [], // Array of { playerId, name, place, result, formattedTime }
+  myPlayerId: defaultId,
+  myPlayerName: defaultName,
+  selectedAvatar: defaultAvatar,
+  room: null, // { code, difficulty, isGameStarted, isPaused, players }
+  activeLobbyInvitation: null, // { roomCode, inviterName }
+  forfeitWinnerPending: null, // { leaverName, eloAdjustment }
+  
+  // Voting / Modals States
+  pauseRequester: null,
+  showPauseVoteModal: false,
+  showPlayAgainVoteModal: false,
+
+  // Pause cooldown (client-side guard — 20s)
+  lastPauseRequestTime: 0,
+
+  // Floating emote callbacks
+  emoteCallback: null,
+  chatMessages: [],
+
+  // Toast Notifications
+  toasts: [],
+  dailyLeaderboards: {},
+
+  // WebRTC Audio Call States
+  localAudioStream: null,
+  remoteAudioStream: null,
+  remoteAudioStreams: {}, // { [peerId]: MediaStream }
+  isMicMuted: false,
+  isVoiceJoined: false,
+  peerConnection: null,
+  peerConnections: {}, // { [peerId]: RTCPeerConnection }
+  voicePromptActive: null,
+  voiceDebugLogs: [],
+  voiceConnectionState: 'idle',
+  iceServersList: null,
+  pauseCountdown: null,
+  teamProgress: 0,
+  cellsContributed: {},
+  
+  // Live Spectating States
+  spectatingPlayerId: null,
+  spectatedPlayerBoardState: null, // { board, notes, selectedCell }
+  spectatedPlayerABoard: null, // { board, notes, selectedCell }
+  spectatedPlayerBBoard: null, // { board, notes, selectedCell }
+  myActiveSpectators: [], // [ "PlayerName1", "PlayerName2", ... ]
+
+  // Phase 12 Sabotage & Power-up States
+  myMana: 0,
+  myStreak: 0,
+  myShieldActive: false,
+  isScrambled: false,
+  activeInkSplashes: [], // [ { id, top, left, size, opacity } ]
+
+  // Actions
+  addVoiceDebugLog: (msg) => {
+    const time = new Date().toLocaleTimeString();
+    const formatted = `[${time}] ${msg}`;
+    console.log(formatted);
+    set((state) => ({
+      voiceDebugLogs: [...state.voiceDebugLogs.slice(-49), formatted]
+    }));
+  },
+
+  setPlayerName: (name) => {
+    const trimmed = name.trim();
+    if (!trimmed) return false;
+
+    const currentName = get().myPlayerName;
+    if (trimmed === currentName) return true; // No change made
+
+    // Check 24 hour cooldown (86,400,000 milliseconds)
+    const lastChange = localStorage.getItem('sudoku_last_name_change');
+    const now = Date.now();
+    const cooldownTime = 24 * 60 * 60 * 1000; // 24 hours
+
+    if (lastChange) {
+      const elapsed = now - Number(lastChange);
+      if (elapsed < cooldownTime) {
+        const remaining = cooldownTime - elapsed;
+        const hours = Math.floor(remaining / (1000 * 60 * 60));
+        const minutes = Math.floor((remaining % (1000 * 60 * 60)) / (1000 * 60));
+        get().addToast(`Username change cooldown! Try again in ${hours}h ${minutes}m.`, 'error');
+        return false; // Blocked
+      }
+    }
+
+    // Allowed! Set name and update cooldown timestamp
+    localStorage.setItem('sudoku_player_name', trimmed);
+    localStorage.setItem('sudoku_last_name_change', now.toString());
+    set({ myPlayerName: trimmed });
+    get().addToast(`Username updated to: ${trimmed}`, 'success');
+
+    // Notify server of name change if connected
+    const { ws, isConnected } = get();
+    if (ws && isConnected && ws.readyState === 1) {
+      ws.send(JSON.stringify({
+        type: 'UPDATE_NAME',
+        payload: { name: trimmed }
+      }));
+    }
+
+    return true; // Succeeded
+  },
+
+  setSelectedAvatar: async (avatar) => {
+    localStorage.setItem('sudoku_avatar', avatar);
+    set({ selectedAvatar: avatar });
+
+    // Notify server of avatar change if connected
+    const { ws, isConnected } = get();
+    if (ws && isConnected && ws.readyState === 1) {
+      ws.send(JSON.stringify({
+        type: 'UPDATE_AVATAR',
+        payload: { avatar }
+      }));
+    }
+
+    // Sync to Supabase if logged in (dynamic import to avoid circular dependencies)
+    try {
+      const { supabase } = await import('../lib/supabase');
+      const { useAuthStore } = await import('./useAuthStore');
+      const { user, profile } = useAuthStore.getState();
+      if (user && supabase) {
+        await supabase
+          .from('profiles')
+          .update({ avatar_id: avatar })
+          .eq('id', user.id);
+
+        if (profile) {
+          useAuthStore.setState({ profile: { ...profile, avatar_id: avatar } });
+        }
+      }
+    } catch (err) {
+      console.warn('Failed syncing avatar to Supabase', err);
+    }
+  },
+
+  setEmoteCallback: (callback) => {
+    set({ emoteCallback: callback });
+  },
+
+  connectWebSocket: () => {
+    clearTimeout(retryTimer);
+    const activeWs = get().ws;
+    if (activeWs && activeWs.readyState <= 1) return; // Already connecting or connected
+
+    set({ connectionState: 'connecting' });
+    const wsUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:3001';
+    const socket = new WebSocket(wsUrl);
+    set({ ws: socket }); // Store immediately to prevent duplicate connections!
+
+    socket.onopen = async () => {
+      // Check if URL contains an invite room code
+      let urlRoomCode = '';
+      try {
+        if (typeof window !== 'undefined') {
+          const params = new URLSearchParams(window.location.search);
+          urlRoomCode = params.get('room') || '';
+          if (!urlRoomCode && window.location.hash) {
+            const hashParams = new URLSearchParams(window.location.hash.replace(/^#\/?/, ''));
+            urlRoomCode = hashParams.get('room') || '';
+          }
+          urlRoomCode = urlRoomCode.replace(/\D/g, '').slice(0, 6);
+        }
+      } catch { }
+
+      // If URL has a specific room code, remove conflicting cached room code
+      if (urlRoomCode && urlRoomCode.length === 6) {
+        const cached = localStorage.getItem('sudoku_active_room_code');
+        if (cached && cached !== urlRoomCode) {
+          localStorage.removeItem('sudoku_active_room_code');
+        }
+      }
+
+      set({ 
+        isConnected: true,
+        connectionState: 'connected'
+      });
+      get().addToast('Connected to competitive lobby server!', 'success');
+
+      // Register player with the server (use dynamic import to avoid circular dependency)
+      try {
+        const { useSocialStore } = await import('./useSocialStore');
+        const { useAuthStore } = await import('./useAuthStore');
+        const myElo = useSocialStore.getState().elo;
+        const supabaseUserId = useAuthStore.getState().user?.id || null;
+        socket.send(JSON.stringify({
+          type: 'REGISTER_PLAYER',
+          payload: {
+            playerId: get().myPlayerId,
+            name: get().myPlayerName,
+            elo: myElo, lastResult: localStorage.getItem("sudoku_result_" + get().myPlayerId), resuming: true,
+            accessToken: (await (await import("../lib/supabase")).supabase?.auth.getSession())?.data.session?.access_token,
+            supabaseUserId
+          }
+        }));
+      } catch (err) {
+        console.error('Failed to register player on connection open', err);
+      }
+
+      // Auto-reconnect or join URL room code
+      const targetRoomCode = (urlRoomCode && urlRoomCode.length === 6)
+        ? urlRoomCode
+        : localStorage.getItem('sudoku_active_room_code');
+
+      if (targetRoomCode) {
+        console.log(`[Auto Join/Reconnect] Joining multiplayer Room: ${targetRoomCode}`);
+        get().joinRoom(targetRoomCode);
+      } else {
+        set({ isConnected: true, localReconnectBy: null, connectionState: 'connected' });
+      }
+    };
+
+    socket.onmessage = (event) => {
+      try {
+        const { type, payload } = JSON.parse(event.data);
+        const NOISY_MESSAGES = ['PROGRESS_UPDATED', 'PEER_SIGNAL', 'ICE_CANDIDATE', 'PEER_OFFER', 'PEER_ANSWER', 'PROGRESS_UPDATE', 'SIGNAL_DATA'];
+        if (!NOISY_MESSAGES.includes(type)) {
+          console.log(`[Client Received] Type: ${type}`, payload);
+        }
+
+        if (get().ws !== socket) return;
+        switch (type) {
+          case 'SESSION_REPLACED': {
+            get().leaveVoice();
+            set({ ws: null, room: null, isConnected: false, localReconnectBy: null });
+            useGameStore.setState({gameStatus:'idle'});
+            get().addToast('This seat is open in another tab.', 'info');
+            socket.close();
+            break;
+          }
+          case 'MATCH_RESULT': {
+            const key = 'sudoku_result_' + payload.playerId;
+            if (payload.playerId !== get().myPlayerId) break;
+            const marker = payload.id + (payload.synced ? '/synced' : '');
+            if (localStorage.getItem(key) === marker) break;
+            localStorage.setItem(key, marker);
+            localStorage.setItem('sudoku_elo', String(payload.rating));
+            import('./useAuthStore').then(({useAuthStore}) => {
+              const {profile, isGuest} = useAuthStore.getState();
+              if (isGuest) localStorage.setItem('sudoku_guest_elo', String(payload.rating));
+              if (profile?.id === payload.playerId) useAuthStore.setState({profile:{...profile, elo:payload.rating}});
+            });
+            import('./useSocialStore').then(({useSocialStore}) => {
+              useSocialStore.setState({ elo: payload.rating });
+              useSocialStore.getState().updateRankTier();
+            });
+            get().addToast(`Match ${payload.outcome}: ${payload.delta >= 0 ? '+' : ''}${payload.delta} Elo`, 'info');
+            break;
+          }
+          case 'CHALLENGE_CREATED': {
+            const link = new URL(location.pathname, location.origin);
+            link.searchParams.set('challenge', payload.id);
+            set({ challengeLink: link.href });
+            break;
+          }
+          case 'CHALLENGE_OPENED': {
+            if (get().room) break;
+            const solution = payload.puzzle.map(row => [...row]);
+            if (!solveSudoku(solution)) {
+              get().addToast('Could not solve challenge puzzle.', 'error');
+              break;
+            }
+            sessionStorage.setItem('sudoku_challenge', JSON.stringify(payload));
+            set({ challenge: payload, challengeScore: null, challengeLink: null });
+            useGameStore.getState().initGame(payload.difficulty, payload.puzzle, solution, false);
+
+            try {
+              if (window.history && window.location.search.includes('challenge')) {
+                const url = new URL(window.location.href);
+                url.searchParams.delete('challenge');
+                window.history.replaceState({}, '', url.pathname + url.search);
+              }
+            } catch {}
+
+            get().addToast(`⚔️ Challenge from ${payload.name}! Solve the board to beat their time.`, 'info');
+            break;
+          }
+          case 'CHALLENGE_SCORE': {
+            if (payload.id === get().challenge?.id) set({ challengeScore: payload });
+            break;
+          }
+          case 'DAILY_LEADERBOARD': {
+            const { date, leaderboard } = payload;
+            if (date && Array.isArray(leaderboard)) {
+              set((state) => {
+                const existing = state.dailyLeaderboards[date];
+                // Do not overwrite non-empty Supabase leaderboard with empty local fallback
+                if (existing && existing.length > 0 && leaderboard.length === 0) {
+                  return {};
+                }
+                return {
+                  dailyLeaderboards: {
+                    ...state.dailyLeaderboards,
+                    [date]: leaderboard,
+                  },
+                };
+              });
+            }
+            break;
+          }
+          case 'COOP_BOARD': {
+            set({ 
+              room: payload.room,
+              teamProgress: payload.teamProgress || payload.room?.teamProgress || 0,
+              cellsContributed: payload.cellsContributed || payload.room?.cellsContributed || {}
+            });
+            const prevBoard = useGameStore.getState().board;
+            const currentNotes = { ...useGameStore.getState().notes };
+            let notesModified = false;
+
+            // Auto-clean pencil notes in the affected row, col, and 3x3 block
+            payload.board.forEach((row, r) => {
+              row.forEach((digit, c) => {
+                if (digit !== null && prevBoard?.[r]?.[c] !== digit) {
+                  delete currentNotes[`${r},${c}`];
+                  notesModified = true;
+
+                  const startRow = Math.floor(r / 3) * 3;
+                  const startCol = Math.floor(c / 3) * 3;
+                  for (let i = 0; i < 9; i++) {
+                    const rowKey = `${r},${i}`;
+                    if (currentNotes[rowKey]?.includes(digit)) {
+                      currentNotes[rowKey] = currentNotes[rowKey].filter(n => n !== digit);
+                      notesModified = true;
+                    }
+                    const colKey = `${i},${c}`;
+                    if (currentNotes[colKey]?.includes(digit)) {
+                      currentNotes[colKey] = currentNotes[colKey].filter(n => n !== digit);
+                      notesModified = true;
+                    }
+                    const bRow = startRow + Math.floor(i / 3);
+                    const bCol = startCol + (i % 3);
+                    const boxKey = `${bRow},${bCol}`;
+                    if (currentNotes[boxKey]?.includes(digit)) {
+                      currentNotes[boxKey] = currentNotes[boxKey].filter(n => n !== digit);
+                      notesModified = true;
+                    }
+                  }
+                }
+              });
+            });
+
+            useGameStore.setState({
+              board: payload.board,
+              notes: notesModified ? currentNotes : useGameStore.getState().notes,
+              gameStatus: payload.complete ? 'won' : 'playing'
+            });
+            break;
+          }
+          case 'COOP_POINT': {
+            set({ coopPointedCell: { row: payload.row, col: payload.col, name: payload.name, id: Date.now() } });
+            get().addToast(`👉 ${payload.name} points to Row ${payload.row + 1}, Col ${payload.col + 1}!`, 'info');
+            setTimeout(() => {
+              const current = get().coopPointedCell;
+              if (current && current.row === payload.row && current.col === payload.col) {
+                set({ coopPointedCell: null });
+              }
+            }, 4000);
+            break;
+          }
+          case 'COOP_INVALID_MOVE': {
+            const cellKey = `${payload.row},${payload.col}`;
+            useGameStore.setState({ shakingCell: cellKey });
+            get().addToast(payload.message || 'That digit does not fit here.', 'error');
+            setTimeout(() => {
+              if (useGameStore.getState().shakingCell === cellKey) {
+                useGameStore.setState({ shakingCell: null });
+              }
+            }, 500);
+            break;
+          }
+          case 'REGISTER_CONFIRMED': {
+            retryAttempt = 0;
+            set({ myPlayerName: payload.name });
+            localStorage.setItem('sudoku_player_name', payload.name);
+            import('./useSocialStore').then(({ useSocialStore }) => {
+              useSocialStore.getState().loadFriends();
+            });
+            break;
+          }
+          case 'FRIEND_REQUEST_RECEIVED': {
+            import('./useSocialStore').then(({ useSocialStore }) => {
+              useSocialStore.getState().receiveFriendRequest(payload.sender);
+            });
+            break;
+          }
+          case 'FRIEND_REQUEST_ACCEPTED': {
+            import('./useSocialStore').then(({ useSocialStore }) => {
+              useSocialStore.getState().friendRequestAccepted(payload.friend);
+            });
+            break;
+          }
+          case 'FRIEND_REQUEST_SENT_CONFIRMED': {
+            get().addToast(`Friend request sent to ${payload.targetName}!`, 'success');
+            break;
+          }
+          case 'FRIENDS_STATUS_LIST': {
+            import('./useSocialStore').then(({ useSocialStore }) => {
+              const { friends } = useSocialStore.getState();
+              const updatedFriends = friends.map(f => {
+                const info = payload.statuses[f.id] || { status: 'offline' };
+                return {
+                  ...f,
+                  status: info.status,
+                  name: info.name || f.name,
+                  roomCode: info.roomCode || null
+                };
+              });
+              useSocialStore.setState({ friends: updatedFriends });
+            });
+            break;
+          }
+          case 'FRIEND_STATUS_UPDATE': {
+            import('./useSocialStore').then(({ useSocialStore }) => {
+              const { friends } = useSocialStore.getState();
+              const updatedFriends = friends.map(f => {
+                if (f.id === payload.friendId) {
+                  return { 
+                    ...f, 
+                    status: payload.status,
+                    name: payload.name || f.name,
+                    roomCode: payload.roomCode || null
+                  };
+                }
+                return f;
+              });
+              useSocialStore.setState({ friends: updatedFriends });
+            });
+            break;
+          }
+          case 'FRIEND_NAME_UPDATE': {
+            import('./useSocialStore').then(({ useSocialStore }) => {
+              const { friends, friendRequests } = useSocialStore.getState();
+              const updatedFriends = friends.map(f => {
+                if (f.id === payload.friendId) {
+                  return { ...f, name: payload.name };
+                }
+                return f;
+              });
+              const updatedRequests = friendRequests.map(r => {
+                if (r.id === payload.friendId) {
+                  return { ...r, name: payload.name };
+                }
+                return r;
+              });
+              useSocialStore.setState({ 
+                friends: updatedFriends,
+                friendRequests: updatedRequests
+              });
+            });
+            break;
+          }
+          case 'LOBBY_INVITATION': {
+            set({ activeLobbyInvitation: payload });
+            get().addToast(`✉️ Invitation received from ${payload.inviterName}!`, 'info');
+            break;
+          }
+          case 'MATCH_FOUND': {
+            const { room } = payload;
+            set({ room });
+            // Join the matched room authoritatively to sync the connection on the server
+            get().joinRoom(room.code);
+            import('./useSocialStore').then(({ useSocialStore }) => {
+              useSocialStore.getState().matchFound(payload);
+            });
+            break;
+          }
+          case 'MATCHMAKING_TIMEOUT': {
+            import('./useSocialStore').then(({ useSocialStore }) => {
+              useSocialStore.getState().handleMatchmakingTimeout();
+            });
+            break;
+          }
+          case 'RIVALRIES_DATA': {
+            import('./useSocialStore').then(({ useSocialStore }) => {
+              useSocialStore.getState().setRivalries(payload.rivalries || []);
+            });
+            break;
+          }
+
+          case 'ROOM_CREATED':
+          case 'ROOM_JOINED': {
+            sessionStorage.removeItem('sudoku_challenge');
+            localStorage.setItem('sudoku_seat_' + payload.room.code, payload.resumeToken);
+            // Persist the room code locally
+            localStorage.setItem('sudoku_active_room_code', payload.room.code);
+
+            set({ 
+              isConnected: true, localReconnectBy: null, room: payload.room, challenge: null, challengeLink: null,
+              myPlayerId: payload.myPlayerId,
+              finishers: payload.room.finishers || [],
+              chatMessages: [],
+              showPauseVoteModal: false,
+              pauseRequester: null,
+              spectatingPlayerId: null,
+              spectatedPlayerBoardState: null,
+              myActiveSpectators: [],
+              myMana: 0,
+              myStreak: 0,
+              myShieldActive: false,
+              isScrambled: false,
+              activeInkSplashes: []
+            });
+            
+            import('./useSocialStore').then(({ useSocialStore }) => {
+              useSocialStore.setState({ matchmakingStatus: 'idle', matchOpponent: null });
+            });
+            
+            // Request dynamic ICE servers credentials from signaling server
+            const { ws } = get();
+            if (ws && ws.readyState === 1) {
+              ws.send(JSON.stringify({ type: 'FETCH_ICE_SERVERS', payload: {} }));
+            }
+
+            // If the game is already started in this room, load the board!
+            if (payload.room.isGameStarted && payload.board) {
+              const { difficulty } = payload.room;
+              const gameStore = useGameStore.getState();
+              
+              const me = payload.room.players.find(p => p.id === payload.myPlayerId);
+              gameStore.initGame(difficulty, payload.board, payload.solution, false);
+              const snap = payload.snapshot;
+              if (snap?.matchId === payload.room.matchId) {
+                const { board, notes, strikes, hintsRemaining, selectedCell, mistakes, timeline, elapsedSeconds } = snap;
+                useGameStore.setState({ board, notes, strikes, hintsRemaining, selectedCell, mistakes, timeline, elapsedSeconds });
+                set({ myMana: me.mana, myStreak: snap.streak || 0, activeInkSplashes: snap.ink || [],
+                  myShieldActive: snap.shieldUntil > Date.now(), shieldUntil: snap.shieldUntil,
+                  isScrambled: snap.scrambleUntil > Date.now(), scrambleUntil: snap.scrambleUntil });
+                for (const [flag, expiry] of [['myShieldActive','shieldUntil'], ['isScrambled','scrambleUntil']]) {
+                  if (snap[expiry] > Date.now()) setTimeout(() => {
+                    if (get()[expiry] === snap[expiry]) set({ [flag]: false });
+                  }, snap[expiry] - Date.now());
+                }
+              }
+              if (payload.sharedBoard) useGameStore.setState({ board: payload.sharedBoard });
+              if (me.hasFinishedGame) useGameStore.setState({ gameStatus: me.strikes >= 3 ? 'lost' : 'won' });
+              useGameStore.getState().persistState();
+            } else if (!payload.room.isGameStarted) {
+              useGameStore.setState({ gameStatus: 'idle' });
+            }
+            break;
+          }
+
+          case 'ROOM_UPDATED': {
+            const prevPlayers = get().room?.players || [];
+            const updatedRoom = payload.room;
+            const newPlayers = updatedRoom?.players || [];
+
+            // Audio cues for player join/leave
+            if (prevPlayers.length > 0 && newPlayers.length > prevPlayers.length) {
+              const hasNewPlayer = newPlayers.some(np => np.id !== get().myPlayerId && !prevPlayers.some(op => op.id === np.id));
+              if (hasNewPlayer) {
+                playSound.playerJoin(get().sfxEnabled);
+              }
+            } else if (prevPlayers.length > 0 && newPlayers.length < prevPlayers.length) {
+              const hasDepartedPlayer = prevPlayers.some(op => op.id !== get().myPlayerId && !newPlayers.some(np => np.id === op.id));
+              if (hasDepartedPlayer) {
+                playSound.playerLeave(get().sfxEnabled);
+              }
+            }
+
+            // Record unknown players to Recent tab
+            import('./useSocialStore').then(({ useSocialStore }) => {
+              const addRecent = useSocialStore.getState().addRecentPlayer;
+              if (addRecent) {
+                newPlayers.forEach((p) => {
+                  if (p && p.id !== get().myPlayerId) {
+                    addRecent(p);
+                  }
+                });
+              }
+            }).catch(() => {});
+
+            set((state) => {
+              const activeSpectatorNames = (updatedRoom?.players || [])
+                .filter(p => p.isSpectator)
+                .map(p => p.name);
+              const reconciled = state.myActiveSpectators.filter(name =>
+                activeSpectatorNames.includes(name)
+              );
+              return {
+                room: updatedRoom,
+                myActiveSpectators: reconciled
+              };
+            });
+            break;
+          }
+
+          case 'GAME_STARTED': {
+            set({ 
+              room: payload.room,
+              finishers: [],
+              showPauseVoteModal: false,
+              pauseRequester: null,
+              spectatingPlayerId: null,
+              spectatedPlayerBoardState: null,
+              myActiveSpectators: [],
+              myMana: 0,
+              myStreak: 0,
+              myShieldActive: false,
+              isScrambled: false,
+              activeInkSplashes: []
+            });
+            set({ challengeLink: null, forfeitWinnerPending: null });
+            // Initialize local Sudoku board with shared dynamic board
+            const { difficulty } = payload.room;
+            useGameStore.getState().initGame(difficulty, payload.board, payload.solution); 
+            get().addToast('Sudoku board matches generated. Solve!', 'info');
+            break;
+          }
+
+          case 'PROGRESS_UPDATED': {
+            set((state) => {
+              if (!state.room) return {};
+              const isWon = payload.result === 'won' || payload.progress >= 100;
+              const updatedPlayers = state.room.players.map(p => 
+                p.id === payload.playerId 
+                  ? { 
+                      ...p, 
+                      progress: isWon ? 100 : payload.progress, 
+                      strikes: payload.strikes, 
+                      mana: payload.mana || 0,
+                      hasFinishedGame: !!payload.hasFinishedGame || payload.strikes >= 3 || isWon,
+                      result: payload.result || (payload.strikes >= 3 ? 'lost' : isWon ? 'won' : p.result),
+                      cellsLeft: isWon ? 0 : payload.cellsLeft,
+                      total: payload.total
+                    } 
+                  : p
+              );
+              return { 
+                room: { 
+                  ...state.room, 
+                  players: updatedPlayers,
+                  seriesScore: payload.seriesScore !== undefined ? payload.seriesScore : state.room.seriesScore,
+                  currentStreak: payload.currentStreak !== undefined ? payload.currentStreak : state.room.currentStreak,
+                  seriesCount: payload.seriesCount !== undefined ? payload.seriesCount : state.room.seriesCount
+                } 
+              };
+            });
+            break;
+          }
+
+          case 'EMOTE_RECEIVED': {
+            const messageItem = {
+              id: Date.now() + Math.random(),
+              playerId: payload.playerId,
+              name: payload.name || 'Player',
+              isSpectator: !!payload.isSpectator,
+              text: payload.emoji || payload.text,
+              timestamp: payload.timestamp || Date.now()
+            };
+            set(state => ({ chatMessages: [...(state.chatMessages || []).slice(-49), messageItem] }));
+            const callback = get().emoteCallback;
+            if (callback) {
+              callback(payload);
+            }
+            break;
+          }
+
+          case 'PAUSE_REQUESTED': {
+            // Show pause vote modal ONLY for non-requester
+            // (Server already excludes the requester from this broadcast)
+            set({
+              room: payload.room,
+              pauseRequester: payload.requesterName,
+              showPauseVoteModal: true
+            });
+            break;
+          }
+
+          case 'PAUSE_RESUMING': {
+            set({ 
+              room: payload.room,
+              pauseCountdown: payload.countdownSeconds || 3,
+              showPauseVoteModal: false,
+              pauseRequester: null
+            });
+            break;
+          }
+
+          case 'PAUSE_CONSENSUS': {
+            // Force pause locally in the game state
+            set({ 
+              room: payload.room,
+              pauseCountdown: null,
+              showPauseVoteModal: false,
+              pauseRequester: null
+            });
+            
+            get().addToast(payload.isPaused ? 'Game PAUSED!' : 'Game RESUMED!', 'info');
+            break;
+          }
+
+          case 'PAUSE_REJECTED': {
+            // Server sends this ONLY to the original requester
+            set({ 
+              room: payload.room,
+              showPauseVoteModal: false,
+              pauseRequester: null
+            });
+            get().addToast('Your pause request was rejected by opponent(s).', 'error');
+            break;
+          }
+
+          case 'PLAY_AGAIN_APPROVED': {
+            set({ 
+              room: payload.room,
+              showPlayAgainVoteModal: false 
+            });
+            get().addToast('Room consensus reached. Starting new game!', 'success');
+            
+            // Reset local board states
+            if (payload.room.players[0]?.id === get().myPlayerId) get().startGame();
+            break;
+          }
+
+          case 'PLAY_AGAIN_REJECTED': {
+            set({ 
+              room: payload.room,
+              showPlayAgainVoteModal: false 
+            });
+            get().addToast('Play again vote rejected.', 'error');
+            break;
+          }
+
+          case 'NOTIFICATION': {
+            get().addToast(payload.message, 'info');
+            break;
+          }
+
+          case 'PLAYER_FINISHED': {
+            // A different player just won or was eliminated
+            const { name, result, playerId, place } = payload;
+            const isWon = result === 'won';
+            set((state) => {
+              if (!state.room) return {};
+              const updatedPlayers = state.room.players.map(p => 
+                p.id === playerId
+                  ? {
+                      ...p,
+                      hasFinishedGame: true,
+                      result: result || p.result || (p.strikes >= 3 ? 'lost' : 'won'),
+                      progress: isWon ? 100 : p.progress,
+                      cellsLeft: isWon ? 0 : p.cellsLeft
+                    }
+                  : p
+              );
+              return { 
+                room: { 
+                  ...state.room, 
+                  players: updatedPlayers,
+                  seriesScore: payload.seriesScore !== undefined ? payload.seriesScore : state.room.seriesScore,
+                  currentStreak: payload.currentStreak !== undefined ? payload.currentStreak : state.room.currentStreak,
+                  seriesCount: payload.seriesCount !== undefined ? payload.seriesCount : state.room.seriesCount
+                } 
+              };
+            });
+            if (result === 'won' && playerId) {
+              const currentFinishers = get().finishers || [];
+              if (!currentFinishers.some(f => f.playerId === playerId)) {
+                const assignedPlace = place || (currentFinishers.length + 1);
+                set({ finishers: [...currentFinishers, { ...payload, place: assignedPlace, progress: 100, cellsLeft: 0 }] });
+                try { playSound.opponentFinished(true); } catch {}
+              }
+            }
+            const emoji = result === 'won' ? '🏆' : '💀';
+            const verb  = result === 'won' ? 'solved the board!' : 'was eliminated!';
+            get().addToast(`${emoji} ${name} ${verb}`, result === 'won' ? 'success' : 'error');
+            break;
+          }
+
+          case 'PLAYER_LEFT': {
+            // Another player explicitly exited the game
+            playSound.playerLeave(get().sfxEnabled);
+            const { name: leaverName, playerId: leaverId } = payload;
+            if (leaverId === get().spectatingPlayerId) {
+              get().addToast(`🚪 Player you were spectating (${leaverName}) has left the game!`, 'error');
+            } else {
+              get().addToast(`🚪 ${leaverName} exited the game. Continue playing!`, 'info');
+            }
+            // Remove the player from local room state so live-sync cards update immediately
+            set((state) => {
+              if (!state.room) return {};
+              const updatedPlayers = state.room.players.filter(p => p.id !== leaverId);
+              const activeSpectatorNames = updatedPlayers
+                .filter(p => p.isSpectator)
+                .map(p => p.name);
+              const reconciled = state.myActiveSpectators.filter(name =>
+                activeSpectatorNames.includes(name)
+              );
+              return {
+                room: {
+                  ...state.room,
+                  players: updatedPlayers
+                },
+                myActiveSpectators: reconciled
+              };
+            });
+            break;
+          }
+
+          case 'PLAYER_DISCONNECTED': {
+            const { playerId, name } = payload;
+            get().addToast(`${name} disconnected. Holding their seat.`, 'info');
+            set((state) => {
+              if (!state.room) return {};
+              const updatedPlayers = state.room.players.map(p => 
+                p.id === playerId ? { ...p, disconnected: true, reconnectBy: payload.reconnectBy } : p
+              );
+              return { room: { ...state.room, players: updatedPlayers } };
+            });
+            break;
+          }
+
+          case 'PLAYER_RECONNECTED': {
+            const { name, room: updatedRoom } = payload;
+            get().addToast(`⚡ ${name} reconnected!`, 'success');
+            set((state) => {
+              const activeSpectatorNames = (updatedRoom?.players || [])
+                .filter(p => p.isSpectator)
+                .map(p => p.name);
+              const reconciled = state.myActiveSpectators.filter(name =>
+                activeSpectatorNames.includes(name)
+              );
+              return {
+                room: updatedRoom,
+                myActiveSpectators: reconciled
+              };
+            });
+            break;
+          }
+
+          case 'GAME_OVER_LEAVER': {
+            const { winnerId, leaverName, eloAdjustment } = payload;
+            
+            // If we already left the room locally, ignore this broadcast
+            if (!get().room) {
+              break;
+            }
+            
+            // If we are the winner, do NOT end the game. Store pending ELO win instead so they can complete the board.
+            if (winnerId === get().myPlayerId) {
+              set({ forfeitWinnerPending: { leaverName, eloAdjustment } });
+              get().addToast(`🏆 Opponent ${leaverName} left! Complete the board successfully to claim +${eloAdjustment} ELO.`, 'success');
+            }
+            break;
+          }
+
+          case 'HINT_USED': {
+            // Another player just used a hint
+            get().addToast(`💡 ${payload.name} used a hint!`, 'info');
+            break;
+          }
+
+          case 'PAUSE_DISMISSED': {
+            // The pause requester left, dismiss any active vote modal
+            set({
+              room: payload.room,
+              showPauseVoteModal: false,
+              pauseRequester: null
+            });
+            get().addToast('Pause vote cancelled — a player left.', 'info');
+            break;
+          }
+
+          case 'KICKED': {
+            get().addToast(payload.message, 'error');
+            localStorage.removeItem('sudoku_active_room_code');
+            get().leaveVoice(); // Clean up WebRTC tracks and connections
+            useGameStore.getState().resetPersistedState();
+            set({
+              room: null,
+              showPauseVoteModal: false,
+              pauseRequester: null,
+              showPlayAgainVoteModal: false,
+              spectatingPlayerId: null,
+              spectatedPlayerBoardState: null,
+              myActiveSpectators: [],
+              myMana: 0,
+              myStreak: 0,
+              myShieldActive: false,
+              isScrambled: false,
+              activeInkSplashes: []
+            });
+            break;
+          }
+
+          case 'ABILITY_CONFIRMED': {
+            const { abilityType, mana } = payload;
+            set({ myMana: mana });
+            get().addToast(`✨ Casted ${abilityType.toUpperCase()}!`, 'success');
+            
+            // If it is cleanse, activate local shield immediately
+            if (abilityType === 'cleanse') {
+              set({ myShieldActive: true, shieldUntil: Date.now() + 5000 });
+              get().cleanseAllSabotages();
+              
+              // Clear shield after 5 seconds
+              setTimeout(() => {
+                set({ myShieldActive: false });
+                get().addToast('Shield expired.', 'info');
+              }, 5000);
+            }
+            break;
+          }
+
+          case 'ABILITY_APPLIED': {
+            const { senderName, abilityType } = payload;
+            
+            // Check if player has an active Cleanse Shield
+            if (get().myShieldActive) {
+              get().addToast(`🛡️ Blocked ${senderName}'s ${abilityType} attack!`, 'success');
+              break;
+            }
+
+            get().addToast(`⚠️ Incoming attack: ${senderName} casted ${abilityType}!`, 'error');
+
+            if (abilityType === 'ink') {
+              // Generate 3 random ink splashes on the grid
+              const splashes = [];
+              for (let i = 0; i < 3; i++) {
+                splashes.push({
+                  id: 'ink_' + Math.random().toString(36).substring(2, 9),
+                  top: Math.floor(Math.random() * 65) + 10, // 10% to 75% height
+                  left: Math.floor(Math.random() * 65) + 10, // 10% to 75% width
+                  size: Math.floor(Math.random() * 40) + 70, // 70px to 110px size
+                  opacity: 0.95
+                });
+              }
+              set({ activeInkSplashes: splashes });
+            } else if (abilityType === 'scramble') {
+              set({ isScrambled: true, scrambleUntil: Date.now() + 7000 });
+              
+              // Scramble keypad for 7 seconds
+              setTimeout(() => {
+                set({ isScrambled: false });
+                get().addToast('Keypad restored.', 'info');
+              }, 7000);
+            }
+            break;
+          }
+
+          case 'ERROR': {
+            get().addToast(payload.message, 'error');
+            if (localStorage.getItem('sudoku_active_room_code') && (payload.message?.includes('Room not found') || payload.message?.includes('reserved for its original session'))) {
+              localStorage.removeItem('sudoku_active_room_code');
+              if (get().room || localStorage.getItem('sudoku_active_room_code')) get().addToast('This room is no longer active.', 'info');
+              get().leaveVoice();
+              set({ room: null, isConnected: true, localReconnectBy: null, forfeitWinnerPending: null });
+              useGameStore.getState().resetPersistedState();
+            }
+            break;
+          }
+
+          case 'VOICE_STATE_UPDATED': {
+            const { playerId, isMuted, isJoined } = payload;
+            set((state) => {
+              if (!state.room) return {};
+              const updatedPlayers = state.room.players.map(p => 
+                p.id === playerId 
+                  ? { ...p, isVoiceJoined: isJoined, isVoiceMuted: isMuted } 
+                  : p
+              );
+              return { room: { ...state.room, players: updatedPlayers } };
+            });
+
+            const state = get();
+            // Spectators should completely ignore voice updates (not show voice prompt, etc.)
+            const isSpectator = state.room?.players?.find(p => p.id === state.myPlayerId)?.isSpectator;
+            if (isSpectator) {
+              break;
+            }
+
+            if (isJoined && playerId !== state.myPlayerId) {
+              if (state.isVoiceJoined) {
+                const isInitiator = state.myPlayerId.localeCompare(playerId) < 0;
+                if (isInitiator) {
+                  state.addVoiceDebugLog(`Opponent joined voice. We are the initiator. Calling...`);
+                  state.initiateCall(playerId);
+                } else {
+                  state.addVoiceDebugLog(`Opponent joined voice. We are the callee. Waiting for offer.`);
+                }
+              } else {
+                const otherPlayer = state.room?.players?.find(p => p.id === playerId);
+                const name = otherPlayer ? otherPlayer.name : 'Your opponent';
+                set({ voicePromptActive: { playerId, playerName: name } });
+              }
+            }
+            break;
+          }
+
+          case 'ICE_SERVERS_RESPONSE': {
+            const { iceServers } = payload;
+            set({ iceServersList: iceServers });
+            get().addVoiceDebugLog(`Loaded ${iceServers?.length || 0} ICE servers dynamically.`);
+            break;
+          }
+
+          case 'SIGNAL_DATA': {
+            const { senderId, signal } = payload;
+            get().handleSignalData(senderId, signal);
+            break;
+          }
+
+          case 'SPECTATOR_ALERT': {
+            const { spectatorName, isSpectating } = payload;
+            set((state) => {
+              const currentSpectators = [...state.myActiveSpectators];
+              if (isSpectating) {
+                if (!currentSpectators.includes(spectatorName)) {
+                  currentSpectators.push(spectatorName);
+                }
+                get().addToast(`👁️ ${spectatorName} is now spectating your game!`, 'success');
+
+                // Immediately sync current gameplay state to the spectator
+                const gameStore = useGameStore.getState();
+                const { board, notes, selectedCell } = gameStore;
+                const { ws, isConnected } = get();
+                if (ws && isConnected && ws.readyState === 1) {
+                  ws.send(JSON.stringify({
+                    type: 'SYNC_GAMEPLAY',
+                    payload: { matchId:get().room.matchId, spectatorOnly:true, board, notes, selectedCell }
+                  }));
+                }
+              } else {
+                const index = currentSpectators.indexOf(spectatorName);
+                if (index !== -1) {
+                  currentSpectators.splice(index, 1);
+                }
+                get().addToast(`${spectatorName} stopped spectating.`, 'info');
+              }
+              return { myActiveSpectators: currentSpectators };
+            });
+            break;
+          }
+
+          case 'GAMEPLAY_SYNCED': {
+            const { playerId, board, notes, selectedCell } = payload;
+            set((state) => {
+              const activePlayers = state.room?.players?.filter(p => !p.isSpectator) || [];
+              const isPlayerA = activePlayers[0]?.id === playerId;
+              const isPlayerB = activePlayers[1]?.id === playerId;
+
+              const updates = {
+                spectatedPlayerBoardState: state.spectatingPlayerId === playerId ? { board, notes, selectedCell } : state.spectatedPlayerBoardState
+              };
+              if (isPlayerA) {
+                updates.spectatedPlayerABoard = { board, notes, selectedCell };
+              } else if (isPlayerB) {
+                updates.spectatedPlayerBBoard = { board, notes, selectedCell };
+              }
+              return updates;
+            });
+            break;
+          }
+
+          default:
+            console.warn(`[Client Warning] Unknown type: ${type}`);
+        }
+      } catch (err) {
+        console.error('[Client Error] Failed handling socket message', err);
+      }
+    };
+
+    socket.onclose = () => {
+      if (get().ws !== socket) return;
+      get().leaveVoice(); // Safely clean up local tracks & connections
+      const attempts = retryAttempt++;
+      set({ 
+        ws: null, 
+        isConnected: false,
+        connectionState: attempts > 4 ? 'disconnected' : 'connecting',
+        localReconnectBy: get().localReconnectBy || (get().room ? Date.now() + (get().room.isGameStarted ? 15000 : 8000) : null)
+      });
+      get().addToast('Disconnected from competitive lobby server. Retrying...', 'error');
+      
+      const delay = Math.min(8000, 1000 * 2 ** Math.min(attempts, 3)) + Math.random() * 400;
+      retryTimer = setTimeout(get().connectWebSocket, delay);
+    };
+  },
+
+  reconnectImmediately: () => {
+    clearTimeout(retryTimer);
+    retryAttempt = 0;
+    const { ws } = get();
+    if (ws && ws.readyState === 1) return;
+    if (ws) {
+      try { ws.close(); } catch {}
+    }
+    set({ ws: null, connectionState: 'connecting' });
+    get().connectWebSocket();
+  },
+
+  createRoom: (difficulty = 'medium', enableAbilities = true, coop = false) => {
+    const { ws, myPlayerName, myPlayerId, selectedAvatar } = get();
+    if (!ws || ws.readyState !== 1) return;
+
+    ws.send(JSON.stringify({
+      type: 'CREATE_ROOM',
+      payload: { name: myPlayerName, playerId: myPlayerId, difficulty, avatar: selectedAvatar, enableAbilities, coop }
+    }));
+  },
+
+  joinRoom: (code, isSpectator = false) => {
+    const { ws, myPlayerName, myPlayerId, selectedAvatar } = get();
+    if (!ws || ws.readyState !== 1) return;
+    const cleanCode = String(code || '').trim();
+
+    ws.send(JSON.stringify({
+      type: 'JOIN_ROOM',
+      payload: { name: myPlayerName, playerId: myPlayerId, code: cleanCode, resumeToken: localStorage.getItem("sudoku_seat_" + cleanCode), isSpectator, avatar: selectedAvatar }
+    }));
+  },
+
+  toggleReady: () => {
+    const { ws } = get();
+    if (!ws || ws.readyState !== 1) return;
+
+    ws.send(JSON.stringify({
+      type: 'TOGGLE_READY',
+      payload: {}
+    }));
+  },
+
+  startGame: () => {
+    const { ws, room } = get();
+    if (!ws || ws.readyState !== 1 || !room) return;
+    const activeDifficulty = room.difficulty || 'medium';
+    const { puzzle: generatedPuzzle, solution: generatedSolution } = generateSudoku(activeDifficulty);
+    ws.send(JSON.stringify({
+      type: 'START_GAME',
+      payload: {
+        board: generatedPuzzle,
+        solution: generatedSolution
+      }
+    }));
+  },
+
+  fetchDailyLeaderboard: async (date) => {
+    if (!date) return;
+
+    // 1. Fetch directly from Supabase for cross-platform persistence across all accounts
+    try {
+      const { supabase } = await import('../lib/supabase');
+      if (supabase) {
+        const { data, error } = await supabase
+          .from('daily_challenge_scores')
+          .select('player_id, name, avatar, time_seconds, formatted_time, strikes, created_at')
+          .eq('challenge_date', date)
+          .order('time_seconds', { ascending: true })
+          .order('strikes', { ascending: true })
+          .order('created_at', { ascending: true })
+          .limit(10);
+
+        if (!error && Array.isArray(data) && data.length > 0) {
+          const formatted = data.map((row, idx) => ({
+            rank: idx + 1,
+            playerId: row.player_id,
+            name: row.name,
+            avatar: row.avatar || 'apex',
+            timeSeconds: row.time_seconds,
+            formattedTime: row.formatted_time,
+            strikes: row.strikes || 0,
+          }));
+          set((state) => ({
+            dailyLeaderboards: {
+              ...state.dailyLeaderboards,
+              [date]: formatted,
+            },
+          }));
+          return; // Supabase returned genuine data, skip local server fallback
+        }
+      }
+    } catch (err) {
+      console.warn('[LobbyStore] Failed to fetch daily leaderboard from Supabase:', err);
+    }
+
+    // 2. Also query local WebSocket server as dual-sync fallback
+    const { ws } = get();
+    if (ws && ws.readyState === 1) {
+      ws.send(JSON.stringify({
+        type: 'GET_DAILY_LEADERBOARD',
+        payload: { date }
+      }));
+    }
+  },
+
+  submitDailyScore: async ({ date, timeSeconds, formattedTime, strikes }) => {
+    if (!date || typeof timeSeconds !== 'number') return;
+    const { ws, myPlayerId, myPlayerName, selectedAvatar } = get();
+    const effectiveId = myPlayerId || localStorage.getItem('sudoku_player_id') || 'guest_' + Math.random().toString(36).slice(2, 9);
+    const effectiveName = myPlayerName || localStorage.getItem('sudoku_player_name') || 'Player';
+    const effectiveAvatar = selectedAvatar || localStorage.getItem('sudoku_avatar') || 'apex';
+    const cleanStrikes = Number.isInteger(strikes) && strikes >= 0 ? strikes : 0;
+    const cleanTimeStr = formattedTime || `${Math.floor(timeSeconds / 60).toString().padStart(2, '0')}:${(timeSeconds % 60).toString().padStart(2, '0')}`;
+
+    // 1. Persist directly to Supabase
+    try {
+      const { supabase } = await import('../lib/supabase');
+      if (supabase) {
+        const { data: existing, error: checkError } = await supabase
+          .from('daily_challenge_scores')
+          .select('id, time_seconds')
+          .eq('challenge_date', date)
+          .eq('player_id', effectiveId)
+          .maybeSingle();
+
+        if (!checkError && existing) {
+          // If faster, update the existing record
+          if (timeSeconds < existing.time_seconds) {
+            await supabase
+              .from('daily_challenge_scores')
+              .update({
+                name: effectiveName,
+                avatar: effectiveAvatar,
+                time_seconds: timeSeconds,
+                formatted_time: cleanTimeStr,
+                strikes: cleanStrikes,
+              })
+              .eq('id', existing.id);
+          }
+        } else if (!checkError) {
+          await supabase
+            .from('daily_challenge_scores')
+            .insert({
+              challenge_date: date,
+              player_id: effectiveId,
+              name: effectiveName,
+              avatar: effectiveAvatar,
+              time_seconds: timeSeconds,
+              formatted_time: cleanTimeStr,
+              strikes: cleanStrikes,
+            });
+        }
+
+        // Re-fetch leaderboard from Supabase immediately to refresh UI
+        await get().fetchDailyLeaderboard(date);
+      }
+    } catch (err) {
+      console.warn('[LobbyStore] Failed saving daily score to Supabase:', err);
+    }
+
+    // 2. Also send over WebSocket as dual-sync fallback
+    if (ws && ws.readyState === 1) {
+      ws.send(JSON.stringify({
+        type: 'SUBMIT_DAILY_SCORE',
+        payload: {
+          date,
+          playerId: effectiveId,
+          name: effectiveName,
+          avatar: effectiveAvatar,
+          timeSeconds,
+          formattedTime: cleanTimeStr,
+          strikes: cleanStrikes,
+        }
+      }));
+    }
+  },
+
+  sendProgress: (progress, strikes, mana, cellsLeft, total, formattedTime) => {
+    const { ws, room, myMana } = get();
+    if (!ws || ws.readyState !== 1 || !room) return;
+
+    ws.send(JSON.stringify({
+      type: 'UPDATE_PROGRESS',
+      payload: { 
+        progress, 
+        strikes, 
+        matchId: room.matchId,
+        cellsLeft,
+        total,
+        formattedTime,
+        hintsUsed: (room.difficulty === 'expert' ? 1 : room.difficulty === 'beginner' ? 3 : 2) - useGameStore.getState().hintsRemaining, 
+        mana: mana !== undefined ? mana : myMana 
+      }
+    }));
+  },
+
+  sendEmote: (text) => {
+    const { ws, room, myPlayerId, myPlayerName } = get();
+    if (!ws || ws.readyState !== 1 || !room || !text) return;
+    const clean = String(text).trim().slice(0, 80);
+    if (!clean) return;
+
+    ws.send(JSON.stringify({
+      type: 'SEND_EMOTE',
+      payload: { emoji: clean, text: clean }
+    }));
+
+    const myStatus = room.players?.find(p => p.id === myPlayerId);
+    const selfMessage = {
+      id: Date.now() + Math.random(),
+      playerId: myPlayerId,
+      name: myPlayerName || 'You',
+      isSpectator: !!myStatus?.isSpectator,
+      text: clean,
+      timestamp: Date.now()
+    };
+    set(state => ({ chatMessages: [...(state.chatMessages || []).slice(-49), selfMessage] }));
+    // Do not trigger local emoteCallback for sender so sender does not see duplicate toast
+  },
+
+  requestPause: () => {
+    const { ws, room, lastPauseRequestTime } = get();
+    if (!ws || ws.readyState !== 1 || !room) return;
+
+    // Client-side 20-second cooldown guard
+    const COOLDOWN_MS = 20_000;
+    const now = Date.now();
+    if (now - lastPauseRequestTime < COOLDOWN_MS) {
+      const remaining = Math.ceil((COOLDOWN_MS - (now - lastPauseRequestTime)) / 1000);
+      get().addToast(`Pause cooldown — wait ${remaining}s before requesting again.`, 'error');
+      return;
+    }
+
+    set({ lastPauseRequestTime: now });
+
+    ws.send(JSON.stringify({
+      type: 'REQUEST_PAUSE',
+      payload: {}
+    }));
+  },
+
+  votePause: (approve) => {
+    const { ws } = get();
+    if (!ws || ws.readyState !== 1) return;
+
+    ws.send(JSON.stringify({
+      type: 'VOTE_PAUSE',
+      payload: { approve }
+    }));
+    set({ showPauseVoteModal: false, pauseRequester: null });
+  },
+
+  votePlayAgain: (vote) => {
+    const { ws } = get();
+    if (!ws || ws.readyState !== 1) return;
+
+    ws.send(JSON.stringify({
+      type: 'VOTE_PLAY_AGAIN',
+      payload: { vote }
+    }));
+    set({ showPlayAgainVoteModal: false });
+  },
+
+  // Toasts Actions
+  addToast: (message, type = 'info') => {
+    const id = Date.now() + Math.random();
+    set((state) => ({
+      toasts: [...state.toasts, { id, message, type }]
+    }));
+
+    // Auto close toast after 4s
+    setTimeout(() => {
+      get().removeToast(id);
+    }, 4000);
+  },
+
+  removeToast: (id) => {
+    set((state) => ({
+      toasts: state.toasts.filter(t => t.id !== id)
+    }));
+  },
+
+  /**
+   * Exit the current game and return to the homepage.
+   * - For solo games: clears persisted localStorage state.
+   * - For multiplayer: only clears room state (server keeps the room alive for others).
+   * The `onHome` callback is called by App.jsx to switch activeView to 'home'.
+   */
+  kickPlayer: (playerId) => {
+    const { ws, room } = get();
+    if (!ws || ws.readyState !== 1 || !room) return;
+
+    ws.send(JSON.stringify({
+      type: 'KICK_PLAYER',
+      payload: { playerId }
+    }));
+  },
+
+  forfeitMatch: () => {
+    const { ws, isConnected, room } = get();
+    if (ws && isConnected && ws.readyState === 1 && room) {
+      ws.send(JSON.stringify({
+        type: 'FORFEIT_MATCH',
+        payload: {}
+      }));
+    }
+  },
+
+  returnToRoomLobby: () => {
+    const { room, forfeitMatch } = get();
+    if (!room) {
+      get().exitToHome();
+      return;
+    }
+    const myPlayerId = get().myPlayerId;
+    const me = room.players?.find(p => p.id === myPlayerId);
+    if (room.isGameStarted && me && !me.hasFinishedGame && !me.isSpectator) {
+      forfeitMatch();
+    }
+    useGameStore.getState().resetPersistedState();
+    useGameStore.setState({ gameStatus: 'idle' });
+  },
+
+  exitToHome: (onHome) => {
+    get().leaveVoice(); // Clean up WebRTC voice chat connection and drop streams
+
+    const { ws, isConnected, room } = get();
+
+    // Notify the server so other players are informed and the player is removed from the room
+    if (ws && isConnected && ws.readyState === 1 && room) {
+      ws.send(JSON.stringify({
+        type: 'LEAVE_GAME',
+        payload: {}
+      }));
+    }
+
+    sessionStorage.removeItem('sudoku_challenge');
+    set({ challenge: null, challengeScore: null, challengeLink: null });
+    // Clear persisted room code
+    localStorage.removeItem('sudoku_active_room_code');
+
+    // Clear any persisted solo-game state (useGameStore is already imported at the top)
+    useGameStore.getState().resetPersistedState();
+    useGameStore.setState({ gameStatus: 'idle' });
+
+    // Reset lobby / room state locally
+    set({
+      room: null,
+      chatMessages: [],
+      showPauseVoteModal: false,
+      pauseRequester: null,
+      showPlayAgainVoteModal: false,
+      forfeitWinnerPending: null,
+      spectatingPlayerId: null,
+      spectatedPlayerBoardState: null,
+      spectatedPlayerABoard: null,
+      spectatedPlayerBBoard: null,
+      myActiveSpectators: [],
+      myMana: 0,
+      myStreak: 0,
+      myShieldActive: false,
+      isScrambled: false,
+      activeInkSplashes: [],
+      voicePromptActive: null
+    });
+
+    import('./useSocialStore').then(({ useSocialStore }) => {
+      useSocialStore.setState({ matchmakingStatus: 'idle', matchOpponent: null });
+    });
+
+    if (typeof onHome === 'function') onHome();
+  },
+
+  // WebRTC P2P Voice Call Actions
+  joinVoice: async () => {
+    try {
+      const { myPlayerId, room } = get();
+      const isSpectator = room?.players?.find(p => p.id === myPlayerId)?.isSpectator;
+      if (isSpectator) {
+        get().addToast('Spectators cannot join the voice channel.', 'error');
+        return;
+      }
+
+      get().addVoiceDebugLog('Requesting local microphone stream...');
+      set({ voiceConnectionState: 'connecting' });
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      
+      set({ 
+        localAudioStream: stream, 
+        isVoiceJoined: true,
+        isMicMuted: false 
+      });
+
+      get().addVoiceDebugLog('Microphone access granted.');
+
+      const { ws } = get();
+      
+      // Notify server of active voice status
+      if (ws && ws.readyState === 1) {
+        ws.send(JSON.stringify({
+          type: 'UPDATE_VOICE_STATE',
+          payload: { isMuted: false, isJoined: true }
+        }));
+        get().addVoiceDebugLog('Sent voice active state to signaling server.');
+      }
+
+      // If other players are already connected and have joined voice, initiate WebRTC handshake with each
+      if (room && room.players) {
+        const otherVoicePeers = room.players.filter(p => p.id !== myPlayerId && p.isVoiceJoined && !p.isSpectator);
+        if (otherVoicePeers.length > 0) {
+          for (const peer of otherVoicePeers) {
+            const isInitiator = myPlayerId.localeCompare(peer.id) < 0;
+            if (isInitiator) {
+              get().addVoiceDebugLog(`Peer ${peer.name} (${peer.id}) is in voice. We are initiator. Calling...`);
+              await get().initiateCall(peer.id);
+            } else {
+              get().addVoiceDebugLog(`Peer ${peer.name} (${peer.id}) is in voice. We are callee. Waiting for offer.`);
+            }
+          }
+        } else {
+          get().addVoiceDebugLog('Waiting for other players to join voice...');
+        }
+      }
+
+      get().addToast('Joined voice channel successfully!', 'success');
+    } catch (err) {
+      console.error('[Voice] Failed getting local audio', err);
+      set({ voiceConnectionState: 'failed' });
+      get().addVoiceDebugLog(`Microphone access failed: ${err.message}`);
+      get().addToast('Microphone access denied! Enable browser permissions.', 'error');
+    }
+  },
+
+  leaveVoice: () => {
+    get().addVoiceDebugLog('Leaving voice channel. Stopping audio tracks and closing connections.');
+    const { localAudioStream, peerConnections, ws } = get();
+
+    if (localAudioStream) {
+      localAudioStream.getTracks().forEach((track) => track.stop());
+    }
+
+    if (peerConnections) {
+      Object.values(peerConnections).forEach((pc) => {
+        try { pc.close(); } catch (e) {}
+      });
+    }
+
+    set({
+      localAudioStream: null,
+      remoteAudioStream: null,
+      remoteAudioStreams: {},
+      peerConnection: null,
+      peerConnections: {},
+      isVoiceJoined: false,
+      isMicMuted: false,
+      voiceConnectionState: 'idle'
+    });
+
+    if (ws && ws.readyState === 1) {
+      ws.send(JSON.stringify({
+        type: 'UPDATE_VOICE_STATE',
+        payload: { isMuted: false, isJoined: false }
+      }));
+      get().addVoiceDebugLog('Sent voice inactive state to signaling server.');
+    }
+  },
+
+  toggleMicMute: () => {
+    const { localAudioStream, isMicMuted, ws } = get();
+    if (!localAudioStream) return;
+
+    const nextMuted = !isMicMuted;
+    localAudioStream.getAudioTracks().forEach((track) => {
+      track.enabled = !nextMuted;
+    });
+
+    set({ isMicMuted: nextMuted });
+
+    if (ws && ws.readyState === 1) {
+      ws.send(JSON.stringify({
+        type: 'UPDATE_VOICE_STATE',
+        payload: { isMuted: nextMuted, isJoined: true }
+      }));
+    }
+  },
+
+  createPeerConnectionInstance: (peerId) => {
+    const { localAudioStream, peerConnections } = get();
+
+    if (peerConnections && peerConnections[peerId]) {
+      try { peerConnections[peerId].close(); } catch (e) {}
+    }
+
+    get().addVoiceDebugLog(`Initializing RTCPeerConnection for peer: ${peerId}`);
+
+    const pc = new RTCPeerConnection({
+      iceServers: get().iceServersList || [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:openrelay.metered.ca:80' },
+        {
+          urls: 'turn:openrelay.metered.ca:80',
+          username: 'openrelayproject',
+          credential: 'openrelayproject',
+          credentialType: 'password'
+        },
+        {
+          urls: 'turn:openrelay.metered.ca:443',
+          username: 'openrelayproject',
+          credential: 'openrelayproject',
+          credentialType: 'password'
+        },
+        {
+          urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+          username: 'openrelayproject',
+          credential: 'openrelayproject',
+          credentialType: 'password'
+        },
+        {
+          urls: 'turns:openrelay.metered.ca:443',
+          username: 'openrelayproject',
+          credential: 'openrelayproject',
+          credentialType: 'password'
+        },
+        {
+          urls: 'turns:openrelay.metered.ca:443?transport=tcp',
+          username: 'openrelayproject',
+          credential: 'openrelayproject',
+          credentialType: 'password'
+        }
+      ]
+    });
+
+    // Initialize ICE candidates queue to prevent RTCPeerConnection race conditions
+    pc.queuedCandidates = [];
+
+    // WebRTC connection state monitoring
+    pc.oniceconnectionstatechange = () => {
+      get().addVoiceDebugLog(`[${peerId}] ICE Connection State: ${pc.iceConnectionState}`);
+      if (pc.iceConnectionState === 'failed') {
+        get().addToast('Voice connection failed for peer. Relaying...', 'error');
+      }
+    };
+    pc.onconnectionstatechange = () => {
+      get().addVoiceDebugLog(`[${peerId}] WebRTC Connection State: ${pc.connectionState}`);
+      set({ voiceConnectionState: pc.connectionState });
+      if (pc.connectionState === 'connected') {
+        get().addToast('Voice connected with peer!', 'success');
+      }
+    };
+    pc.onicegatheringstatechange = () => {
+      get().addVoiceDebugLog(`[${peerId}] ICE Gathering State: ${pc.iceGatheringState}`);
+    };
+
+    if (localAudioStream) {
+      localAudioStream.getTracks().forEach((track) => {
+        pc.addTrack(track, localAudioStream);
+      });
+      get().addVoiceDebugLog(`Added local microphone audio track to peer ${peerId}.`);
+    }
+
+    pc.ontrack = (event) => {
+      get().addVoiceDebugLog(`[${peerId}] ontrack event: track received`);
+      let stream = event.streams && event.streams[0];
+      if (!stream && event.track) {
+        stream = new MediaStream([event.track]);
+      }
+      if (stream) {
+        set((state) => {
+          const nextStreams = { ...state.remoteAudioStreams, [peerId]: stream };
+          return {
+            remoteAudioStreams: nextStreams,
+            remoteAudioStream: Object.values(nextStreams)[0] || null
+          };
+        });
+        get().addVoiceDebugLog(`Bound remote audio stream for peer: ${peerId}`);
+      }
+    };
+
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        const { ws } = get();
+        if (ws && ws.readyState === 1) {
+          ws.send(JSON.stringify({
+            type: 'SIGNAL_DATA',
+            payload: {
+              targetId: peerId,
+              signal: { type: 'candidate', candidate: event.candidate }
+            }
+          }));
+        }
+      }
+    };
+
+    set((state) => ({
+      peerConnections: { ...state.peerConnections, [peerId]: pc },
+      peerConnection: pc
+    }));
+    return pc;
+  },
+
+  initiateCall: async (targetId) => {
+    const { ws, localAudioStream } = get();
+    if (!localAudioStream) return;
+
+    get().addVoiceDebugLog(`Initiating WebRTC call with ${targetId}. Generating SDP offer...`);
+    const pc = get().createPeerConnectionInstance(targetId);
+
+    try {
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      get().addVoiceDebugLog(`Set local description (SDP offer) for ${targetId}. Sending to signaling server...`);
+
+      ws.send(JSON.stringify({
+        type: 'SIGNAL_DATA',
+        payload: {
+          targetId,
+          signal: { type: 'offer', sdp: offer.sdp }
+        }
+      }));
+    } catch (err) {
+      get().addVoiceDebugLog(`Failed to create SDP offer: ${err.message}`);
+      console.error('[Voice] Error creating SDP offer', err);
+    }
+  },
+
+  handleSignalData: async (senderId, signal) => {
+    const { ws, peerConnections } = get();
+    let pc = peerConnections ? peerConnections[senderId] : null;
+
+    try {
+      if (signal.type === 'offer') {
+        get().addVoiceDebugLog(`Received SDP offer from peer ${senderId}. Processing...`);
+        if (!pc) {
+          pc = get().createPeerConnectionInstance(senderId);
+        }
+        await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: signal.sdp }));
+        get().addVoiceDebugLog(`Remote description (SDP offer) set for ${senderId}.`);
+
+        // Drain queued ICE candidates
+        if (pc.queuedCandidates && pc.queuedCandidates.length > 0) {
+          for (const cand of pc.queuedCandidates) {
+            try {
+              await pc.addIceCandidate(cand);
+            } catch (e) {
+              console.warn('[Voice] Failed adding queued candidate', e);
+            }
+          }
+          pc.queuedCandidates = [];
+        }
+
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        get().addVoiceDebugLog(`Set local description (SDP answer) for ${senderId}. Sending to peer...`);
+
+        ws.send(JSON.stringify({
+          type: 'SIGNAL_DATA',
+          payload: {
+            targetId: senderId,
+            signal: { type: 'answer', sdp: answer.sdp }
+          }
+        }));
+      } else if (signal.type === 'answer') {
+        get().addVoiceDebugLog(`Received SDP answer from peer ${senderId}. Processing...`);
+        if (pc) {
+          await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: signal.sdp }));
+          get().addVoiceDebugLog(`Remote description (SDP answer) set for ${senderId}.`);
+
+          // Drain queued ICE candidates
+          if (pc.queuedCandidates && pc.queuedCandidates.length > 0) {
+            for (const cand of pc.queuedCandidates) {
+              try {
+                await pc.addIceCandidate(cand);
+              } catch (e) {
+                console.warn('[Voice] Failed adding queued candidate', e);
+              }
+            }
+            pc.queuedCandidates = [];
+          }
+        }
+      } else if (signal.type === 'candidate') {
+        if (!pc) {
+          get().addVoiceDebugLog(`Received ICE candidate for ${senderId} before PC initialized. Creating PC...`);
+          pc = get().createPeerConnectionInstance(senderId);
+        }
+        if (pc && signal.candidate) {
+          const candDesc = signal.candidate.candidate ? signal.candidate.candidate.split(' ')[7] || 'stun/relay' : 'end-of-candidates';
+          if (pc.remoteDescription && pc.remoteDescription.type) {
+            try {
+              await pc.addIceCandidate(signal.candidate);
+              get().addVoiceDebugLog(`Added remote ICE candidate directly: ${candDesc}`);
+            } catch (e) {
+              console.warn('[Voice] Failed adding ICE candidate directly', e);
+            }
+          } else {
+            pc.queuedCandidates = pc.queuedCandidates || [];
+            pc.queuedCandidates.push(signal.candidate);
+            get().addVoiceDebugLog(`Queued remote ICE candidate: ${candDesc}`);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[Voice] Error handling signal data payload', err);
+    }
+  },
+
+  // Live Spectating Actions
+  startSpectating: (targetPlayerId) => {
+    const { ws, isConnected } = get();
+    console.log(`[Spectator] Starting spectating opponent: ${targetPlayerId}`);
+    set({
+      spectatingPlayerId: targetPlayerId,
+      spectatedPlayerBoardState: null
+    });
+
+    if (ws && isConnected && ws.readyState === 1) {
+      ws.send(JSON.stringify({
+        type: 'START_SPECTATING',
+        payload: { targetPlayerId }
+      }));
+    }
+  },
+
+  stopSpectating: () => {
+    const { ws, isConnected } = get();
+    console.log('[Spectator] Stopping spectating');
+    set({
+      spectatingPlayerId: null,
+      spectatedPlayerBoardState: null
+    });
+
+    if (ws && isConnected && ws.readyState === 1) {
+      ws.send(JSON.stringify({
+        type: 'STOP_SPECTATING',
+        payload: {}
+      }));
+    }
+  },
+
+  // Phase 12 Sabotage & Power-up Actions
+  addMana: (amount) => {
+    const nextMana = Math.max(0, Math.min(100, get().myMana + amount));
+    set({ myMana: nextMana });
+
+    // Sync to server if in active multiplayer game
+    const gameStore = useGameStore.getState();
+    const solution = gameStore.solution;
+    if (solution && solution.length > 0) {
+      const {percent: progress} = raceProgress(gameStore.board, solution, gameStore.originalCells);
+
+      get().sendProgress(progress, gameStore.strikes, nextMana);
+    }
+  },
+
+  resetStreak: () => set({ myStreak: 0 }),
+  incrementStreak: () => set((state) => ({ myStreak: state.myStreak + 1 })),
+
+  triggerAbility: (abilityType) => {
+    const { ws, isConnected, room } = get();
+    if (!ws || !isConnected || ws.readyState !== 1 || !room) return;
+
+    ws.send(JSON.stringify({
+      type: 'TRIGGER_ABILITY',
+      payload: { abilityType }
+    }));
+  },
+
+  wipeInkSplatter: (blobId) => {
+    set((state) => {
+      const updated = state.activeInkSplashes.map((splash) => {
+        if (splash.id === blobId) {
+          const nextOpacity = splash.opacity - 0.33;
+          return { ...splash, opacity: nextOpacity };
+        }
+        return splash;
+      }).filter(s => s.opacity > 0.05);
+
+      return { activeInkSplashes: updated };
+    });
+  },
+
+  cleanseAllSabotages: () => {
+    set({
+      activeInkSplashes: [],
+      isScrambled: false
+    });
+  }
+}));
+
+window.addEventListener('online', () => useLobbyStore.getState().connectWebSocket());
+window.useLobbyStore = useLobbyStore;
