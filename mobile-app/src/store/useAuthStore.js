@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import { supabase } from "../lib/supabase";
 import { useLobbyStore } from "./useLobbyStore";
+import { isNativePlatform } from "../utils/mobileBridge";
+import { Browser } from "@capacitor/browser";
 
 // Helper function to sanitize usernames to match constraints
 const sanitizeUsername = (name) => {
@@ -753,26 +755,95 @@ export const useAuthStore = create((set, get) => ({
       }
 
       // ── Build redirect URL (include guest creds as fallback for email guests) ─
-      let redirectUrl = window.location.origin;
+      const isNative = isNativePlatform();
+      let redirectUrl = isNative ? "app.codoku.sudoku://google-auth" : window.location.origin;
       const creds = localStorage.getItem("sudoku_guest_creds");
       if (creds) {
         try {
           const parsed = JSON.parse(creds);
           if (parsed.email && parsed.password) {
-            redirectUrl += `?g_e=${encodeURIComponent(parsed.email)}&g_p=${encodeURIComponent(parsed.password)}`;
+            redirectUrl += (redirectUrl.includes("?") ? "&" : "?") + `g_e=${encodeURIComponent(parsed.email)}&g_p=${encodeURIComponent(parsed.password)}`;
           }
         } catch (e) {}
       }
 
       console.log("[Auth] Initiating Google Sign-In with redirect URL:", redirectUrl);
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: "google",
-        options: { redirectTo: redirectUrl },
-      });
-      if (error) throw error;
+      if (isNative) {
+        const { data, error } = await supabase.auth.signInWithOAuth({
+          provider: "google",
+          options: {
+            redirectTo: redirectUrl,
+            skipBrowserRedirect: true,
+          },
+        });
+        if (error) throw error;
+        if (data?.url) {
+          await Browser.open({ url: data.url, windowName: "_system" });
+        }
+      } else {
+        const { error } = await supabase.auth.signInWithOAuth({
+          provider: "google",
+          options: { redirectTo: redirectUrl },
+        });
+        if (error) throw error;
+      }
     } catch (err) {
       console.error("Google Sign-In failed:", err);
       useLobbyStore.getState().addToast(`Google Sign-In failed: ${err.message}`, "error");
+    }
+  },
+
+  handleAuthDeepLink: async (url) => {
+    if (!supabase || !url) return;
+    try {
+      console.log("[Auth] Handling auth deep link callback:", url);
+      if (isNativePlatform()) {
+        try {
+          await Browser.close();
+        } catch (e) {}
+      }
+
+      let hashOrQuery = "";
+      if (url.includes("#")) {
+        hashOrQuery = url.substring(url.indexOf("#") + 1);
+      } else if (url.includes("?")) {
+        hashOrQuery = url.substring(url.indexOf("?") + 1);
+      }
+
+      if (hashOrQuery) {
+        const params = new URLSearchParams(hashOrQuery);
+        const accessToken = params.get("access_token");
+        const refreshToken = params.get("refresh_token");
+
+        if (accessToken && refreshToken) {
+          console.log("[Auth] Setting Supabase session from deep link tokens...");
+          const { data, error } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+          });
+          if (error) throw error;
+          if (data?.user) {
+            useLobbyStore.getState().addToast("Google Account linked successfully!", "success");
+            await get().fetchAndSyncProfile(data.user);
+          }
+          return;
+        }
+
+        const code = params.get("code");
+        if (code) {
+          console.log("[Auth] Exchanging auth code for session from deep link...");
+          const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+          if (error) throw error;
+          if (data?.user) {
+            useLobbyStore.getState().addToast("Google Account linked successfully!", "success");
+            await get().fetchAndSyncProfile(data.user);
+          }
+          return;
+        }
+      }
+    } catch (err) {
+      console.error("[Auth] Error processing auth deep link:", err);
+      useLobbyStore.getState().addToast(`Auth deep link error: ${err.message}`, "error");
     }
   },
 

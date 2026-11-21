@@ -1,5 +1,55 @@
 # Project log
 
+## 2026-11-21 · Mobile App Native UX Redesign, Glowing Neon Icon Assets & Google OAuth Linking Fix
+
+On branch `feat/mobile-app-native-redesign-and-icons`:
+
+### Player-Facing Behavior & Architecture
+
+1. **Native Mobile App Shell & Bottom Navigation (`MobileBottomNav.jsx`):**
+   - Transformed the mobile experience from a desktop 12-column web dashboard into a mobile-first navigation model with a frosted glass bottom navigation bar docked with safe-area padding.
+   - 4 dedicated tabs with active glow pills, unread notification badges, and tactile haptic feedback:
+     - **Play (`<Play />`):** Solo practice difficulty picker (Easy to Master) and Daily Challenge card with current streak and calendar launcher.
+     - **Multiplayer (`<Swords />`):** 1v1 Ranked Matchmaking with radar queue animation, custom room creation (Co-op vs Speed Race, Mana powers), numeric PIN join, and pre-game lobby.
+     - **Social (`<Users />`):** Friends list with live in-game/lobby presence, pending friend requests with 1-tap accept/decline, head-to-head rivalry records, and daily challenge leaderboards.
+     - **Profile (`<User />`):** Player badge, avatar selector, username editor, Google Account Linking card, and Lo-Fi Focus Music player.
+
+2. **Full-Screen Distraction-Free In-Game Canvas:**
+   - On mobile match start (`activeView === "game"`), the top home header and bottom navigation bar are hidden to grant 100% of the screen height to gameplay.
+   - Screen hierarchy: Minimal top HUD (Exit, Timer, Strikes, compact Opponent vs status) -> Screen-width responsive Sudoku board -> Action toolbar (Undo, Erase, Notes, Hint) -> Thumb-accessible 1–9 numeric keypad & Mana ability bar.
+   - `InGameSidebars` is responsive with `hidden lg:flex`, preventing desktop room sidebars and player lists from rendering beneath the keypad on mobile devices.
+   - Chat and player spectating are smoothly managed via the slide-up `MobileChatDrawer`.
+
+3. **Google OAuth Linking Redirection Fix for Mobile:**
+   - Resolved Google OAuth redirect issues where Android WebView blocked authentication (`disallowed_useragent`) and `window.location.origin` (`https://localhost`) failed to return to the application.
+   - Installed and integrated `@capacitor/browser@^6.0.0`.
+   - On native platforms, `signInWithGoogle` requests OAuth with `skipBrowserRedirect: true` and redirect URI `app.codoku.sudoku://google-auth`, launching the system browser safely via `Browser.open()`.
+   - Updated `AndroidManifest.xml` intent filters and `Info.plist` `CFBundleURLTypes` for `app.codoku.sudoku` and `codoku` custom schemes.
+   - Enhanced `initMobileListeners` and `useAuthStore.handleAuthDeepLink` to detect the OAuth callback URL, automatically close the in-app browser sheet via `Browser.close()`, extract access/refresh tokens, and invoke `supabase.auth.setSession()`, successfully establishing the user's Google session and syncing the profile.
+
+4. **Glowing Neon Sudoku App Icon & Splash Screens:**
+   - Replaced default Android Studio robot icons and placeholder splash screens with branded "Glowing Neon Sudoku Emblem" assets.
+   - Designed a high-impact emblem: rounded 3x3 Sudoku mini-grid with numbers 3, 9, 7, and 5, overlaid with Co-doku's signature glowing cyan/purple lightning "S" glyph with dual bloom shaders and specular core.
+   - Generated native Android adaptive icon assets (`ic_launcher_foreground.png` scaled within the 66% safe zone across `mdpi`, `hdpi`, `xhdpi`, `xxhdpi`, `xxxhdpi`, and updated `ic_launcher_background.xml` to cosmic midnight `#050814`).
+   - Generated legacy fallback icons (`ic_launcher.png`, `ic_launcher_round.png`), iOS App Store asset (`AppIcon-512@2x.png` 1024x1024), PWA web icons (`icon-512.png`, `icon-192.png`), and portrait/landscape splash screens across all DPI densities.
+
+5. **Celebratory Victory Confetti & Micro-Interaction Polish:**
+   - Integrated `canvas-confetti` in `GameResultModal.jsx` to fire a colorful particle burst on puzzle solve or multiplayer match victory.
+   - Connected tactile haptics across tab changes, cell taps, number entry, undo/redo, note toggles, mistake buzz, and victory pulses.
+   - Added quick-access Theme, Sound, and Settings buttons in the mobile home header for effortless on-the-go personalization.
+
+### Verification Performed
+
+- **Automated Test Suite:** Ran `npm test`; all 42/42 unit and integration tests passed cleanly in 5.85s.
+- **Client Web Build:** Ran `npm run build --prefix client`; production Vite build compiled cleanly in 1.56s.
+- **Mobile App Build:** Ran `npm run build --prefix mobile-app`; Vite bundle with PWA service worker generated in 2.09s with zero errors.
+- **Capacitor Native Sync:** Ran `npx cap sync` in `mobile-app`; successfully registered all 6 native plugins (`@capacitor/browser`, `@capacitor/haptics`, `@capacitor/app`, `@capacitor-community/keep-awake`, `@capacitor/splash-screen`, `@capacitor/status-bar`) and copied web assets to Android and iOS platform directories in 0.53s.
+
+### Remaining Limitations
+
+- Cloud APK generation requires running the GitHub Actions workflow (`.github/workflows/build-android-apk.yml`) or building locally via Android Studio / `./gradlew assembleDebug`.
+
+
 ## 2026-11-18 · Mobile App Isolated Experiment: Capacitor 6 Setup & Cloud Android APK Pipeline
 
 On branch `feat/mobile-app-experiment`:

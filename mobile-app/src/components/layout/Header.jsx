@@ -172,45 +172,14 @@ export default function Header({
           {/* Desktop Utility Buttons (Theme, Audio, Lo-Fi, Guide, Settings) */}
           <div className="hidden sm:flex items-center gap-2 sm:gap-3">
             {/* Theme custom picker */}
-            <div className="relative">
-              <button
-                onClick={() => setShowThemeMenu(!showThemeMenu)}
-                className="p-2 rounded-xl border border-border-custom hover:bg-accent-glow hover:border-accent-custom hover:text-accent-custom active:scale-95 transition-all flex items-center gap-1.5"
-                title="Change Theme Palette"
-              >
-                <Palette size={18} />
-                <span className="text-xs font-bold hidden sm:inline">Theme</span>
-              </button>
-
-              {showThemeMenu && (
-                <div className="absolute right-0 mt-2 w-48 rounded-xl border border-border-custom bg-panel-custom p-2 shadow-lg z-50 animate-scale-in">
-                  <p className="text-[9px] uppercase font-bold text-accent-custom tracking-wider px-2 py-1 border-b border-border-custom mb-1">
-                    Select Theme
-                  </p>
-                  <div className="space-y-0.5">
-                    {themes.map((t) => (
-                      <button
-                        key={t.id}
-                        onClick={() => {
-                          setTheme(t.id);
-                          setShowThemeMenu(false);
-                        }}
-                        className={`
-                          w-full text-left px-2 py-1.5 rounded-lg text-xs font-semibold flex items-center justify-between
-                          transition-colors hover:bg-accent-glow hover:text-accent-custom
-                          ${theme === t.id ? "text-accent-custom bg-accent-glow" : ""}
-                        `}
-                      >
-                        <span>{t.name}</span>
-                        <div
-                          className={`w-3.5 h-3.5 rounded-full border border-border-custom ${t.preview}`}
-                        />
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
+            <button
+              onClick={() => setShowThemeMenu(!showThemeMenu)}
+              className="p-2 rounded-xl border border-border-custom hover:bg-accent-glow hover:border-accent-custom hover:text-accent-custom active:scale-95 transition-all flex items-center gap-1.5 cursor-pointer"
+              title="Change Theme Palette"
+            >
+              <Palette size={18} />
+              <span className="text-xs font-bold hidden sm:inline">Theme</span>
+            </button>
 
             {/* Audio toggle */}
             <button

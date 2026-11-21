@@ -23,18 +23,24 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <!-- Deep linking for room invites (codoku://room/* and https://codoku.app/room/*) -->
-            <intent-filter android:autoVerify="true">
+            <!-- Deep linking for Google OAuth authentication & room invites -->
+            <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="codoku" android:host="room" />
+                <data android:scheme="app.codoku.sudoku" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="codoku" />
             </intent-filter>
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="https" android:host="codoku.app" android:pathPrefix="/room" />
+                <data android:scheme="https" android:host="codoku.app" />
             </intent-filter>
 
         </activity>

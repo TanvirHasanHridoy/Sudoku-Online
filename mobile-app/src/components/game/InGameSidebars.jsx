@@ -297,7 +297,7 @@ export default function InGameSidebars({
   const solvedDailyDates = propSolvedDailyDates || new Set();
 
   return (
-    <section className={`${room ? "lg:col-span-5" : "lg:col-span-4"} flex flex-col gap-6 w-full select-none`}>
+    <section className={`${room ? "lg:col-span-5" : "lg:col-span-4"} hidden lg:flex flex-col gap-6 w-full select-none`}>
       {room ? (
         <>
           {/* Compact Stats Row (multiplayer) */}

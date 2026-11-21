@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import confetti from "canvas-confetti";
 import {
   Award as Trophy,
   AlertTriangle,
@@ -89,6 +90,22 @@ export default function GameResultModal({
   const exitToHome = propExitToHome || ((cb) => cb && cb());
   const setSeconds = propSetSeconds || (() => {});
   const startNewGame = propStartNewGame || (() => {});
+
+  // Celebratory victory confetti fanfare
+  useEffect(() => {
+    if (activeView === "game" && (gameStatus === "won" || gameStatus === "practice-completed")) {
+      try {
+        confetti({
+          particleCount: 75,
+          spread: 65,
+          origin: { y: 0.55 },
+          colors: ["#a855f7", "#38bdf8", "#818cf8", "#10b981", "#f59e0b"]
+        });
+      } catch (e) {
+        // Safe fallback
+      }
+    }
+  }, [activeView, gameStatus]);
   const myProgress = propMyProgress !== undefined ? propMyProgress : (lobbyStore.myProgress || 0);
   const startLocalPractice = propStartLocalPractice || (() => {});
   const isConnected = propIsConnected !== undefined ? propIsConnected : (lobbyStore.isConnected ?? true);

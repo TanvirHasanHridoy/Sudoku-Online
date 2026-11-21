@@ -29,6 +29,7 @@ import {
   ToastContainer,
   WebRTCAudioManager,
   MobileChatDrawer,
+  MobileBottomNav,
   THEMES,
   AVATARS,
 } from "./components/layout";
@@ -66,6 +67,7 @@ export default function App() {
     () => localStorage.getItem("sudoku_theme") || "nordic-dark",
   );
   const [activeView, setActiveView] = useState("home");
+  const [mobileTab, setMobileTab] = useState("play");
   const [showThemeMenu, setShowThemeMenu] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
 
@@ -1098,6 +1100,13 @@ export default function App() {
     const cleanup = initMobileListeners({
       onUrlOpen: (url) => {
         try {
+          if (!url) return;
+          // Check for OAuth authentication callback first
+          if (url.includes("google-auth") || url.includes("access_token=") || url.includes("code=")) {
+            useAuthStore.getState().handleAuthDeepLink(url);
+            return;
+          }
+
           const parsed = new URL(url);
           const code = parsed.searchParams.get("room") || parsed.pathname.split("/").pop();
           if (code && /^\d{6}$/.test(code)) {
@@ -1120,6 +1129,13 @@ export default function App() {
     });
     return cleanup;
   }, [showSettingsModal, isGuideOpen, activeView, exitToHome]);
+
+  // Synchronize mobileTab with active room state
+  useEffect(() => {
+    if (room && activeView === "home") {
+      setMobileTab("multiplayer");
+    }
+  }, [room, activeView]);
 
   // Heartbeat sound synchronization triggered strictly by single-source matchUrgency
   useEffect(() => {
@@ -1741,181 +1757,424 @@ export default function App() {
         activeReactions={activeReactions}
       />
 
-      {/* Header bar */}
-      <Header
-        room={room}
-        activeView={activeView}
-        loadingAuth={loadingAuth}
-        isGuest={isGuest}
-        signInWithGoogle={signInWithGoogle}
-        signOut={signOut}
-        profile={profile}
-        isSavingUsername={isSavingUsername}
-        isCheckingUsername={isCheckingUsername}
-        theme={theme}
-        setTheme={setTheme}
-        themes={THEMES}
-        showThemeMenu={showThemeMenu}
-        setShowThemeMenu={setShowThemeMenu}
-        soundEnabled={soundEnabled}
-        setSoundEnabled={setSoundEnabled}
-        lofiEnabled={lofiEnabled}
-        handleToggleLofi={handleToggleLofi}
-        lofiPreset={lofiPreset}
-        handleLofiPresetChange={handleLofiPresetChange}
-        lofiVolume={lofiVolume}
-        handleLofiVolumeChange={handleLofiVolumeChange}
-        isLofiMenuOpen={isLofiMenuOpen}
-        setIsLofiMenuOpen={setIsLofiMenuOpen}
-        lofiMenuRef={lofiMenuRef}
-        gameStatus={gameStatus}
-        isGamePaused={isGamePaused}
-        setIsGuideOpen={setIsGuideOpen}
-        setShowSettingsModal={setShowSettingsModal}
-        selectedAvatar={selectedAvatar}
-        avatars={AVATARS}
-        inputName={inputName}
-        setInputName={setInputName}
-        setUsernameSuccess={setUsernameSuccess}
-        setDbUsernameError={setDbUsernameError}
-        handleUsernameSave={handleUsernameSave}
-        connectionState={connectionState}
-        isConnected={isConnected}
-        elo={elo}
-      />
+      {/* Header bar (only rendered on Home view for a clean distraction-free mobile game canvas) */}
+      {activeView === "home" && (
+        <Header
+          room={room}
+          activeView={activeView}
+          loadingAuth={loadingAuth}
+          isGuest={isGuest}
+          signInWithGoogle={signInWithGoogle}
+          signOut={signOut}
+          profile={profile}
+          isSavingUsername={isSavingUsername}
+          isCheckingUsername={isCheckingUsername}
+          theme={theme}
+          setTheme={setTheme}
+          themes={THEMES}
+          showThemeMenu={showThemeMenu}
+          setShowThemeMenu={setShowThemeMenu}
+          soundEnabled={soundEnabled}
+          setSoundEnabled={setSoundEnabled}
+          lofiEnabled={lofiEnabled}
+          handleToggleLofi={handleToggleLofi}
+          lofiPreset={lofiPreset}
+          handleLofiPresetChange={handleLofiPresetChange}
+          lofiVolume={lofiVolume}
+          handleLofiVolumeChange={handleLofiVolumeChange}
+          isLofiMenuOpen={isLofiMenuOpen}
+          setIsLofiMenuOpen={setIsLofiMenuOpen}
+          lofiMenuRef={lofiMenuRef}
+          gameStatus={gameStatus}
+          isGamePaused={isGamePaused}
+          setIsGuideOpen={setIsGuideOpen}
+          setShowSettingsModal={setShowSettingsModal}
+          selectedAvatar={selectedAvatar}
+          avatars={AVATARS}
+          inputName={inputName}
+          setInputName={setInputName}
+          setUsernameSuccess={setUsernameSuccess}
+          setDbUsernameError={setDbUsernameError}
+          handleUsernameSave={handleUsernameSave}
+          connectionState={connectionState}
+          isConnected={isConnected}
+          elo={elo}
+        />
+      )}
 
       {/* Main Container */}
       {activeView === "home" && (
-        <main className="max-w-6xl mx-auto px-2 sm:px-4 py-6 md:py-10 grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-          <HomeProfilePanel
-            selectedAvatar={selectedAvatar}
-            setSelectedAvatar={setSelectedAvatar}
-            showAvatarPicker={showAvatarPicker}
-            setShowAvatarPicker={setShowAvatarPicker}
-            myPlayerName={myPlayerName}
-            isGuest={isGuest}
-            inputName={inputName}
-            setInputName={setInputName}
-            setUsernameSuccess={setUsernameSuccess}
-            setDbUsernameError={setDbUsernameError}
-            isSavingUsername={isSavingUsername}
-            isCheckingUsername={isCheckingUsername}
-            handleUsernameSave={handleUsernameSave}
-            usernameError={usernameError}
-            usernameSuccess={usernameSuccess}
-            localUsernameError={localUsernameError}
-            elo={elo}
-            rank={rank}
-            personalStats={personalStats}
-            winRate={winRate}
-            formatAvgTime={formatAvgTime}
-            signOut={signOut}
-            signInWithGoogle={signInWithGoogle}
-            friendRequests={friendRequests}
-            handleAcceptFriendRequest={handleAcceptFriendRequest}
-            handleDeclineFriendRequest={handleDeclineFriendRequest}
-            actionPendingRequests={actionPendingRequests}
-            myActiveSpectators={myActiveSpectators}
-            spectators={spectators}
-            avatars={AVATARS}
-          />
-          <HomeMatchmakingLobbyPanel
-            activeTab={activeTab}
-            setActiveTab={setActiveTab}
-            fetchLeaderboard={fetchLeaderboard}
-            room={room}
-            myPlayerId={myPlayerId}
-            stayedMatch={stayedMatch}
-            startSpectating={startSpectating}
-            setActiveView={setActiveView}
-            bothFinished={bothFinished}
-            votePlayAgain={votePlayAgain}
-            challengeId={challengeId}
-            challenge={challenge}
-            solvedDailyDates={solvedDailyDates}
-            formatDateKey={formatDateKey}
-            formatReadableDate={formatReadableDate}
-            startDailyGame={startDailyGame}
-            setIsCalendarOpen={setIsCalendarOpen}
-            selectedDifficulty={selectedDifficulty}
-            setSelectedDifficulty={setSelectedDifficulty}
-            startNewGame={startNewGame}
-            isSavingUsername={isSavingUsername}
-            isCheckingUsername={isCheckingUsername}
-            isConnected={isConnected}
-            connectionState={connectionState}
-            createRoom={createRoom}
-            showManaOptionSetting={showManaOptionSetting}
-            enableAbilities={enableAbilities}
-            setEnableAbilities={setEnableAbilities}
-            setIsGuideOpen={setIsGuideOpen}
-            inputCode={inputCode}
-            setInputCode={setInputCode}
-            joinRoom={joinRoom}
-            copyRoomCode={copyRoomCode}
-            isCopied={isCopied}
-            shareInviteLink={shareInviteLink}
-            isLinkCopied={isLinkCopied}
-            getJoinUrl={getJoinUrl}
-            activePlayers={activePlayers}
-            isVoiceJoined={isVoiceJoined}
-            isMicMuted={isMicMuted}
-            selectedAvatar={selectedAvatar}
-            friends={friends}
-            addFriend={addFriend}
-            maxStrikes={maxStrikes}
-            isHost={isHost}
-            kickPlayer={kickPlayer}
-            myProgress={myProgress}
-            chatMessages={chatMessages}
-            sendEmote={sendEmote}
-            lobbyChatEndRef={lobbyChatEndRef}
-            lobbyInputText={lobbyInputText}
-            setLobbyInputText={setLobbyInputText}
-            toggleReady={toggleReady}
-            myStatusInRoom={myStatusInRoom}
-            startGame={startGame}
-            allPlayersReady={allPlayersReady}
-            exitToHome={exitToHome}
-            matchmakingStatus={matchmakingStatus}
-            searchTimer={searchTimer}
-            cancelMatchmaking={cancelMatchmaking}
-            matchOpponent={matchOpponent}
-            elo={elo}
-            rank={rank}
-            difficulty={difficulty}
-            startMatchmaking={startMatchmaking}
-            loadingLeaderboard={loadingLeaderboard}
-            leaderboard={leaderboard}
-            getRankTierFromElo={getRankTierFromElo}
-            dailyDate={dailyDate}
-            dailyLeaderboards={dailyLeaderboards}
-            fetchDailyLeaderboard={fetchDailyLeaderboard}
-            avatars={AVATARS}
-          />
-          <HomeSocialPanel
-            socialDrawerTab={socialDrawerTab}
-            setSocialDrawerTab={setSocialDrawerTab}
-            friends={friends}
-            friendRequests={friendRequests}
-            rivalries={rivalries}
-            fetchRivalries={fetchRivalries}
-            handleAddFriendSubmit={handleAddFriendSubmit}
-            friendNameInput={friendNameInput}
-            setFriendNameInput={setFriendNameInput}
-            isAddingFriend={isAddingFriend}
-            handleAcceptFriendRequest={handleAcceptFriendRequest}
-            handleDeclineFriendRequest={handleDeclineFriendRequest}
-            actionPendingRequests={actionPendingRequests}
-            room={room}
-            gameStatus={gameStatus}
-            finishers={finishers}
-            startSpectating={startSpectating}
-            handleSpectateFriend={handleSpectateFriend}
-            inviteFriend={inviteFriend}
-            joinRoom={joinRoom}
-          />
+        <main className="max-w-6xl mx-auto px-2 sm:px-4 py-4 md:py-8 pb-24">
+          {/* Mobile Tab-Switched View (< lg) */}
+          <div className="lg:hidden">
+            {mobileTab === "play" && (
+              <div className="animate-fade-in">
+                <HomeMatchmakingLobbyPanel
+                  activeTab="solo"
+                  setActiveTab={setActiveTab}
+                  fetchLeaderboard={fetchLeaderboard}
+                  room={room}
+                  myPlayerId={myPlayerId}
+                  stayedMatch={stayedMatch}
+                  startSpectating={startSpectating}
+                  setActiveView={setActiveView}
+                  bothFinished={bothFinished}
+                  votePlayAgain={votePlayAgain}
+                  challengeId={challengeId}
+                  challenge={challenge}
+                  solvedDailyDates={solvedDailyDates}
+                  formatDateKey={formatDateKey}
+                  formatReadableDate={formatReadableDate}
+                  startDailyGame={startDailyGame}
+                  setIsCalendarOpen={setIsCalendarOpen}
+                  selectedDifficulty={selectedDifficulty}
+                  setSelectedDifficulty={setSelectedDifficulty}
+                  startNewGame={startNewGame}
+                  isSavingUsername={isSavingUsername}
+                  isCheckingUsername={isCheckingUsername}
+                  isConnected={isConnected}
+                  connectionState={connectionState}
+                  createRoom={createRoom}
+                  showManaOptionSetting={showManaOptionSetting}
+                  enableAbilities={enableAbilities}
+                  setEnableAbilities={setEnableAbilities}
+                  setIsGuideOpen={setIsGuideOpen}
+                  inputCode={inputCode}
+                  setInputCode={setInputCode}
+                  joinRoom={joinRoom}
+                  copyRoomCode={copyRoomCode}
+                  isCopied={isCopied}
+                  shareInviteLink={shareInviteLink}
+                  isLinkCopied={isLinkCopied}
+                  getJoinUrl={getJoinUrl}
+                  activePlayers={activePlayers}
+                  isVoiceJoined={isVoiceJoined}
+                  isMicMuted={isMicMuted}
+                  selectedAvatar={selectedAvatar}
+                  friends={friends}
+                  addFriend={addFriend}
+                  maxStrikes={maxStrikes}
+                  isHost={isHost}
+                  kickPlayer={kickPlayer}
+                  myProgress={myProgress}
+                  chatMessages={chatMessages}
+                  sendEmote={sendEmote}
+                  lobbyChatEndRef={lobbyChatEndRef}
+                  lobbyInputText={lobbyInputText}
+                  setLobbyInputText={setLobbyInputText}
+                  toggleReady={toggleReady}
+                  myStatusInRoom={myStatusInRoom}
+                  startGame={startGame}
+                  allPlayersReady={allPlayersReady}
+                  exitToHome={exitToHome}
+                  matchmakingStatus={matchmakingStatus}
+                  searchTimer={searchTimer}
+                  cancelMatchmaking={cancelMatchmaking}
+                  matchOpponent={matchOpponent}
+                  elo={elo}
+                  rank={rank}
+                  difficulty={difficulty}
+                  startMatchmaking={startMatchmaking}
+                  loadingLeaderboard={loadingLeaderboard}
+                  leaderboard={leaderboard}
+                  getRankTierFromElo={getRankTierFromElo}
+                  dailyDate={dailyDate}
+                  dailyLeaderboards={dailyLeaderboards}
+                  fetchDailyLeaderboard={fetchDailyLeaderboard}
+                  avatars={AVATARS}
+                />
+              </div>
+            )}
+            {mobileTab === "multiplayer" && (
+              <div className="animate-fade-in">
+                <HomeMatchmakingLobbyPanel
+                  activeTab={room ? "lobby" : (activeTab === "lobby" ? "lobby" : "matchmaking")}
+                  setActiveTab={setActiveTab}
+                  fetchLeaderboard={fetchLeaderboard}
+                  room={room}
+                  myPlayerId={myPlayerId}
+                  stayedMatch={stayedMatch}
+                  startSpectating={startSpectating}
+                  setActiveView={setActiveView}
+                  bothFinished={bothFinished}
+                  votePlayAgain={votePlayAgain}
+                  challengeId={challengeId}
+                  challenge={challenge}
+                  solvedDailyDates={solvedDailyDates}
+                  formatDateKey={formatDateKey}
+                  formatReadableDate={formatReadableDate}
+                  startDailyGame={startDailyGame}
+                  setIsCalendarOpen={setIsCalendarOpen}
+                  selectedDifficulty={selectedDifficulty}
+                  setSelectedDifficulty={setSelectedDifficulty}
+                  startNewGame={startNewGame}
+                  isSavingUsername={isSavingUsername}
+                  isCheckingUsername={isCheckingUsername}
+                  isConnected={isConnected}
+                  connectionState={connectionState}
+                  createRoom={createRoom}
+                  showManaOptionSetting={showManaOptionSetting}
+                  enableAbilities={enableAbilities}
+                  setEnableAbilities={setEnableAbilities}
+                  setIsGuideOpen={setIsGuideOpen}
+                  inputCode={inputCode}
+                  setInputCode={setInputCode}
+                  joinRoom={joinRoom}
+                  copyRoomCode={copyRoomCode}
+                  isCopied={isCopied}
+                  shareInviteLink={shareInviteLink}
+                  isLinkCopied={isLinkCopied}
+                  getJoinUrl={getJoinUrl}
+                  activePlayers={activePlayers}
+                  isVoiceJoined={isVoiceJoined}
+                  isMicMuted={isMicMuted}
+                  selectedAvatar={selectedAvatar}
+                  friends={friends}
+                  addFriend={addFriend}
+                  maxStrikes={maxStrikes}
+                  isHost={isHost}
+                  kickPlayer={kickPlayer}
+                  myProgress={myProgress}
+                  chatMessages={chatMessages}
+                  sendEmote={sendEmote}
+                  lobbyChatEndRef={lobbyChatEndRef}
+                  lobbyInputText={lobbyInputText}
+                  setLobbyInputText={setLobbyInputText}
+                  toggleReady={toggleReady}
+                  myStatusInRoom={myStatusInRoom}
+                  startGame={startGame}
+                  allPlayersReady={allPlayersReady}
+                  exitToHome={exitToHome}
+                  matchmakingStatus={matchmakingStatus}
+                  searchTimer={searchTimer}
+                  cancelMatchmaking={cancelMatchmaking}
+                  matchOpponent={matchOpponent}
+                  elo={elo}
+                  rank={rank}
+                  difficulty={difficulty}
+                  startMatchmaking={startMatchmaking}
+                  loadingLeaderboard={loadingLeaderboard}
+                  leaderboard={leaderboard}
+                  getRankTierFromElo={getRankTierFromElo}
+                  dailyDate={dailyDate}
+                  dailyLeaderboards={dailyLeaderboards}
+                  fetchDailyLeaderboard={fetchDailyLeaderboard}
+                  avatars={AVATARS}
+                />
+              </div>
+            )}
+            {mobileTab === "social" && (
+              <div className="animate-fade-in space-y-6">
+                <HomeSocialPanel
+                  socialDrawerTab={socialDrawerTab}
+                  setSocialDrawerTab={setSocialDrawerTab}
+                  friends={friends}
+                  friendRequests={friendRequests}
+                  rivalries={rivalries}
+                  fetchRivalries={fetchRivalries}
+                  handleAddFriendSubmit={handleAddFriendSubmit}
+                  friendNameInput={friendNameInput}
+                  setFriendNameInput={setFriendNameInput}
+                  isAddingFriend={isAddingFriend}
+                  handleAcceptFriendRequest={handleAcceptFriendRequest}
+                  handleDeclineFriendRequest={handleDeclineFriendRequest}
+                  actionPendingRequests={actionPendingRequests}
+                  room={room}
+                  gameStatus={gameStatus}
+                  finishers={finishers}
+                  startSpectating={startSpectating}
+                  handleSpectateFriend={handleSpectateFriend}
+                  inviteFriend={inviteFriend}
+                  joinRoom={joinRoom}
+                />
+              </div>
+            )}
+            {mobileTab === "profile" && (
+              <div className="animate-fade-in">
+                <HomeProfilePanel
+                  selectedAvatar={selectedAvatar}
+                  setSelectedAvatar={setSelectedAvatar}
+                  showAvatarPicker={showAvatarPicker}
+                  setShowAvatarPicker={setShowAvatarPicker}
+                  myPlayerName={myPlayerName}
+                  isGuest={isGuest}
+                  inputName={inputName}
+                  setInputName={setInputName}
+                  setUsernameSuccess={setUsernameSuccess}
+                  setDbUsernameError={setDbUsernameError}
+                  isSavingUsername={isSavingUsername}
+                  isCheckingUsername={isCheckingUsername}
+                  handleUsernameSave={handleUsernameSave}
+                  usernameError={usernameError}
+                  usernameSuccess={usernameSuccess}
+                  localUsernameError={localUsernameError}
+                  elo={elo}
+                  rank={rank}
+                  personalStats={personalStats}
+                  winRate={winRate}
+                  formatAvgTime={formatAvgTime}
+                  signOut={signOut}
+                  signInWithGoogle={signInWithGoogle}
+                  friendRequests={friendRequests}
+                  handleAcceptFriendRequest={handleAcceptFriendRequest}
+                  handleDeclineFriendRequest={handleDeclineFriendRequest}
+                  actionPendingRequests={actionPendingRequests}
+                  myActiveSpectators={myActiveSpectators}
+                  spectators={spectators}
+                  avatars={AVATARS}
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Desktop Dashboard Multi-Column Grid (>= lg) */}
+          <div className="hidden lg:grid grid-cols-12 gap-8 items-start">
+            <HomeProfilePanel
+              selectedAvatar={selectedAvatar}
+              setSelectedAvatar={setSelectedAvatar}
+              showAvatarPicker={showAvatarPicker}
+              setShowAvatarPicker={setShowAvatarPicker}
+              myPlayerName={myPlayerName}
+              isGuest={isGuest}
+              inputName={inputName}
+              setInputName={setInputName}
+              setUsernameSuccess={setUsernameSuccess}
+              setDbUsernameError={setDbUsernameError}
+              isSavingUsername={isSavingUsername}
+              isCheckingUsername={isCheckingUsername}
+              handleUsernameSave={handleUsernameSave}
+              usernameError={usernameError}
+              usernameSuccess={usernameSuccess}
+              localUsernameError={localUsernameError}
+              elo={elo}
+              rank={rank}
+              personalStats={personalStats}
+              winRate={winRate}
+              formatAvgTime={formatAvgTime}
+              signOut={signOut}
+              signInWithGoogle={signInWithGoogle}
+              friendRequests={friendRequests}
+              handleAcceptFriendRequest={handleAcceptFriendRequest}
+              handleDeclineFriendRequest={handleDeclineFriendRequest}
+              actionPendingRequests={actionPendingRequests}
+              myActiveSpectators={myActiveSpectators}
+              spectators={spectators}
+              avatars={AVATARS}
+            />
+            <HomeMatchmakingLobbyPanel
+              activeTab={activeTab}
+              setActiveTab={setActiveTab}
+              fetchLeaderboard={fetchLeaderboard}
+              room={room}
+              myPlayerId={myPlayerId}
+              stayedMatch={stayedMatch}
+              startSpectating={startSpectating}
+              setActiveView={setActiveView}
+              bothFinished={bothFinished}
+              votePlayAgain={votePlayAgain}
+              challengeId={challengeId}
+              challenge={challenge}
+              solvedDailyDates={solvedDailyDates}
+              formatDateKey={formatDateKey}
+              formatReadableDate={formatReadableDate}
+              startDailyGame={startDailyGame}
+              setIsCalendarOpen={setIsCalendarOpen}
+              selectedDifficulty={selectedDifficulty}
+              setSelectedDifficulty={setSelectedDifficulty}
+              startNewGame={startNewGame}
+              isSavingUsername={isSavingUsername}
+              isCheckingUsername={isCheckingUsername}
+              isConnected={isConnected}
+              connectionState={connectionState}
+              createRoom={createRoom}
+              showManaOptionSetting={showManaOptionSetting}
+              enableAbilities={enableAbilities}
+              setEnableAbilities={setEnableAbilities}
+              setIsGuideOpen={setIsGuideOpen}
+              inputCode={inputCode}
+              setInputCode={setInputCode}
+              joinRoom={joinRoom}
+              copyRoomCode={copyRoomCode}
+              isCopied={isCopied}
+              shareInviteLink={shareInviteLink}
+              isLinkCopied={isLinkCopied}
+              getJoinUrl={getJoinUrl}
+              activePlayers={activePlayers}
+              isVoiceJoined={isVoiceJoined}
+              isMicMuted={isMicMuted}
+              selectedAvatar={selectedAvatar}
+              friends={friends}
+              addFriend={addFriend}
+              maxStrikes={maxStrikes}
+              isHost={isHost}
+              kickPlayer={kickPlayer}
+              myProgress={myProgress}
+              chatMessages={chatMessages}
+              sendEmote={sendEmote}
+              lobbyChatEndRef={lobbyChatEndRef}
+              lobbyInputText={lobbyInputText}
+              setLobbyInputText={setLobbyInputText}
+              toggleReady={toggleReady}
+              myStatusInRoom={myStatusInRoom}
+              startGame={startGame}
+              allPlayersReady={allPlayersReady}
+              exitToHome={exitToHome}
+              matchmakingStatus={matchmakingStatus}
+              searchTimer={searchTimer}
+              cancelMatchmaking={cancelMatchmaking}
+              matchOpponent={matchOpponent}
+              elo={elo}
+              rank={rank}
+              difficulty={difficulty}
+              startMatchmaking={startMatchmaking}
+              loadingLeaderboard={loadingLeaderboard}
+              leaderboard={leaderboard}
+              getRankTierFromElo={getRankTierFromElo}
+              dailyDate={dailyDate}
+              dailyLeaderboards={dailyLeaderboards}
+              fetchDailyLeaderboard={fetchDailyLeaderboard}
+              avatars={AVATARS}
+            />
+            <HomeSocialPanel
+              socialDrawerTab={socialDrawerTab}
+              setSocialDrawerTab={setSocialDrawerTab}
+              friends={friends}
+              friendRequests={friendRequests}
+              rivalries={rivalries}
+              fetchRivalries={fetchRivalries}
+              handleAddFriendSubmit={handleAddFriendSubmit}
+              friendNameInput={friendNameInput}
+              setFriendNameInput={setFriendNameInput}
+              isAddingFriend={isAddingFriend}
+              handleAcceptFriendRequest={handleAcceptFriendRequest}
+              handleDeclineFriendRequest={handleDeclineFriendRequest}
+              actionPendingRequests={actionPendingRequests}
+              room={room}
+              gameStatus={gameStatus}
+              finishers={finishers}
+              startSpectating={startSpectating}
+              handleSpectateFriend={handleSpectateFriend}
+              inviteFriend={inviteFriend}
+              joinRoom={joinRoom}
+            />
+          </div>
         </main>
+      )}
+
+      {/* Mobile Bottom Navigation Bar (Docked at bottom on mobile home view) */}
+      {activeView === "home" && (
+        <div className="lg:hidden">
+          <MobileBottomNav
+            activeTab={mobileTab}
+            onSelectTab={(tab) => {
+              setMobileTab(tab);
+              if (tab === "play") setActiveTab("solo");
+              else if (tab === "multiplayer") setActiveTab(room ? "lobby" : "matchmaking");
+            }}
+            friendRequestsCount={friendRequests?.length || 0}
+            hasActiveRoom={!!room}
+          />
+        </div>
       )}
       {activeView !== "home" && (
         isMeSpectator ? (

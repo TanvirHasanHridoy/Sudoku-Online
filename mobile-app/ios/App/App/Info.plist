@@ -47,5 +47,17 @@
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Microphone access is required for real-time peer-to-peer in-game voice chat with friends and opponents.</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>app.codoku.sudoku</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>app.codoku.sudoku</string>
+				<string>codoku</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>
